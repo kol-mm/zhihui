@@ -56,6 +56,35 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream().map(this::toView).toList());
     }
 
+    @PostMapping("/view")
+    public ApiResponse<Map<String, Object>> view(@RequestBody Map<String, Object> request) {
+        Long fileId = number(request.get("fileId"), 0L);
+        return knowledgeStore.view(fileId)
+                .map(file -> ApiResponse.ok(toView(file)))
+                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+    }
+
+    @PostMapping("/download")
+    public ApiResponse<Map<String, Object>> download(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long fileId = number(request.get("fileId"), 0L);
+        return knowledgeStore.download(userId, fileId)
+                .map(file -> ApiResponse.ok(Map.of(
+                        "file", toView(file),
+                        "downloadUrl", file.getFileUrl() == null ? "" : file.getFileUrl(),
+                        "downloaded", true
+                )))
+                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+    }
+
+    @PostMapping("/like")
+    public ApiResponse<Map<String, Object>> like(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long fileId = number(request.get("fileId"), 0L);
+        int likes = knowledgeStore.like(userId, fileId);
+        return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "liked", true, "likes", likes));
+    }
+
     @GetMapping("/ranking")
     public ApiResponse<List<Map<String, Object>>> ranking() {
         return ApiResponse.ok(List.of(
@@ -158,6 +187,7 @@ public class KnowledgeController {
         view.put("auditStatus", file.getAuditStatus());
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
+        view.put("likes", knowledgeStore.likeCount(file.getId()));
         view.put("createdAt", file.getCreatedAt());
         return view;
     }

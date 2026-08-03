@@ -65,6 +65,9 @@
             <el-form-item label="举报原因"><el-input v-model="knowledgeAction.reason" /></el-form-item>
             <div class="actions">
               <el-button type="primary" @click="uploadKnowledge">提交知识</el-button>
+              <el-button @click="viewKnowledge">阅读</el-button>
+              <el-button @click="downloadKnowledge">下载</el-button>
+              <el-button @click="likeKnowledge">点赞</el-button>
               <el-button @click="collectKnowledge">收藏</el-button>
               <el-button @click="reportKnowledge">举报</el-button>
               <el-button @click="loadKnowledgeCollects">我的收藏</el-button>
@@ -149,7 +152,7 @@
             <div v-for="file in knowledgeFiles" :key="file.id" class="list-item">
               <div>
                 <strong>{{ file.title }}</strong>
-                <p>{{ file.fileType || 'unknown' }} · 上传人 {{ file.userId }} · {{ file.auditStatus }}</p>
+                <p>{{ file.fileType || 'unknown' }} · 上传人 {{ file.userId }} · 浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }} · 点赞 {{ file.likes || 0 }}</p>
               </div>
               <el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'">{{ file.auditStatus }}</el-tag>
             </div>
@@ -400,6 +403,9 @@ type KnowledgeFile = {
   title: string;
   fileType: string;
   auditStatus: string;
+  views?: number;
+  downloads?: number;
+  likes?: number;
 };
 
 type User = {
@@ -564,6 +570,30 @@ async function uploadKnowledge() {
     const created = await postData('/knowledge/upload', knowledgeForm.value);
     await loadKnowledge();
     return created;
+  });
+}
+
+async function viewKnowledge() {
+  await runClient(async () => {
+    const viewed = await postData('/knowledge/view', { fileId: knowledgeAction.value.fileId });
+    await loadKnowledge();
+    return viewed;
+  });
+}
+
+async function downloadKnowledge() {
+  await runClient(async () => {
+    const downloaded = await postData('/knowledge/download', knowledgeAction.value);
+    await loadKnowledge();
+    return downloaded;
+  });
+}
+
+async function likeKnowledge() {
+  await runClient(async () => {
+    const liked = await postData('/knowledge/like', knowledgeAction.value);
+    await loadKnowledge();
+    return liked;
   });
 }
 

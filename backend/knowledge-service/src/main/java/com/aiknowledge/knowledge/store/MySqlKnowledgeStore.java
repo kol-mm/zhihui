@@ -2,9 +2,11 @@ package com.aiknowledge.knowledge.store;
 
 import com.aiknowledge.knowledge.entity.KnowledgeCollectEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeLikeEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeReportEntity;
 import com.aiknowledge.knowledge.mapper.KnowledgeCollectMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeFileMapper;
+import com.aiknowledge.knowledge.mapper.KnowledgeLikeMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeReportMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
@@ -21,15 +23,18 @@ import java.util.Optional;
 public class MySqlKnowledgeStore implements KnowledgeStore {
     private final KnowledgeFileMapper fileMapper;
     private final KnowledgeCollectMapper collectMapper;
+    private final KnowledgeLikeMapper likeMapper;
     private final KnowledgeReportMapper reportMapper;
 
     public MySqlKnowledgeStore(
             KnowledgeFileMapper fileMapper,
             KnowledgeCollectMapper collectMapper,
+            KnowledgeLikeMapper likeMapper,
             KnowledgeReportMapper reportMapper
     ) {
         this.fileMapper = fileMapper;
         this.collectMapper = collectMapper;
+        this.likeMapper = likeMapper;
         this.reportMapper = reportMapper;
     }
 
@@ -50,6 +55,50 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         return fileMapper.selectList(Wrappers.<KnowledgeFileEntity>lambdaQuery()
                 .like(keyword != null && !keyword.isBlank(), KnowledgeFileEntity::getTitle, keyword)
                 .orderByDesc(KnowledgeFileEntity::getCreatedAt));
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> view(Long fileId) {
+        KnowledgeFileEntity file = fileMapper.selectById(fileId);
+        if (file == null) {
+            return Optional.empty();
+        }
+        file.setViews((file.getViews() == null ? 0 : file.getViews()) + 1);
+        fileMapper.updateById(file);
+        return Optional.of(file);
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> download(Long userId, Long fileId) {
+        KnowledgeFileEntity file = fileMapper.selectById(fileId);
+        if (file == null) {
+            return Optional.empty();
+        }
+        file.setDownloads((file.getDownloads() == null ? 0 : file.getDownloads()) + 1);
+        fileMapper.updateById(file);
+        return Optional.of(file);
+    }
+
+    @Override
+    public int like(Long userId, Long fileId) {
+        Long existing = likeMapper.selectCount(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                .eq(KnowledgeLikeEntity::getUserId, userId)
+                .eq(KnowledgeLikeEntity::getFileId, fileId));
+        if (existing == null || existing == 0) {
+            KnowledgeLikeEntity like = new KnowledgeLikeEntity();
+            like.setUserId(userId);
+            like.setFileId(fileId);
+            like.setCreatedAt(LocalDateTime.now());
+            likeMapper.insert(like);
+        }
+        return likeCount(fileId);
+    }
+
+    @Override
+    public int likeCount(Long fileId) {
+        Long count = likeMapper.selectCount(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                .eq(KnowledgeLikeEntity::getFileId, fileId));
+        return count == null ? 0 : count.intValue();
     }
 
     @Override

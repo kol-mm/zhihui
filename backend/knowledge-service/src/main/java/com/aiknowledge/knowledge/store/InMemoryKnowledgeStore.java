@@ -22,6 +22,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     private final AtomicLong ids = new AtomicLong(100);
     private final List<KnowledgeFileEntity> files = new CopyOnWriteArrayList<>();
     private final List<CollectRecord> collects = new CopyOnWriteArrayList<>();
+    private final List<LikeRecord> likes = new CopyOnWriteArrayList<>();
     private final List<ReportRecord> reports = new CopyOnWriteArrayList<>();
 
     public InMemoryKnowledgeStore() {
@@ -30,6 +31,9 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
             files.addAll(state.files);
             if (state.collects != null) {
                 collects.addAll(state.collects);
+            }
+            if (state.likes != null) {
+                likes.addAll(state.likes);
             }
             if (state.reports != null) {
                 reports.addAll(state.reports);
@@ -76,6 +80,48 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         return files.stream()
                 .filter(file -> keyword == null || keyword.isBlank() || file.getTitle().contains(keyword))
                 .toList();
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> view(Long fileId) {
+        Optional<KnowledgeFileEntity> found = files.stream()
+                .filter(file -> file.getId().equals(fileId))
+                .findFirst();
+        found.ifPresent(file -> {
+            file.setViews((file.getViews() == null ? 0 : file.getViews()) + 1);
+            persist();
+        });
+        return found;
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> download(Long userId, Long fileId) {
+        Optional<KnowledgeFileEntity> found = files.stream()
+                .filter(file -> file.getId().equals(fileId))
+                .findFirst();
+        found.ifPresent(file -> {
+            file.setDownloads((file.getDownloads() == null ? 0 : file.getDownloads()) + 1);
+            persist();
+        });
+        return found;
+    }
+
+    @Override
+    public int like(Long userId, Long fileId) {
+        boolean exists = likes.stream()
+                .anyMatch(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
+        if (!exists) {
+            likes.add(new LikeRecord(userId, fileId, LocalDateTime.now()));
+            persist();
+        }
+        return likeCount(fileId);
+    }
+
+    @Override
+    public int likeCount(Long fileId) {
+        return (int) likes.stream()
+                .filter(record -> record.fileId().equals(fileId))
+                .count();
     }
 
     @Override
@@ -127,6 +173,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         State state = new State();
         state.files = new ArrayList<>(files);
         state.collects = new ArrayList<>(collects);
+        state.likes = new ArrayList<>(likes);
         state.reports = new ArrayList<>(reports);
         LocalJsonStore.write(storePath, state);
     }
@@ -152,10 +199,14 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     public static class State {
         public List<KnowledgeFileEntity> files = new ArrayList<>();
         public List<CollectRecord> collects = new ArrayList<>();
+        public List<LikeRecord> likes = new ArrayList<>();
         public List<ReportRecord> reports = new ArrayList<>();
     }
 
     public record CollectRecord(Long userId, Long fileId, LocalDateTime createdAt) {
+    }
+
+    public record LikeRecord(Long userId, Long fileId, LocalDateTime createdAt) {
     }
 
     public record ReportRecord(Long userId, Long fileId, String reason, LocalDateTime createdAt) {
