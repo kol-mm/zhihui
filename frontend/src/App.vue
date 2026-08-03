@@ -316,6 +316,47 @@
           </div>
         </article>
 
+        <article class="card wide stats-card">
+          <div class="card-head">
+            <div>
+              <h3>平台数据统计</h3>
+              <p class="muted">汇总用户、内容、互动、反馈和待办数据，来自各服务管理概览。</p>
+            </div>
+            <el-button type="success" @click="loadAdmin">刷新统计</el-button>
+          </div>
+          <div class="metric-grid">
+            <div v-for="metric in platformStatCards" :key="metric.label" class="metric">
+              <span>{{ metric.label }}</span>
+              <strong>{{ metric.value }}</strong>
+              <small>{{ metric.hint }}</small>
+            </div>
+          </div>
+          <div class="stats-columns">
+            <div>
+              <h4>待处理事项</h4>
+              <div v-for="item in pendingStatCards" :key="item.label" class="stat-line">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+            <div>
+              <h4>内容互动</h4>
+              <div v-for="item in engagementStatCards" :key="item.label" class="stat-line">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+          </div>
+          <el-alert
+            class="stats-alert"
+            :title="platformHealth.title"
+            :type="platformHealth.type"
+            :description="platformHealth.description"
+            show-icon
+            :closable="false"
+          />
+        </article>
+
         <article class="card wide">
           <div class="card-head">
             <h3>待处理队列</h3>
@@ -512,6 +553,48 @@ const adminMetrics = computed(() => [
 ]);
 
 const adminQueueCount = computed(() => adminKnowledgeFiles.value.length + knowledgeReports.value.length + adminTickets.value.length);
+
+function metricValue(section: string, key: string) {
+  const value = adminOverview.value[section]?.[key];
+  return typeof value === 'number' ? value : 0;
+}
+
+const platformStatCards = computed(() => [
+  { label: '注册用户', value: String(metricValue('userAdmin', 'totalUsers')), hint: `${metricValue('userAdmin', 'activeUsers')} 个正常账号` },
+  { label: '知识资源', value: String(metricValue('knowledgeAdmin', 'totalFiles')), hint: `${metricValue('knowledgeAdmin', 'pendingAudit')} 个待审核` },
+  { label: '社区帖子', value: String(metricValue('forumAdmin', 'publishedPosts')), hint: `${metricValue('forumAdmin', 'draftsTracked')} 篇草稿追踪` },
+  { label: '反馈工单', value: String(metricValue('feedbackAdmin', 'tickets')), hint: `${metricValue('feedbackAdmin', 'pendingTickets')} 个待处理` },
+  { label: '消息互动', value: String(metricValue('messageAdmin', 'sessionOneMessages')), hint: `${metricValue('messageAdmin', 'notifications')} 条通知` },
+  { label: '知识举报', value: String(metricValue('knowledgeAdmin', 'reports')), hint: '用于内容安全复核' }
+]);
+
+const pendingStatCards = computed(() => [
+  { label: '知识待审', value: metricValue('knowledgeAdmin', 'pendingAudit') },
+  { label: '帖子待审', value: metricValue('forumAdmin', 'pendingAudit') },
+  { label: '待处理工单', value: metricValue('feedbackAdmin', 'pendingTickets') },
+  { label: '风险账号', value: metricValue('userAdmin', 'riskUsers') },
+  { label: '知识举报', value: metricValue('knowledgeAdmin', 'reports') }
+]);
+
+const engagementStatCards = computed(() => [
+  { label: '知识浏览', value: metricValue('knowledgeAdmin', 'totalViews') },
+  { label: '知识下载', value: metricValue('knowledgeAdmin', 'totalDownloads') },
+  { label: '会话消息', value: metricValue('messageAdmin', 'sessionOneMessages') },
+  { label: '通知提醒', value: metricValue('messageAdmin', 'notifications') },
+  { label: 'FAQ 数量', value: metricValue('feedbackAdmin', 'faqs') }
+]);
+
+const platformHealth = computed(() => {
+  const pendingTotal = pendingStatCards.value.reduce((sum, item) => sum + item.value, 0);
+  const loaded = Object.keys(adminOverview.value).length > 0;
+  if (!loaded) {
+    return { type: 'info' as const, title: '等待加载统计数据', description: '点击“刷新统计”或“平台概览”后展示最新本地运营数据。' };
+  }
+  if (pendingTotal > 0) {
+    return { type: 'warning' as const, title: `当前有 ${pendingTotal} 个待处理事项`, description: '建议先处理知识审核、帖子审核、工单和举报，避免用户端内容积压。' };
+  }
+  return { type: 'success' as const, title: '平台暂无待处理事项', description: '用户、内容、互动和反馈模块均已返回可用统计数据。' };
+});
 
 function formatData(data: unknown) {
   return JSON.stringify(data, null, 2);
@@ -802,6 +885,14 @@ async function refreshAdmin() {
 .metric { padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
 .metric span { display: block; color: #6b7280; font-size: 13px; }
 .metric strong { display: block; margin-top: 8px; font-size: 22px; }
+.metric small { display: block; margin-top: 6px; color: #6b7280; }
+.muted { margin: 6px 0 0; color: #6b7280; line-height: 1.5; }
+.stats-card { grid-column: 1 / -1; }
+.stats-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 16px; }
+.stats-columns h4 { margin: 0 0 10px; }
+.stat-line { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid #e5e7eb; color: #4b5563; }
+.stat-line strong { color: #111827; }
+.stats-alert { margin-top: 16px; }
 pre { min-height: 260px; margin: 16px 0 0; padding: 16px; overflow: auto; border-radius: 8px; background: #111827; color: #d1fae5; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 :deep(.el-select) { width: 100%; }
 @media (max-width: 900px) {
