@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @Profile("mysql")
@@ -67,5 +68,16 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         report.setStatus("PENDING");
         report.setCreatedAt(LocalDateTime.now());
         reportMapper.insert(report);
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
+        KnowledgeFileEntity file = fileMapper.selectById(fileId);
+        if (file == null) {
+            return Optional.empty();
+        }
+        file.setAuditStatus(auditStatus);
+        fileMapper.updateById(file);
+        return Optional.of(file);
     }
 }

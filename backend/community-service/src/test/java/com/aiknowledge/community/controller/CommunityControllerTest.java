@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class CommunityControllerTest {
+    static {
+        System.setProperty("LOCAL_STORE_DIR", "target/test-local-store/community-" + System.nanoTime());
+    }
+
     private final CommunityController controller =
             new CommunityController(new InMemoryCommunityStore());
 

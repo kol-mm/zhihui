@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class MessageControllerTest {
+    static {
+        System.setProperty("LOCAL_STORE_DIR", "target/test-local-store/message-" + System.nanoTime());
+    }
+
     private final MessageController controller =
             new MessageController(new InMemoryMessageStore());
 

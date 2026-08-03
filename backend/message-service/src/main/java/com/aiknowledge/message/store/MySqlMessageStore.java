@@ -12,7 +12,9 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @Profile("mysql")
@@ -78,5 +80,18 @@ public class MySqlMessageStore implements MessageStore {
         return ticketMapper.selectList(Wrappers.<FeedbackTicketEntity>lambdaQuery()
                 .eq(userId != null, FeedbackTicketEntity::getUserId, userId)
                 .orderByDesc(FeedbackTicketEntity::getCreatedAt));
+    }
+
+    @Override
+    public Optional<FeedbackTicketEntity> replyTicket(Long ticketId, String status, String reply) {
+        FeedbackTicketEntity ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) {
+            return Optional.empty();
+        }
+        ticket.setStatus(status);
+        ticket.setOfficialReply(reply);
+        ticket.setUpdatedAt(LocalDateTime.now());
+        ticketMapper.updateById(ticket);
+        return Optional.of(ticket);
     }
 }

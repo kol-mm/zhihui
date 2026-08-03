@@ -135,6 +135,17 @@ public class InMemoryCommunityStore implements CommunityStore {
         return collect;
     }
 
+    @Override
+    public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
+        Optional<PostEntity> found = findPost(postId);
+        found.ifPresent(post -> {
+            post.setStatus(status);
+            post.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
     private long maxId(List<?> items, long fallback) {
         return items.stream()
                 .map(item -> {

@@ -6,6 +6,7 @@ import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface MessageStore {
     ChatMessageEntity sendMessage(ChatMessageEntity message);
@@ -21,4 +22,6 @@ public interface MessageStore {
     FeedbackTicketEntity createTicket(FeedbackTicketEntity ticket);
 
     List<FeedbackTicketEntity> listTickets(Long userId);
+
+    Optional<FeedbackTicketEntity> replyTicket(Long ticketId, String status, String reply);
 }

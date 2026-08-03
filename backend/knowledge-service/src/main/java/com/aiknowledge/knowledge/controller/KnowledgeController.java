@@ -102,12 +102,16 @@ public class KnowledgeController {
 
     @PostMapping("/admin/audit")
     public ApiResponse<Map<String, Object>> audit(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of(
-                "fileId", request.getOrDefault("fileId", 0),
-                "auditStatus", request.getOrDefault("auditStatus", "APPROVED"),
-                "reason", request.getOrDefault("reason", ""),
-                "updated", true
-        ));
+        Long fileId = number(request.get("fileId"), 0L);
+        String auditStatus = String.valueOf(request.getOrDefault("auditStatus", "APPROVED"));
+        String reason = String.valueOf(request.getOrDefault("reason", ""));
+        return knowledgeStore.auditFile(fileId, auditStatus, reason)
+                .map(file -> ApiResponse.ok(Map.of(
+                        "file", toView(file),
+                        "reason", reason,
+                        "updated", true
+                )))
+                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
     }
 
     private Map<String, Object> toView(KnowledgeFileEntity file) {

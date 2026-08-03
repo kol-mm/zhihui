@@ -12,6 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class UserControllerTest {
+    static {
+        System.setProperty("LOCAL_STORE_DIR", "target/test-local-store/user-" + System.nanoTime());
+    }
+
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final UserController controller =
             new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder);

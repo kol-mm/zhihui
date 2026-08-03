@@ -105,7 +105,7 @@ public class CommunityController {
         return ApiResponse.ok(Map.of(
                 "module", "论坛管理",
                 "publishedPosts", feed.size(),
-                "pendingAudit", 0,
+                "pendingAudit", feed.stream().filter(post -> "PENDING".equals(post.getStatus())).count(),
                 "draftsTracked", communityStore.listDrafts(authorUserId).size(),
                 "squareMode", "仅展示已关注用户动态",
                 "capabilities", List.of("帖子审核", "评论管理", "草稿追踪", "广场互动管理")
@@ -114,12 +114,16 @@ public class CommunityController {
 
     @PostMapping("/post/admin/audit")
     public ApiResponse<Map<String, Object>> auditPost(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of(
-                "postId", request.getOrDefault("postId", 0),
-                "status", request.getOrDefault("status", "VISIBLE"),
-                "reason", request.getOrDefault("reason", ""),
-                "updated", true
-        ));
+        Long postId = number(request.get("postId"), 0L);
+        String status = String.valueOf(request.getOrDefault("status", "PUBLISHED"));
+        String reason = String.valueOf(request.getOrDefault("reason", ""));
+        return communityStore.auditPost(postId, status, reason)
+                .map(post -> ApiResponse.ok(Map.of(
+                        "post", toPostView(post),
+                        "reason", reason,
+                        "updated", true
+                )))
+                .orElseGet(() -> ApiResponse.fail("post not found"));
     }
 
     private CommentEntity buildComment(Map<String, Object> request, String source) {

@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -85,6 +86,18 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     public void report(Long userId, Long fileId, String reason) {
         reports.add(new ReportRecord(userId, fileId, reason, LocalDateTime.now()));
         persist();
+    }
+
+    @Override
+    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
+        Optional<KnowledgeFileEntity> found = files.stream()
+                .filter(file -> file.getId().equals(fileId))
+                .findFirst();
+        found.ifPresent(file -> {
+            file.setAuditStatus(auditStatus);
+            persist();
+        });
+        return found;
     }
 
     private void persist() {

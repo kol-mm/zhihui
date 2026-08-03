@@ -66,6 +66,24 @@ public class InMemoryUserStore implements UserStore {
         return user;
     }
 
+    @Override
+    public List<UserEntity> listUsers() {
+        return List.copyOf(users.values());
+    }
+
+    @Override
+    public Optional<UserEntity> updateStatus(Long userId, String status) {
+        Optional<UserEntity> found = users.values().stream()
+                .filter(user -> user.getId().equals(userId))
+                .findFirst();
+        found.ifPresent(user -> {
+            user.setStatus(status);
+            user.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
     private void persist() {
         State state = new State();
         state.users = new ArrayList<>(users.values());

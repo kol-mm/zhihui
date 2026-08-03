@@ -86,23 +86,37 @@ public class UserController {
 
     @GetMapping("/admin/overview")
     public ApiResponse<Map<String, Object>> adminOverview() {
+        java.util.List<UserEntity> users = userStore.listUsers();
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("module", "用户账号管理");
-        overview.put("totalUsers", 1);
-        overview.put("activeUsers", 1);
+        overview.put("totalUsers", users.size());
+        overview.put("activeUsers", users.stream().filter(user -> "ACTIVE".equals(user.getStatus())).count());
         overview.put("pendingAudits", 0);
-        overview.put("riskUsers", 0);
+        overview.put("riskUsers", users.stream().filter(user -> !"ACTIVE".equals(user.getStatus())).count());
         overview.put("capabilities", java.util.List.of("资料审核", "账号状态管理", "关注关系查看", "个人内容追踪"));
         return ApiResponse.ok(overview);
     }
 
     @PostMapping("/admin/status")
     public ApiResponse<Map<String, Object>> updateUserStatus(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of(
-                "userId", request.getOrDefault("userId", 0),
-                "status", request.getOrDefault("status", "ACTIVE"),
-                "updated", true
-        ));
+        Long userId = number(request.get("userId"), 0L);
+        String status = String.valueOf(request.getOrDefault("status", "ACTIVE"));
+        return userStore.updateStatus(userId, status)
+                .map(user -> ApiResponse.ok(Map.of(
+                        "user", toView(user),
+                        "updated", true
+                )))
+                .orElseGet(() -> ApiResponse.fail("user not found"));
+    }
+
+    private Long number(Object value, Long fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.valueOf(value.toString());
     }
 
     private Map<String, Object> toView(UserEntity user) {

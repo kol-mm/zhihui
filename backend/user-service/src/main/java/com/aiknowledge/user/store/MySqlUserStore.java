@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -28,5 +30,22 @@ public class MySqlUserStore implements UserStore {
     public UserEntity save(UserEntity user) {
         userMapper.insert(user);
         return user;
+    }
+
+    @Override
+    public List<UserEntity> listUsers() {
+        return userMapper.selectList(Wrappers.emptyWrapper());
+    }
+
+    @Override
+    public Optional<UserEntity> updateStatus(Long userId, String status) {
+        UserEntity user = userMapper.selectById(userId);
+        if (user == null) {
+            return Optional.empty();
+        }
+        user.setStatus(status);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return Optional.of(user);
     }
 }

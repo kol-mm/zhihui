@@ -84,4 +84,15 @@ public class MySqlCommunityStore implements CommunityStore {
         collectMapper.insert(collect);
         return collect;
     }
+
+    @Override
+    public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
+        PostEntity post = postMapper.selectById(postId);
+        if (post == null) {
+            return Optional.empty();
+        }
+        post.setStatus(status);
+        postMapper.updateById(post);
+        return Optional.of(post);
+    }
 }

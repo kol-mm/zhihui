@@ -24,4 +24,6 @@ public interface CommunityStore {
     List<PostDraftEntity> listDrafts(Long userId);
 
     PostCollectEntity collectPost(PostCollectEntity collect);
+
+    Optional<PostEntity> auditPost(Long postId, String status, String reason);
 }

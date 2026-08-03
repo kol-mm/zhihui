@@ -101,12 +101,15 @@ public class MessageController {
 
     @PostMapping("/feedback/admin/reply")
     public ApiResponse<Map<String, Object>> replyTicket(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of(
-                "ticketId", request.getOrDefault("ticketId", 0),
-                "status", request.getOrDefault("status", "PROCESSING"),
-                "reply", request.getOrDefault("reply", ""),
-                "updated", true
-        ));
+        Long ticketId = number(request.get("ticketId"), 0L);
+        String status = String.valueOf(request.getOrDefault("status", "PROCESSING"));
+        String reply = String.valueOf(request.getOrDefault("reply", ""));
+        return messageStore.replyTicket(ticketId, status, reply)
+                .map(ticket -> ApiResponse.ok(Map.of(
+                        "ticket", toTicketView(ticket),
+                        "updated", true
+                )))
+                .orElseGet(() -> ApiResponse.fail("ticket not found"));
     }
 
     private Map<String, Object> toMessageView(ChatMessageEntity message) {

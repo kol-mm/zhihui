@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -131,6 +132,20 @@ public class InMemoryMessageStore implements MessageStore {
                 .filter(ticket -> userId == null || ticket.getUserId().equals(userId))
                 .sorted(Comparator.comparing(FeedbackTicketEntity::getCreatedAt).reversed())
                 .toList();
+    }
+
+    @Override
+    public Optional<FeedbackTicketEntity> replyTicket(Long ticketId, String status, String reply) {
+        Optional<FeedbackTicketEntity> found = tickets.stream()
+                .filter(ticket -> ticket.getId().equals(ticketId))
+                .findFirst();
+        found.ifPresent(ticket -> {
+            ticket.setStatus(status);
+            ticket.setOfficialReply(reply);
+            ticket.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
     }
 
     private long maxId(List<?> items, long fallback) {

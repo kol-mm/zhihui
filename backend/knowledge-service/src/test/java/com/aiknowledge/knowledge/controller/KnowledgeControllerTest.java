@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class KnowledgeControllerTest {
+    static {
+        System.setProperty("LOCAL_STORE_DIR", "target/test-local-store/knowledge-" + System.nanoTime());
+    }
+
     private final KnowledgeController controller =
             new KnowledgeController(new InMemoryKnowledgeStore());
 
