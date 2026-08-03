@@ -20,18 +20,29 @@ import java.util.concurrent.atomic.AtomicLong;
 public class InMemoryUserStore implements UserStore {
     private final Path storePath = LocalJsonStore.dataFile("users.json");
     private final AtomicLong ids = new AtomicLong(1000);
+    private final AtomicLong followIds = new AtomicLong(2000);
     private final Map<String, UserEntity> users = new ConcurrentHashMap<>();
+    private final List<FollowRecord> follows = new ArrayList<>();
 
     public InMemoryUserStore(PasswordEncoder passwordEncoder) {
         State state = LocalJsonStore.read(storePath, State.class, new State());
         if (state.users != null && !state.users.isEmpty()) {
             state.users.forEach(user -> users.put(user.getUsername(), user));
+            if (state.follows != null) {
+                follows.addAll(state.follows);
+            }
             ids.set(state.users.stream()
                     .map(UserEntity::getId)
                     .filter(id -> id != null)
                     .mapToLong(Long::longValue)
                     .max()
                     .orElse(1000L));
+            followIds.set(follows.stream()
+                    .map(FollowRecord::id)
+                    .filter(id -> id != null)
+                    .mapToLong(Long::longValue)
+                    .max()
+                    .orElse(2000L));
             return;
         }
 
@@ -84,13 +95,46 @@ public class InMemoryUserStore implements UserStore {
         return found;
     }
 
+    @Override
+    public boolean follow(Long userId, Long targetUserId) {
+        boolean exists = follows.stream()
+                .anyMatch(follow -> follow.userId().equals(userId) && follow.targetUserId().equals(targetUserId));
+        if (!exists) {
+            follows.add(new FollowRecord(followIds.incrementAndGet(), userId, targetUserId, LocalDateTime.now()));
+            persist();
+        }
+        return true;
+    }
+
+    @Override
+    public boolean unfollow(Long userId, Long targetUserId) {
+        boolean removed = follows.removeIf(follow -> follow.userId().equals(userId) && follow.targetUserId().equals(targetUserId));
+        if (removed) {
+            persist();
+        }
+        return removed;
+    }
+
+    @Override
+    public List<Long> listFollowTargets(Long userId) {
+        return follows.stream()
+                .filter(follow -> userId == null || follow.userId().equals(userId))
+                .map(FollowRecord::targetUserId)
+                .toList();
+    }
+
     private void persist() {
         State state = new State();
         state.users = new ArrayList<>(users.values());
+        state.follows = new ArrayList<>(follows);
         LocalJsonStore.write(storePath, state);
     }
 
     public static class State {
         public List<UserEntity> users = new ArrayList<>();
+        public List<FollowRecord> follows = new ArrayList<>();
+    }
+
+    public record FollowRecord(Long id, Long userId, Long targetUserId, LocalDateTime createdAt) {
     }
 }

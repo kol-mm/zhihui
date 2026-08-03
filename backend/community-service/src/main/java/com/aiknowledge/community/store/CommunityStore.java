@@ -19,6 +19,8 @@ public interface CommunityStore {
 
     CommentEntity saveComment(CommentEntity comment);
 
+    List<CommentEntity> listComments(Long postId);
+
     PostDraftEntity saveDraft(PostDraftEntity draft);
 
     List<PostDraftEntity> listDrafts(Long userId);

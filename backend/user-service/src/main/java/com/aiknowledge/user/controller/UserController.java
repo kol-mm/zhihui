@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
@@ -76,12 +77,23 @@ public class UserController {
 
     @PostMapping("/follow")
     public ApiResponse<Map<String, Object>> follow(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of("followedUserId", request.getOrDefault("targetUserId", 0), "followed", true));
+        Long userId = number(request.get("userId"), 1L);
+        Long targetUserId = number(request.get("targetUserId"), 0L);
+        userStore.follow(userId, targetUserId);
+        return ApiResponse.ok(Map.of("userId", userId, "followedUserId", targetUserId, "followed", true));
     }
 
     @DeleteMapping("/follow")
     public ApiResponse<Map<String, Object>> unfollow(@RequestBody Map<String, Object> request) {
-        return ApiResponse.ok(Map.of("followedUserId", request.getOrDefault("targetUserId", 0), "followed", false));
+        Long userId = number(request.get("userId"), 1L);
+        Long targetUserId = number(request.get("targetUserId"), 0L);
+        userStore.unfollow(userId, targetUserId);
+        return ApiResponse.ok(Map.of("userId", userId, "followedUserId", targetUserId, "followed", false));
+    }
+
+    @GetMapping("/follows")
+    public ApiResponse<Map<String, Object>> follows(@RequestParam(name = "userId", defaultValue = "1") Long userId) {
+        return ApiResponse.ok(Map.of("userId", userId, "followedUserIds", userStore.listFollowTargets(userId)));
     }
 
     @GetMapping("/admin/overview")

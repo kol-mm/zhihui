@@ -42,4 +42,14 @@ class UserControllerTest {
                 controller.login(Map.of("username", "alice", "password", "secret123"));
         assertEquals(0, login.code());
     }
+
+    @Test
+    void followStateCanBeSavedAndListed() {
+        ApiResponse<Map<String, Object>> followed = controller.follow(Map.of("userId", 1L, "targetUserId", 2L));
+        assertEquals(0, followed.code());
+
+        ApiResponse<Map<String, Object>> follows = controller.follows(1L);
+        assertEquals(0, follows.code());
+        assertEquals(java.util.List.of(2L), follows.data().get("followedUserIds"));
+    }
 }

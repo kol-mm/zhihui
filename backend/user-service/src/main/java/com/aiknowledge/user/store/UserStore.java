@@ -13,4 +13,10 @@ public interface UserStore {
     List<UserEntity> listUsers();
 
     Optional<UserEntity> updateStatus(Long userId, String status);
+
+    boolean follow(Long userId, Long targetUserId);
+
+    boolean unfollow(Long userId, Long targetUserId);
+
+    List<Long> listFollowTargets(Long userId);
 }

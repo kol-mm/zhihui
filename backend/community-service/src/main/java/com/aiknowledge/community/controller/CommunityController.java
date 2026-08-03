@@ -54,7 +54,11 @@ public class CommunityController {
     @GetMapping("/post/detail")
     public ApiResponse<Map<String, Object>> detail(@RequestParam(name = "id", defaultValue = "1") Long id) {
         return communityStore.findPost(id)
-                .map(post -> ApiResponse.ok(toPostView(post)))
+                .map(post -> {
+                    Map<String, Object> detail = toPostView(post);
+                    detail.put("comments", communityStore.listComments(id).stream().map(this::toCommentView).toList());
+                    return ApiResponse.ok(detail);
+                })
                 .orElseGet(() -> ApiResponse.fail("post not found"));
     }
 
@@ -62,6 +66,11 @@ public class CommunityController {
     public ApiResponse<Map<String, Object>> createComment(@RequestBody Map<String, Object> request) {
         CommentEntity comment = buildComment(request, "POST");
         return ApiResponse.ok(toCommentView(communityStore.saveComment(comment)));
+    }
+
+    @GetMapping("/comment/list")
+    public ApiResponse<List<Map<String, Object>>> comments(@RequestParam(name = "postId", required = false) Long postId) {
+        return ApiResponse.ok(communityStore.listComments(postId).stream().map(this::toCommentView).toList());
     }
 
     @PostMapping("/post/draft")

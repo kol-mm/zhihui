@@ -58,4 +58,22 @@ class CommunityControllerTest {
         assertEquals(0, comment.code());
         assertEquals("SQUARE", comment.data().get("source"));
     }
+
+    @Test
+    void commentsCanBeListedWithPostDetail() {
+        ApiResponse<Map<String, Object>> comment = controller.createComment(Map.of(
+                "postId", 1L,
+                "userId", 1L,
+                "content", "detail comment"
+        ));
+        assertEquals(0, comment.code());
+
+        ApiResponse<List<Map<String, Object>>> comments = controller.comments(1L);
+        assertEquals(0, comments.code());
+        assertFalse(comments.data().isEmpty());
+
+        ApiResponse<Map<String, Object>> detail = controller.detail(1L);
+        assertEquals(0, detail.code());
+        assertFalse(((List<?>) detail.data().get("comments")).isEmpty());
+    }
 }

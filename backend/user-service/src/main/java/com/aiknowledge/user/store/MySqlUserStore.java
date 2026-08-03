@@ -1,6 +1,8 @@
 package com.aiknowledge.user.store;
 
 import com.aiknowledge.user.entity.UserEntity;
+import com.aiknowledge.user.entity.UserFollowEntity;
+import com.aiknowledge.user.mapper.UserFollowMapper;
 import com.aiknowledge.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
@@ -14,9 +16,11 @@ import java.util.Optional;
 @Profile("mysql")
 public class MySqlUserStore implements UserStore {
     private final UserMapper userMapper;
+    private final UserFollowMapper followMapper;
 
-    public MySqlUserStore(UserMapper userMapper) {
+    public MySqlUserStore(UserMapper userMapper, UserFollowMapper followMapper) {
         this.userMapper = userMapper;
+        this.followMapper = followMapper;
     }
 
     @Override
@@ -47,5 +51,37 @@ public class MySqlUserStore implements UserStore {
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
         return Optional.of(user);
+    }
+
+    @Override
+    public boolean follow(Long userId, Long targetUserId) {
+        UserFollowEntity existing = followMapper.selectOne(Wrappers.<UserFollowEntity>lambdaQuery()
+                .eq(UserFollowEntity::getUserId, userId)
+                .eq(UserFollowEntity::getTargetUserId, targetUserId));
+        if (existing == null) {
+            UserFollowEntity follow = new UserFollowEntity();
+            follow.setUserId(userId);
+            follow.setTargetUserId(targetUserId);
+            follow.setCreatedAt(LocalDateTime.now());
+            followMapper.insert(follow);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean unfollow(Long userId, Long targetUserId) {
+        return followMapper.delete(Wrappers.<UserFollowEntity>lambdaQuery()
+                .eq(UserFollowEntity::getUserId, userId)
+                .eq(UserFollowEntity::getTargetUserId, targetUserId)) > 0;
+    }
+
+    @Override
+    public List<Long> listFollowTargets(Long userId) {
+        return followMapper.selectList(Wrappers.<UserFollowEntity>lambdaQuery()
+                        .eq(userId != null, UserFollowEntity::getUserId, userId)
+                        .orderByDesc(UserFollowEntity::getCreatedAt))
+                .stream()
+                .map(UserFollowEntity::getTargetUserId)
+                .toList();
     }
 }

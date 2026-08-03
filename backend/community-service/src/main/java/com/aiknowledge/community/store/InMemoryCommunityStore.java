@@ -108,6 +108,14 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
+    public List<CommentEntity> listComments(Long postId) {
+        return comments.stream()
+                .filter(comment -> postId == null || comment.getPostId().equals(postId))
+                .sorted(Comparator.comparing(CommentEntity::getCreatedAt))
+                .toList();
+    }
+
+    @Override
     public PostDraftEntity saveDraft(PostDraftEntity draft) {
         draft.setId(draftIds.incrementAndGet());
         draft.setUpdatedAt(LocalDateTime.now());

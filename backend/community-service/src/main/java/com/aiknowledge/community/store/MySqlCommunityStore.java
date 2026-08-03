@@ -67,6 +67,13 @@ public class MySqlCommunityStore implements CommunityStore {
     }
 
     @Override
+    public List<CommentEntity> listComments(Long postId) {
+        return commentMapper.selectList(Wrappers.<CommentEntity>lambdaQuery()
+                .eq(postId != null, CommentEntity::getPostId, postId)
+                .orderByAsc(CommentEntity::getCreatedAt));
+    }
+
+    @Override
     public PostDraftEntity saveDraft(PostDraftEntity draft) {
         draftMapper.insert(draft);
         return draft;
