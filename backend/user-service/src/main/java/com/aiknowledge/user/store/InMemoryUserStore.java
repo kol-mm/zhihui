@@ -43,19 +43,43 @@ public class InMemoryUserStore implements UserStore {
                     .mapToLong(Long::longValue)
                     .max()
                     .orElse(2000L));
+            ensureDefaultUsers(passwordEncoder);
             return;
         }
 
-        UserEntity demo = new UserEntity();
-        demo.setId(1L);
-        demo.setUsername("demo");
-        demo.setPasswordHash(passwordEncoder.encode("demo"));
-        demo.setNickname("Demo User");
-        demo.setStatus("ACTIVE");
-        demo.setCreatedAt(LocalDateTime.now());
-        demo.setUpdatedAt(LocalDateTime.now());
-        users.put(demo.getUsername(), demo);
+        ensureDefaultUsers(passwordEncoder);
         persist();
+    }
+
+    private void ensureDefaultUsers(PasswordEncoder passwordEncoder) {
+        if (!users.containsKey("demo")) {
+            UserEntity demo = new UserEntity();
+            demo.setId(1L);
+            demo.setUsername("demo");
+            demo.setPasswordHash(passwordEncoder.encode("demo"));
+            demo.setNickname("Demo User");
+            demo.setStatus("ACTIVE");
+            demo.setCreatedAt(LocalDateTime.now());
+            demo.setUpdatedAt(LocalDateTime.now());
+            users.put(demo.getUsername(), demo);
+        }
+        if (!users.containsKey("admin")) {
+            UserEntity admin = new UserEntity();
+            admin.setId(2L);
+            admin.setUsername("admin");
+            admin.setPasswordHash(passwordEncoder.encode("admin123"));
+            admin.setNickname("Local Admin");
+            admin.setStatus("ACTIVE");
+            admin.setCreatedAt(LocalDateTime.now());
+            admin.setUpdatedAt(LocalDateTime.now());
+            users.put(admin.getUsername(), admin);
+        }
+        ids.set(users.values().stream()
+                .map(UserEntity::getId)
+                .filter(id -> id != null)
+                .mapToLong(Long::longValue)
+                .max()
+                .orElse(1000L));
     }
 
     @Override

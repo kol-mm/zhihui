@@ -7,6 +7,7 @@
         <p class="summary">用户端和管理端已拆分为可操作页面：支持注册登录、知识提交、发帖评论、反馈工单，以及审核、账号状态和工单回复。</p>
       </div>
       <div class="hero-actions">
+        <el-tag>{{ currentUser }}</el-tag>
         <el-button type="primary" @click="refreshClient">刷新用户端数据</el-button>
         <el-button type="success" @click="refreshAdmin">刷新管理端数据</el-button>
       </div>
@@ -35,6 +36,7 @@
             <div class="actions">
               <el-button type="primary" @click="registerUser">注册</el-button>
               <el-button @click="loginUser">登录</el-button>
+              <el-button @click="loginAdmin">管理员登录</el-button>
             </div>
           </el-form>
         </article>
@@ -179,11 +181,12 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { deleteData, getData, postData } from './api/client';
+import { deleteData, getData, postData, setAuthToken } from './api/client';
 
 const activePortal = ref<'client' | 'admin'>('client');
 const clientOutput = ref('填写表单后提交，数据会通过本地后端保存。');
 const adminOutput = ref('管理端操作会真实修改状态并落盘。');
+const currentUser = ref('未登录');
 const portalOptions = [{ label: '用户端', value: 'client' }, { label: '管理端', value: 'admin' }];
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
@@ -225,7 +228,23 @@ async function registerUser() {
 }
 
 async function loginUser() {
-  await runClient(() => postData('/user/login', { username: authForm.value.username, password: authForm.value.password }));
+  await runClient(async () => {
+    const result = await postData<{ token: string; role: string; user: { id: number; username: string } }>('/user/login', {
+      username: authForm.value.username,
+      password: authForm.value.password
+    });
+    setAuthToken(result.token);
+    currentUser.value = `${result.user.username} / ${result.role}`;
+    return result;
+  });
+}
+
+async function loginAdmin() {
+  authForm.value.username = 'admin';
+  authForm.value.password = 'admin123';
+  authForm.value.nickname = 'Local Admin';
+  await loginUser();
+  activePortal.value = 'admin';
 }
 
 async function uploadKnowledge() {

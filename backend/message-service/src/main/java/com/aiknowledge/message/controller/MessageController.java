@@ -1,6 +1,7 @@
 package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.message.entity.ChatMessageEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
@@ -9,6 +10,7 @@ import com.aiknowledge.message.store.MessageStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -79,7 +81,14 @@ public class MessageController {
     }
 
     @GetMapping("/message/admin/overview")
-    public ApiResponse<Map<String, Object>> messageAdminOverview(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<Map<String, Object>> messageAdminOverview(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long userId
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         return ApiResponse.ok(Map.of(
                 "module", "消息互动管理",
                 "notifications", messageStore.listNotifications(userId).size(),
@@ -89,7 +98,14 @@ public class MessageController {
     }
 
     @GetMapping("/feedback/admin/overview")
-    public ApiResponse<Map<String, Object>> feedbackAdminOverview(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<Map<String, Object>> feedbackAdminOverview(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long userId
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         return ApiResponse.ok(Map.of(
                 "module", "工单反馈管理",
                 "tickets", messageStore.listTickets(userId).size(),
@@ -100,7 +116,14 @@ public class MessageController {
     }
 
     @PostMapping("/feedback/admin/reply")
-    public ApiResponse<Map<String, Object>> replyTicket(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> replyTicket(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         Long ticketId = number(request.get("ticketId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "PROCESSING"));
         String reply = String.valueOf(request.getOrDefault("reply", ""));

@@ -5,9 +5,31 @@ export const api = axios.create({
   timeout: 8000
 });
 
+const AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
+
+export function setAuthToken(token: string) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+}
+
+api.interceptors.request.use((config) => {
+  const token = getAuthToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 function normalizeApiResponse<T>(url: string, payload: unknown): T {
   if (payload && typeof payload === 'object' && 'data' in payload) {
-    return (payload as { data: T }).data;
+    const response = payload as { code?: number; message?: string; data: T };
+    if (typeof response.code === 'number' && response.code !== 0) {
+      throw new Error(`接口 ${url} 返回失败：${response.message || 'unknown error'}`);
+    }
+    return response.data;
   }
 
   throw new Error(`接口 ${url} 返回格式不符合预期`);

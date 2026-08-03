@@ -1,6 +1,7 @@
 package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -109,7 +111,14 @@ public class CommunityController {
     }
 
     @GetMapping("/post/admin/overview")
-    public ApiResponse<Map<String, Object>> adminOverview(@RequestParam(name = "authorUserId", required = false) Long authorUserId) {
+    public ApiResponse<Map<String, Object>> adminOverview(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "authorUserId", required = false) Long authorUserId
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         List<PostEntity> feed = communityStore.feed(authorUserId);
         return ApiResponse.ok(Map.of(
                 "module", "论坛管理",
@@ -122,7 +131,14 @@ public class CommunityController {
     }
 
     @PostMapping("/post/admin/audit")
-    public ApiResponse<Map<String, Object>> auditPost(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> auditPost(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         Long postId = number(request.get("postId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "PUBLISHED"));
         String reason = String.valueOf(request.getOrDefault("reason", ""));

@@ -1,6 +1,7 @@
 package com.aiknowledge.user.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.store.UserStore;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -63,16 +65,17 @@ public class UserController {
             return ApiResponse.fail("invalid username or password");
         }
         return ApiResponse.ok(Map.of(
-                "token", "local-dev-token-" + username,
+                "token", LocalAuth.issueToken(username),
+                "role", LocalAuth.roleForUsername(username),
                 "user", toView(user)
         ));
     }
 
     @GetMapping("/info")
-    public ApiResponse<Map<String, Object>> info() {
-        return userStore.findByUsername("demo")
+    public ApiResponse<Map<String, Object>> info(@RequestParam(name = "username", defaultValue = "demo") String username) {
+        return userStore.findByUsername(username)
                 .map(user -> ApiResponse.ok(toView(user)))
-                .orElseGet(() -> ApiResponse.fail("demo user not found"));
+                .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
     @PostMapping("/follow")
@@ -97,7 +100,11 @@ public class UserController {
     }
 
     @GetMapping("/admin/overview")
-    public ApiResponse<Map<String, Object>> adminOverview() {
+    public ApiResponse<Map<String, Object>> adminOverview(@RequestHeader(name = "Authorization", required = false) String authorization) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         java.util.List<UserEntity> users = userStore.listUsers();
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("module", "用户账号管理");
@@ -110,7 +117,14 @@ public class UserController {
     }
 
     @PostMapping("/admin/status")
-    public ApiResponse<Map<String, Object>> updateUserStatus(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> updateUserStatus(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         Long userId = number(request.get("userId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "ACTIVE"));
         return userStore.updateStatus(userId, status)
@@ -139,6 +153,7 @@ public class UserController {
         view.put("avatarUrl", user.getAvatarUrl());
         view.put("signature", user.getSignature());
         view.put("status", user.getStatus());
+        view.put("role", LocalAuth.roleForUsername(user.getUsername()));
         return view;
     }
 }

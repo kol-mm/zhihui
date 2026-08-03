@@ -1,11 +1,13 @@
 package com.aiknowledge.knowledge.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -95,7 +97,11 @@ public class KnowledgeController {
     }
 
     @GetMapping("/admin/overview")
-    public ApiResponse<Map<String, Object>> adminOverview() {
+    public ApiResponse<Map<String, Object>> adminOverview(@RequestHeader(name = "Authorization", required = false) String authorization) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         List<KnowledgeFileEntity> files = knowledgeStore.listFiles();
         long pendingAudit = files.stream().filter(file -> "PENDING".equals(file.getAuditStatus())).count();
         int totalViews = files.stream().mapToInt(file -> file.getViews() == null ? 0 : file.getViews()).sum();
@@ -112,12 +118,22 @@ public class KnowledgeController {
     }
 
     @GetMapping("/admin/reports")
-    public ApiResponse<List<Map<String, Object>>> adminReports() {
+    public ApiResponse<List<Map<String, Object>>> adminReports(@RequestHeader(name = "Authorization", required = false) String authorization) {
+        if (!LocalAuth.isAdmin(authorization)) {
+            return ApiResponse.fail("admin authorization is required");
+        }
         return ApiResponse.ok(knowledgeStore.listReports(null));
     }
 
     @PostMapping("/admin/audit")
-    public ApiResponse<Map<String, Object>> audit(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> audit(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
         Long fileId = number(request.get("fileId"), 0L);
         String auditStatus = String.valueOf(request.getOrDefault("auditStatus", "APPROVED"));
         String reason = String.valueOf(request.getOrDefault("reason", ""));
