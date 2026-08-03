@@ -107,6 +107,58 @@
 
       <section class="result-grid">
         <article class="card wide">
+          <div class="card-head">
+            <h3>知识列表</h3>
+            <el-tag>{{ knowledgeFiles.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="knowledgeFiles.length === 0" description="暂无知识数据，点击刷新列表加载" />
+          <div v-else class="item-list">
+            <div v-for="file in knowledgeFiles" :key="file.id" class="list-item">
+              <div>
+                <strong>{{ file.title }}</strong>
+                <p>{{ file.fileType || 'unknown' }} · 上传人 {{ file.userId }} · {{ file.auditStatus }}</p>
+              </div>
+              <el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'">{{ file.auditStatus }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>社区广场</h3>
+            <el-tag>{{ feedPosts.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="feedPosts.length === 0" description="暂无帖子数据，点击刷新广场加载" />
+          <div v-else class="item-list">
+            <div v-for="post in feedPosts" :key="post.id" class="list-item">
+              <div>
+                <strong>#{{ post.id }} {{ post.title }}</strong>
+                <p>{{ post.content }}</p>
+              </div>
+              <el-tag :type="post.status === 'PUBLISHED' ? 'success' : 'danger'">{{ post.status }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>我的工单</h3>
+            <el-tag>{{ tickets.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="tickets.length === 0" description="暂无工单，提交或刷新反馈后显示" />
+          <div v-else class="item-list">
+            <div v-for="ticket in tickets" :key="ticket.id" class="list-item">
+              <div>
+                <strong>#{{ ticket.id }} {{ ticket.type }}</strong>
+                <p>{{ ticket.content }}</p>
+                <small v-if="ticket.reply">回复：{{ ticket.reply }}</small>
+              </div>
+              <el-tag>{{ ticket.status }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
           <h3>用户端数据</h3>
           <pre>{{ clientOutput }}</pre>
         </article>
@@ -166,6 +218,64 @@
       <section class="result-grid">
         <article class="card wide">
           <div class="card-head">
+            <h3>管理概览</h3>
+            <el-tag type="success">Admin</el-tag>
+          </div>
+          <div class="metric-grid">
+            <div v-for="metric in adminMetrics" :key="metric.label" class="metric">
+              <span>{{ metric.label }}</span>
+              <strong>{{ metric.value }}</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>待处理队列</h3>
+            <el-tag>{{ adminQueueCount }} 条</el-tag>
+          </div>
+          <el-tabs>
+            <el-tab-pane label="知识">
+              <el-empty v-if="adminKnowledgeFiles.length === 0" description="暂无知识数据" />
+              <div v-else class="item-list">
+                <div v-for="file in adminKnowledgeFiles" :key="file.id" class="list-item">
+                  <div>
+                    <strong>#{{ file.id }} {{ file.title }}</strong>
+                    <p>上传人 {{ file.userId }} · {{ file.fileType }}</p>
+                  </div>
+                  <el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'">{{ file.auditStatus }}</el-tag>
+                </div>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="举报">
+              <el-empty v-if="knowledgeReports.length === 0" description="暂无举报" />
+              <div v-else class="item-list">
+                <div v-for="report in knowledgeReports" :key="report.id || `${report.userId}-${report.fileId}-${report.createdAt}`" class="list-item">
+                  <div>
+                    <strong>文件 #{{ report.fileId }}</strong>
+                    <p>{{ report.reason }}</p>
+                  </div>
+                  <el-tag type="warning">{{ report.status }}</el-tag>
+                </div>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="工单">
+              <el-empty v-if="adminTickets.length === 0" description="暂无工单" />
+              <div v-else class="item-list">
+                <div v-for="ticket in adminTickets" :key="ticket.id" class="list-item">
+                  <div>
+                    <strong>#{{ ticket.id }} {{ ticket.type }}</strong>
+                    <p>{{ ticket.content }}</p>
+                  </div>
+                  <el-tag>{{ ticket.status }}</el-tag>
+                </div>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
             <h3>管理端数据</h3>
             <div class="actions">
               <el-button @click="loadAdmin">平台概览</el-button>
@@ -180,14 +290,55 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { deleteData, getData, postData, setAuthToken } from './api/client';
+
+type KnowledgeFile = {
+  id: number;
+  userId: number;
+  title: string;
+  fileType: string;
+  auditStatus: string;
+};
+
+type Post = {
+  id: number;
+  userId: number;
+  title: string;
+  content: string;
+  status: string;
+};
+
+type Ticket = {
+  id: number;
+  userId: number;
+  type: string;
+  content: string;
+  status: string;
+  reply?: string;
+};
+
+type KnowledgeReport = {
+  id?: number;
+  userId: number;
+  fileId: number;
+  reason: string;
+  status: string;
+  createdAt?: string;
+};
 
 const activePortal = ref<'client' | 'admin'>('client');
 const clientOutput = ref('填写表单后提交，数据会通过本地后端保存。');
 const adminOutput = ref('管理端操作会真实修改状态并落盘。');
 const currentUser = ref('未登录');
 const portalOptions = [{ label: '用户端', value: 'client' }, { label: '管理端', value: 'admin' }];
+const knowledgeFiles = ref<KnowledgeFile[]>([]);
+const feedPosts = ref<Post[]>([]);
+const tickets = ref<Ticket[]>([]);
+const adminKnowledgeFiles = ref<KnowledgeFile[]>([]);
+const knowledgeReports = ref<KnowledgeReport[]>([]);
+const adminTickets = ref<Ticket[]>([]);
+const adminOverview = ref<Record<string, Record<string, unknown>>>({});
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
 const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
@@ -203,6 +354,16 @@ const knowledgeAudit = ref({ fileId: 1, auditStatus: 'APPROVED', reason: '内容
 const postAudit = ref({ postId: 1, status: 'PUBLISHED', reason: '内容正常' });
 const userStatus = ref({ userId: 1, status: 'ACTIVE' });
 const ticketReply = ref({ ticketId: 3001, status: 'PROCESSING', reply: '已收到反馈，正在处理。' });
+
+const adminMetrics = computed(() => [
+  { label: '用户总数', value: String(adminOverview.value.userAdmin?.totalUsers ?? '-') },
+  { label: '知识文件', value: String(adminOverview.value.knowledgeAdmin?.totalFiles ?? '-') },
+  { label: '知识举报', value: String(adminOverview.value.knowledgeAdmin?.reports ?? '-') },
+  { label: '帖子数量', value: String(adminOverview.value.forumAdmin?.publishedPosts ?? '-') },
+  { label: '工单数量', value: String(adminOverview.value.feedbackAdmin?.tickets ?? '-') }
+]);
+
+const adminQueueCount = computed(() => adminKnowledgeFiles.value.length + knowledgeReports.value.length + adminTickets.value.length);
 
 function formatData(data: unknown) {
   return JSON.stringify(data, null, 2);
@@ -248,7 +409,11 @@ async function loginAdmin() {
 }
 
 async function uploadKnowledge() {
-  await runClient(() => postData('/knowledge/upload', knowledgeForm.value));
+  await runClient(async () => {
+    const created = await postData('/knowledge/upload', knowledgeForm.value);
+    await loadKnowledge();
+    return created;
+  });
 }
 
 async function collectKnowledge() {
@@ -265,14 +430,18 @@ async function loadKnowledgeCollects() {
 
 async function loadKnowledge() {
   await runClient(async () => ({
-    files: await getData('/knowledge/list'),
+    files: knowledgeFiles.value = await getData<KnowledgeFile[]>('/knowledge/list'),
     ranking: await getData('/knowledge/ranking'),
     collects: await getData(`/knowledge/collects?userId=${knowledgeAction.value.userId}`)
   }));
 }
 
 async function createPost() {
-  await runClient(() => postData('/post/create', postForm.value));
+  await runClient(async () => {
+    const created = await postData('/post/create', postForm.value);
+    await loadFeed();
+    return created;
+  });
 }
 
 async function createComment() {
@@ -288,7 +457,7 @@ async function loadComments() {
 }
 
 async function loadFeed() {
-  await runClient(() => getData('/square/feed'));
+  await runClient(async () => feedPosts.value = await getData<Post[]>('/square/feed'));
 }
 
 async function followUser() {
@@ -304,11 +473,18 @@ async function loadFollows() {
 }
 
 async function createTicket() {
-  await runClient(() => postData('/feedback/ticket', ticketForm.value));
+  await runClient(async () => {
+    const created = await postData('/feedback/ticket', ticketForm.value);
+    await loadFeedback();
+    return created;
+  });
 }
 
 async function loadFeedback() {
-  await runClient(async () => ({ faqs: await getData('/feedback/faqs'), tickets: await getData('/feedback/tickets?userId=1') }));
+  await runClient(async () => ({
+    faqs: await getData('/feedback/faqs'),
+    tickets: tickets.value = await getData<Ticket[]>('/feedback/tickets?userId=1')
+  }));
 }
 
 async function askAi() {
@@ -316,21 +492,21 @@ async function askAi() {
 }
 
 async function loadAdmin() {
-  await runAdmin(async () => ({
+  await runAdmin(async () => adminOverview.value = {
     userAdmin: await getData('/user/admin/overview'),
     knowledgeAdmin: await getData('/knowledge/admin/overview'),
     forumAdmin: await getData('/post/admin/overview'),
     messageAdmin: await getData('/message/admin/overview?userId=1'),
     feedbackAdmin: await getData('/feedback/admin/overview?userId=1')
-  }));
+  });
 }
 
 async function loadAdminQueues() {
   await runAdmin(async () => ({
-    knowledgeFiles: await getData('/knowledge/list'),
-    knowledgeReports: await getData('/knowledge/admin/reports'),
+    knowledgeFiles: adminKnowledgeFiles.value = await getData<KnowledgeFile[]>('/knowledge/list'),
+    knowledgeReports: knowledgeReports.value = await getData<KnowledgeReport[]>('/knowledge/admin/reports'),
     posts: await getData('/square/feed'),
-    tickets: await getData('/feedback/tickets')
+    tickets: adminTickets.value = await getData<Ticket[]>('/feedback/tickets')
   }));
 }
 
@@ -353,11 +529,14 @@ async function replyTicket() {
 async function refreshClient() {
   activePortal.value = 'client';
   await loadKnowledge();
+  await loadFeed();
+  await loadFeedback();
 }
 
 async function refreshAdmin() {
   activePortal.value = 'admin';
   await loadAdmin();
+  await loadAdminQueues();
 }
 </script>
 
@@ -376,8 +555,17 @@ async function refreshAdmin() {
 .hero-actions, .actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 .result-grid { margin-top: 16px; }
+.result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 .card { padding: 18px; }
 .wide { min-width: 0; }
+.item-list { display: grid; gap: 10px; }
+.list-item { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
+.list-item p { margin: 6px 0 0; color: #4b5563; line-height: 1.5; }
+.list-item small { display: block; margin-top: 6px; color: #059669; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.metric { padding: 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
+.metric span { display: block; color: #6b7280; font-size: 13px; }
+.metric strong { display: block; margin-top: 8px; font-size: 22px; }
 pre { min-height: 260px; margin: 16px 0 0; padding: 16px; overflow: auto; border-radius: 8px; background: #111827; color: #d1fae5; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 :deep(.el-select) { width: 100%; }
 @media (max-width: 900px) {
