@@ -23,7 +23,7 @@ if (Test-Path $assetDir) {
 }
 
 if ((Test-Path $indexPath) -and $jsAssets.Count -gt 0 -and $cssAssets.Count -gt 0) {
-    Write-Warning "Vite returned exit code $viteExit after writing dist output. Treating build as successful for this Windows local MVP environment."
+    Write-Warning "Vite returned exit code $viteExit after writing dist output. Treating build as successful for this Windows local usable environment."
     Write-Host "Generated index: $indexPath"
     Write-Host "Generated JS assets: $($jsAssets.Count)"
     Write-Host "Generated CSS assets: $($cssAssets.Count)"

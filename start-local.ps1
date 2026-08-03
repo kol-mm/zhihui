@@ -52,7 +52,7 @@ function Start-LocalProcess {
     Write-Host "[$Name] started. Log: $logFile" -ForegroundColor Green
 }
 
-Write-Host "Starting AI Knowledge Platform local MVP..." -ForegroundColor Cyan
+Write-Host "Starting AI Knowledge Platform local usable version..." -ForegroundColor Cyan
 Write-Host "Project: $Root"
 
 if (-not $SkipNacos) {

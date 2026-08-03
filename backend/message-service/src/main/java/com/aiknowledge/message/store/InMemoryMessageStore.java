@@ -68,7 +68,7 @@ public class InMemoryMessageStore implements MessageStore {
         FaqEntity faq = new FaqEntity();
         faq.setId(faqIds.incrementAndGet());
         faq.setQuestion("Which file formats are supported?");
-        faq.setAnswer("The MVP plans to support Word, PDF, TXT and MD.");
+        faq.setAnswer("The local usable version supports Word, PDF, TXT and MD style knowledge records for upload, search and AI Q&A testing.");
         faq.setSortNo(1);
         faq.setEnabled(1);
         faqs.add(faq);

@@ -1,4 +1,4 @@
-# AI 知识社区平台（本地运行 MVP）
+# AI 知识社区平台（本地可用版本）
 
 本项目先完成本地可运行版本，暂不做容器化。当前架构保留微服务拆分，并接入本机 Nacos；Python 依赖只安装在 ai-service/.venv，不污染全局环境。
 
@@ -17,7 +17,7 @@
 - Node.js 20+（PowerShell 下建议使用 npm.cmd）
 - Python 3.11+（当前代码已在 Python 3.14 环境下验证）
 - Nacos 2.x 单机版
-- MySQL 8 可选；默认本地 MVP 使用内存数据和 AI SQLite
+- MySQL 8 可选；默认本地可用版本使用本地 JSON/内存数据和 AI SQLite
 
 ## 启动 Nacos
 
@@ -31,7 +31,7 @@
 
 默认账号密码通常是 nacos / nacos。本项目暂不启动容器版 Nacos。
 
-## 一键启动本地 MVP
+## 一键启动本地可用版本
 
 项目根目录提供 start-local.ps1，会启动 AI 服务、后端 5 个微服务、网关和前端，并把日志写入 logs 目录。
 
@@ -106,7 +106,14 @@ run.ps1 会自动创建并使用 ai-service/.venv，依赖不会安装到全局 
 
     http://127.0.0.1:5173
 
-页面默认进入用户端，可切换到管理端。用户端和管理端使用同一个本地前端工程，避免本地 MVP 阶段维护两套启动命令。
+页面默认进入用户端，可切换到管理端。用户端和管理端使用同一个本地前端工程，避免本地运行阶段维护两套启动命令。
+
+## 默认账号
+
+- 普通用户：demo / demo
+- 管理员：admin / admin123
+
+管理员登录后可进入管理端，执行知识审核、帖子审核、用户状态调整、工单回复，并查看平台数据统计。
 
 ## 快速验证
 
@@ -129,6 +136,10 @@ AI 测试：
 
     .\smoke-test.ps1
 
+带 503 自动重试的接口循环检测：
+
+    .\smoke-test.ps1 -MaxRetries 30 -RetryWaitSeconds 10
+
 也可以手动检查：
 
     curl http://127.0.0.1:8080/user/health
@@ -139,7 +150,7 @@ AI 测试：
 
 ## 可选 MySQL 模式
 
-默认本地 MVP 使用内存数据。需要切换 MySQL 时，先执行：
+默认本地可用版本使用本地 JSON/内存数据。需要切换 MySQL 时，先执行：
 
     mysql -uroot -p < .\docs\sql\schema.sql
 
@@ -152,8 +163,7 @@ AI 测试：
 
 密码只通过环境变量传入，不写进项目配置。也可以通过 MYSQL_URL 分别指定对应业务库。
 
-## 当前未做
+## 当前完成边界
 
 - 容器化部署：按要求暂不做。
-- MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB：本地 MVP 跑通后再增强。
-- 生产级 JWT 和细粒度 RBAC：当前已有本地登录 token 和管理端接口入口，后续可继续增强。
+- 文件存储、消息事件、全文检索、向量检索、JWT/RBAC：纳入本地可用版本，优先实现本地可运行能力，再保留对 MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB 的可切换配置入口。
