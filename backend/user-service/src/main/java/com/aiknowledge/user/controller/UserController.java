@@ -78,6 +78,17 @@ public class UserController {
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
+    @PostMapping("/profile")
+    public ApiResponse<Map<String, Object>> updateProfile(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        String nickname = String.valueOf(request.getOrDefault("nickname", ""));
+        String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", ""));
+        String signature = String.valueOf(request.getOrDefault("signature", ""));
+        return userStore.updateProfile(userId, nickname, avatarUrl, signature)
+                .map(user -> ApiResponse.ok(toView(user)))
+                .orElseGet(() -> ApiResponse.fail("user not found"));
+    }
+
     @PostMapping("/follow")
     public ApiResponse<Map<String, Object>> follow(@RequestBody Map<String, Object> request) {
         Long userId = number(request.get("userId"), 1L);
@@ -114,6 +125,16 @@ public class UserController {
         overview.put("riskUsers", users.stream().filter(user -> !"ACTIVE".equals(user.getStatus())).count());
         overview.put("capabilities", java.util.List.of("资料审核", "账号状态管理", "关注关系查看", "个人内容追踪"));
         return ApiResponse.ok(overview);
+    }
+
+    @GetMapping("/admin/users")
+    public ApiResponse<java.util.List<Map<String, Object>>> adminUsers(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) {
+            return ApiResponse.fail("admin authorization is required");
+        }
+        return ApiResponse.ok(userStore.listUsers().stream().map(this::toView).toList());
     }
 
     @PostMapping("/admin/status")

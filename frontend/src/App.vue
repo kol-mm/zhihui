@@ -42,6 +42,20 @@
         </article>
 
         <article class="card">
+          <h3>个人资料</h3>
+          <el-form label-position="top">
+            <el-form-item label="用户 ID"><el-input-number v-model="profileForm.userId" :min="1" /></el-form-item>
+            <el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item>
+            <el-form-item label="头像地址"><el-input v-model="profileForm.avatarUrl" /></el-form-item>
+            <el-form-item label="签名"><el-input v-model="profileForm.signature" type="textarea" :rows="2" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="updateProfile">保存资料</el-button>
+              <el-button @click="loadUserInfo">查看资料</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
           <h3>知识提交</h3>
           <el-form label-position="top">
             <el-form-item label="标题"><el-input v-model="knowledgeForm.title" /></el-form-item>
@@ -346,6 +360,23 @@
 
         <article class="card wide">
           <div class="card-head">
+            <h3>用户列表</h3>
+            <el-tag>{{ adminUsers.length }} 人</el-tag>
+          </div>
+          <el-empty v-if="adminUsers.length === 0" description="暂无用户数据，点击平台概览加载" />
+          <div v-else class="item-list">
+            <div v-for="user in adminUsers" :key="user.id" class="list-item">
+              <div>
+                <strong>#{{ user.id }} {{ user.nickname || user.username }}</strong>
+                <p>{{ user.username }} · {{ user.signature || '暂无签名' }}</p>
+              </div>
+              <el-tag :type="user.status === 'ACTIVE' ? 'success' : 'danger'">{{ user.status }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
             <h3>管理端数据</h3>
             <div class="actions">
               <el-button @click="loadAdmin">平台概览</el-button>
@@ -369,6 +400,16 @@ type KnowledgeFile = {
   title: string;
   fileType: string;
   auditStatus: string;
+};
+
+type User = {
+  id: number;
+  username: string;
+  nickname: string;
+  avatarUrl?: string;
+  signature?: string;
+  status: string;
+  role: string;
 };
 
 type Post = {
@@ -432,12 +473,14 @@ const tickets = ref<Ticket[]>([]);
 const postDrafts = ref<PostDraft[]>([]);
 const messages = ref<ChatMessage[]>([]);
 const notifications = ref<Notice[]>([]);
+const adminUsers = ref<User[]>([]);
 const adminKnowledgeFiles = ref<KnowledgeFile[]>([]);
 const knowledgeReports = ref<KnowledgeReport[]>([]);
 const adminTickets = ref<Ticket[]>([]);
 const adminOverview = ref<Record<string, Record<string, unknown>>>({});
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
+const profileForm = ref({ userId: 1, nickname: 'Demo User', avatarUrl: '', signature: '本地可用版本测试用户' });
 const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
 const knowledgeAction = ref({ userId: 1, fileId: 1, reason: '内容不准确，需要复核' });
 const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
@@ -495,6 +538,7 @@ async function loginUser() {
     });
     setAuthToken(result.token);
     currentUser.value = `${result.user.username} / ${result.role}`;
+    profileForm.value.userId = result.user.id;
     return result;
   });
 }
@@ -505,6 +549,14 @@ async function loginAdmin() {
   authForm.value.nickname = 'Local Admin';
   await loginUser();
   activePortal.value = 'admin';
+}
+
+async function updateProfile() {
+  await runClient(() => postData('/user/profile', profileForm.value));
+}
+
+async function loadUserInfo() {
+  await runClient(() => getData(`/user/info?username=${authForm.value.username}`));
 }
 
 async function uploadKnowledge() {
@@ -638,12 +690,17 @@ async function askAi() {
 }
 
 async function loadAdmin() {
-  await runAdmin(async () => adminOverview.value = {
-    userAdmin: await getData('/user/admin/overview'),
-    knowledgeAdmin: await getData('/knowledge/admin/overview'),
-    forumAdmin: await getData('/post/admin/overview'),
-    messageAdmin: await getData('/message/admin/overview?userId=1'),
-    feedbackAdmin: await getData('/feedback/admin/overview?userId=1')
+  await runAdmin(async () => {
+    const overview: Record<string, Record<string, unknown>> = {
+      userAdmin: await getData<Record<string, unknown>>('/user/admin/overview'),
+      knowledgeAdmin: await getData<Record<string, unknown>>('/knowledge/admin/overview'),
+      forumAdmin: await getData<Record<string, unknown>>('/post/admin/overview'),
+      messageAdmin: await getData<Record<string, unknown>>('/message/admin/overview?userId=1'),
+      feedbackAdmin: await getData<Record<string, unknown>>('/feedback/admin/overview?userId=1')
+    };
+    adminOverview.value = overview;
+    adminUsers.value = await getData<User[]>('/user/admin/users');
+    return overview;
   });
 }
 

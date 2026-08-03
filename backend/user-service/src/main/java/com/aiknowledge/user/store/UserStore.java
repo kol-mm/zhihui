@@ -8,7 +8,11 @@ import java.util.Optional;
 public interface UserStore {
     Optional<UserEntity> findByUsername(String username);
 
+    Optional<UserEntity> findById(Long userId);
+
     UserEntity save(UserEntity user);
+
+    Optional<UserEntity> updateProfile(Long userId, String nickname, String avatarUrl, String signature);
 
     List<UserEntity> listUsers();
 

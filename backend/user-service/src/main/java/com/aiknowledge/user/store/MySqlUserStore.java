@@ -31,9 +31,28 @@ public class MySqlUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> findById(Long userId) {
+        return Optional.ofNullable(userMapper.selectById(userId));
+    }
+
+    @Override
     public UserEntity save(UserEntity user) {
         userMapper.insert(user);
         return user;
+    }
+
+    @Override
+    public Optional<UserEntity> updateProfile(Long userId, String nickname, String avatarUrl, String signature) {
+        UserEntity user = userMapper.selectById(userId);
+        if (user == null) {
+            return Optional.empty();
+        }
+        user.setNickname(nickname);
+        user.setAvatarUrl(avatarUrl);
+        user.setSignature(signature);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return Optional.of(user);
     }
 
     @Override

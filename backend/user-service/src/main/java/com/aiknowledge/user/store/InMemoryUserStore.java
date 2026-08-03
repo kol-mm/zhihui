@@ -88,6 +88,13 @@ public class InMemoryUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> findById(Long userId) {
+        return users.values().stream()
+                .filter(user -> user.getId().equals(userId))
+                .findFirst();
+    }
+
+    @Override
     public UserEntity save(UserEntity user) {
         if (user.getId() == null) {
             user.setId(ids.incrementAndGet());
@@ -99,6 +106,19 @@ public class InMemoryUserStore implements UserStore {
         users.put(user.getUsername(), user);
         persist();
         return user;
+    }
+
+    @Override
+    public Optional<UserEntity> updateProfile(Long userId, String nickname, String avatarUrl, String signature) {
+        Optional<UserEntity> found = findById(userId);
+        found.ifPresent(user -> {
+            user.setNickname(nickname);
+            user.setAvatarUrl(avatarUrl);
+            user.setSignature(signature);
+            user.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
     }
 
     @Override
