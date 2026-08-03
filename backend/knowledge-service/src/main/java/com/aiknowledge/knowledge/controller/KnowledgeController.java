@@ -1,0 +1,138 @@
+package com.aiknowledge.knowledge.controller;
+
+import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.store.KnowledgeStore;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/knowledge")
+public class KnowledgeController {
+    private final KnowledgeStore knowledgeStore;
+
+    public KnowledgeController(KnowledgeStore knowledgeStore) {
+        this.knowledgeStore = knowledgeStore;
+    }
+
+    @GetMapping("/health")
+    public ApiResponse<Map<String, Object>> health() {
+        return ApiResponse.ok(Map.of("service", "knowledge-service", "time", Instant.now().toString()));
+    }
+
+    @PostMapping("/upload")
+    public ApiResponse<Map<String, Object>> upload(@RequestBody Map<String, Object> request) {
+        KnowledgeFileEntity file = new KnowledgeFileEntity();
+        file.setUserId(number(request.get("userId"), 1L));
+        file.setCategoryId(number(request.get("categoryId"), null));
+        file.setTitle(String.valueOf(request.getOrDefault("title", "Untitled knowledge file")));
+        file.setFileUrl(String.valueOf(request.getOrDefault("fileUrl", "")));
+        file.setFileType(String.valueOf(request.getOrDefault("fileType", "txt")));
+        file.setParseStatus("PENDING");
+        file.setAuditStatus("PENDING");
+        file.setViews(0);
+        file.setDownloads(0);
+        return ApiResponse.ok(toView(knowledgeStore.saveFile(file)));
+    }
+
+    @GetMapping("/list")
+    public ApiResponse<List<Map<String, Object>>> list() {
+        return ApiResponse.ok(knowledgeStore.listFiles().stream().map(this::toView).toList());
+    }
+
+    @GetMapping("/search")
+    public ApiResponse<List<Map<String, Object>>> search(@RequestParam(name = "keyword", defaultValue = "") String keyword) {
+        return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream().map(this::toView).toList());
+    }
+
+    @GetMapping("/ranking")
+    public ApiResponse<List<Map<String, Object>>> ranking() {
+        return ApiResponse.ok(List.of(
+                Map.of("rank", 1, "userId", 1L, "nickname", "Demo User", "uploads", 12, "views", 386, "downloads", 92, "violations", 0),
+                Map.of("rank", 2, "userId", 2L, "nickname", "Knowledge Builder", "uploads", 8, "views", 241, "downloads", 56, "violations", 1),
+                Map.of("rank", 3, "userId", 3L, "nickname", "AI Learner", "uploads", 5, "views", 180, "downloads", 33, "violations", 0)
+        ));
+    }
+
+    @PostMapping("/collect")
+    public ApiResponse<Map<String, Object>> collect(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long fileId = number(request.get("fileId"), 0L);
+        knowledgeStore.collect(userId, fileId);
+        return ApiResponse.ok(Map.of("fileId", fileId, "collected", true));
+    }
+
+    @PostMapping("/report")
+    public ApiResponse<Map<String, Object>> report(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long fileId = number(request.get("fileId"), 0L);
+        knowledgeStore.report(userId, fileId, String.valueOf(request.getOrDefault("reason", "")));
+        return ApiResponse.ok(Map.of("fileId", fileId, "status", "REPORTED"));
+    }
+
+    @PostMapping("/forward")
+    public ApiResponse<Map<String, Object>> forward(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(Map.of("fileId", request.getOrDefault("fileId", 0), "forwarded", true));
+    }
+
+    @GetMapping("/admin/overview")
+    public ApiResponse<Map<String, Object>> adminOverview() {
+        List<KnowledgeFileEntity> files = knowledgeStore.listFiles();
+        long pendingAudit = files.stream().filter(file -> "PENDING".equals(file.getAuditStatus())).count();
+        int totalViews = files.stream().mapToInt(file -> file.getViews() == null ? 0 : file.getViews()).sum();
+        int totalDownloads = files.stream().mapToInt(file -> file.getDownloads() == null ? 0 : file.getDownloads()).sum();
+        return ApiResponse.ok(Map.of(
+                "module", "知识库管理",
+                "totalFiles", files.size(),
+                "pendingAudit", pendingAudit,
+                "totalViews", totalViews,
+                "totalDownloads", totalDownloads,
+                "capabilities", List.of("资源审核", "分类维护", "AI解析状态追踪", "违规举报处理")
+        ));
+    }
+
+    @PostMapping("/admin/audit")
+    public ApiResponse<Map<String, Object>> audit(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(Map.of(
+                "fileId", request.getOrDefault("fileId", 0),
+                "auditStatus", request.getOrDefault("auditStatus", "APPROVED"),
+                "reason", request.getOrDefault("reason", ""),
+                "updated", true
+        ));
+    }
+
+    private Map<String, Object> toView(KnowledgeFileEntity file) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", file.getId());
+        view.put("userId", file.getUserId());
+        view.put("categoryId", file.getCategoryId());
+        view.put("title", file.getTitle());
+        view.put("fileUrl", file.getFileUrl());
+        view.put("fileType", file.getFileType());
+        view.put("parseStatus", file.getParseStatus());
+        view.put("auditStatus", file.getAuditStatus());
+        view.put("views", file.getViews());
+        view.put("downloads", file.getDownloads());
+        view.put("createdAt", file.getCreatedAt());
+        return view;
+    }
+
+    private Long number(Object value, Long fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.valueOf(value.toString());
+    }
+}
