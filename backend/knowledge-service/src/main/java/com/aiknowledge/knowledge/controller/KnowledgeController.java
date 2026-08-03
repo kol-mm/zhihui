@@ -68,7 +68,12 @@ public class KnowledgeController {
         Long userId = number(request.get("userId"), 1L);
         Long fileId = number(request.get("fileId"), 0L);
         knowledgeStore.collect(userId, fileId);
-        return ApiResponse.ok(Map.of("fileId", fileId, "collected", true));
+        return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "collected", true));
+    }
+
+    @GetMapping("/collects")
+    public ApiResponse<List<Map<String, Object>>> collects(@RequestParam(name = "userId", required = false) Long userId) {
+        return ApiResponse.ok(knowledgeStore.listCollects(userId));
     }
 
     @PostMapping("/report")
@@ -77,6 +82,11 @@ public class KnowledgeController {
         Long fileId = number(request.get("fileId"), 0L);
         knowledgeStore.report(userId, fileId, String.valueOf(request.getOrDefault("reason", "")));
         return ApiResponse.ok(Map.of("fileId", fileId, "status", "REPORTED"));
+    }
+
+    @GetMapping("/reports")
+    public ApiResponse<List<Map<String, Object>>> reports(@RequestParam(name = "userId", required = false) Long userId) {
+        return ApiResponse.ok(knowledgeStore.listReports(userId));
     }
 
     @PostMapping("/forward")
@@ -96,8 +106,14 @@ public class KnowledgeController {
                 "pendingAudit", pendingAudit,
                 "totalViews", totalViews,
                 "totalDownloads", totalDownloads,
+                "reports", knowledgeStore.listReports(null).size(),
                 "capabilities", List.of("资源审核", "分类维护", "AI解析状态追踪", "违规举报处理")
         ));
+    }
+
+    @GetMapping("/admin/reports")
+    public ApiResponse<List<Map<String, Object>>> adminReports() {
+        return ApiResponse.ok(knowledgeStore.listReports(null));
     }
 
     @PostMapping("/admin/audit")

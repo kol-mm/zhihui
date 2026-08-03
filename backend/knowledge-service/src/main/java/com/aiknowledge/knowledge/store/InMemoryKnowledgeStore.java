@@ -8,7 +8,9 @@ import org.springframework.stereotype.Repository;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,14 +80,35 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
 
     @Override
     public void collect(Long userId, Long fileId) {
+        boolean exists = collects.stream()
+                .anyMatch(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
+        if (exists) {
+            return;
+        }
         collects.add(new CollectRecord(userId, fileId, LocalDateTime.now()));
         persist();
+    }
+
+    @Override
+    public List<Map<String, Object>> listCollects(Long userId) {
+        return collects.stream()
+                .filter(record -> userId == null || record.userId().equals(userId))
+                .map(this::collectView)
+                .toList();
     }
 
     @Override
     public void report(Long userId, Long fileId, String reason) {
         reports.add(new ReportRecord(userId, fileId, reason, LocalDateTime.now()));
         persist();
+    }
+
+    @Override
+    public List<Map<String, Object>> listReports(Long userId) {
+        return reports.stream()
+                .filter(record -> userId == null || record.userId().equals(userId))
+                .map(this::reportView)
+                .toList();
     }
 
     @Override
@@ -106,6 +129,24 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         state.collects = new ArrayList<>(collects);
         state.reports = new ArrayList<>(reports);
         LocalJsonStore.write(storePath, state);
+    }
+
+    private Map<String, Object> collectView(CollectRecord record) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("userId", record.userId());
+        view.put("fileId", record.fileId());
+        view.put("createdAt", record.createdAt());
+        return view;
+    }
+
+    private Map<String, Object> reportView(ReportRecord record) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("userId", record.userId());
+        view.put("fileId", record.fileId());
+        view.put("reason", record.reason());
+        view.put("status", "PENDING");
+        view.put("createdAt", record.createdAt());
+        return view;
     }
 
     public static class State {

@@ -45,8 +45,13 @@
             <el-form-item label="标题"><el-input v-model="knowledgeForm.title" /></el-form-item>
             <el-form-item label="文件类型"><el-input v-model="knowledgeForm.fileType" /></el-form-item>
             <el-form-item label="文件地址"><el-input v-model="knowledgeForm.fileUrl" /></el-form-item>
+            <el-form-item label="操作文件 ID"><el-input-number v-model="knowledgeAction.fileId" :min="1" /></el-form-item>
+            <el-form-item label="举报原因"><el-input v-model="knowledgeAction.reason" /></el-form-item>
             <div class="actions">
               <el-button type="primary" @click="uploadKnowledge">提交知识</el-button>
+              <el-button @click="collectKnowledge">收藏</el-button>
+              <el-button @click="reportKnowledge">举报</el-button>
+              <el-button @click="loadKnowledgeCollects">我的收藏</el-button>
               <el-button @click="loadKnowledge">刷新列表</el-button>
             </div>
           </el-form>
@@ -183,6 +188,7 @@ const portalOptions = [{ label: '用户端', value: 'client' }, { label: '管理
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
 const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
+const knowledgeAction = ref({ userId: 1, fileId: 1, reason: '内容不准确，需要复核' });
 const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
 const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善。' });
 const detailPostId = ref(1);
@@ -226,8 +232,24 @@ async function uploadKnowledge() {
   await runClient(() => postData('/knowledge/upload', knowledgeForm.value));
 }
 
+async function collectKnowledge() {
+  await runClient(() => postData('/knowledge/collect', knowledgeAction.value));
+}
+
+async function reportKnowledge() {
+  await runClient(() => postData('/knowledge/report', knowledgeAction.value));
+}
+
+async function loadKnowledgeCollects() {
+  await runClient(() => getData(`/knowledge/collects?userId=${knowledgeAction.value.userId}`));
+}
+
 async function loadKnowledge() {
-  await runClient(async () => ({ files: await getData('/knowledge/list'), ranking: await getData('/knowledge/ranking') }));
+  await runClient(async () => ({
+    files: await getData('/knowledge/list'),
+    ranking: await getData('/knowledge/ranking'),
+    collects: await getData(`/knowledge/collects?userId=${knowledgeAction.value.userId}`)
+  }));
 }
 
 async function createPost() {
@@ -287,6 +309,7 @@ async function loadAdmin() {
 async function loadAdminQueues() {
   await runAdmin(async () => ({
     knowledgeFiles: await getData('/knowledge/list'),
+    knowledgeReports: await getData('/knowledge/admin/reports'),
     posts: await getData('/square/feed'),
     tickets: await getData('/feedback/tickets')
   }));
