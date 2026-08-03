@@ -2,15 +2,13 @@
   <main class="shell">
     <section class="hero">
       <div>
-        <p class="eyebrow">Local MVP</p>
+        <p class="eyebrow">Local Usable Version</p>
         <h1>AI 知识社区平台</h1>
-        <p class="summary">
-          当前本地版已拆成用户端和管理端两个入口：用户端负责知识、论坛、消息、广场、个人中心、反馈；管理端负责审核、统计、账号和工单处理。
-        </p>
+        <p class="summary">用户端和管理端已拆分为可操作页面：支持注册登录、知识提交、发帖评论、反馈工单，以及审核、账号状态和工单回复。</p>
       </div>
       <div class="hero-actions">
-        <el-button type="primary" @click="refreshClient">刷新用户端</el-button>
-        <el-button type="success" @click="refreshAdmin">刷新管理端</el-button>
+        <el-button type="primary" @click="refreshClient">刷新用户端数据</el-button>
+        <el-button type="success" @click="refreshAdmin">刷新管理端数据</el-button>
       </div>
     </section>
 
@@ -24,35 +22,71 @@
           <p class="eyebrow">Client Portal</p>
           <h2>用户端</h2>
         </div>
-        <el-tag type="primary">面向普通用户</el-tag>
+        <el-tag type="primary">普通用户操作</el-tag>
       </div>
 
-      <section class="grid">
-        <article v-for="module in clientModules" :key="module.title" class="panel">
-          <div class="panel-head">
-            <h3>{{ module.title }}</h3>
-            <el-tag>{{ module.owner }}</el-tag>
-          </div>
-          <p>{{ module.desc }}</p>
-          <ul>
-            <li v-for="item in module.items" :key="item">{{ item }}</li>
-          </ul>
+      <section class="form-grid">
+        <article class="card">
+          <h3>注册 / 登录</h3>
+          <el-form label-position="top">
+            <el-form-item label="用户名"><el-input v-model="authForm.username" /></el-form-item>
+            <el-form-item label="密码"><el-input v-model="authForm.password" type="password" show-password /></el-form-item>
+            <el-form-item label="昵称"><el-input v-model="authForm.nickname" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="registerUser">注册</el-button>
+              <el-button @click="loginUser">登录</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>知识提交</h3>
+          <el-form label-position="top">
+            <el-form-item label="标题"><el-input v-model="knowledgeForm.title" /></el-form-item>
+            <el-form-item label="文件类型"><el-input v-model="knowledgeForm.fileType" /></el-form-item>
+            <el-form-item label="文件地址"><el-input v-model="knowledgeForm.fileUrl" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="uploadKnowledge">提交知识</el-button>
+              <el-button @click="loadKnowledge">刷新列表</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>论坛发帖 / 评论</h3>
+          <el-form label-position="top">
+            <el-form-item label="标题"><el-input v-model="postForm.title" /></el-form-item>
+            <el-form-item label="内容"><el-input v-model="postForm.content" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item label="评论 Post ID"><el-input-number v-model="commentForm.postId" :min="1" /></el-form-item>
+            <el-form-item label="评论内容"><el-input v-model="commentForm.content" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="createPost">发布帖子</el-button>
+              <el-button @click="createComment">发表评论</el-button>
+              <el-button @click="loadFeed">刷新广场</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>反馈工单 / AI</h3>
+          <el-form label-position="top">
+            <el-form-item label="反馈类型"><el-input v-model="ticketForm.type" /></el-form-item>
+            <el-form-item label="反馈内容"><el-input v-model="ticketForm.content" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item label="AI 问题"><el-input v-model="aiQuestion" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="createTicket">提交工单</el-button>
+              <el-button @click="askAi">AI 问答</el-button>
+              <el-button @click="loadFeedback">刷新反馈</el-button>
+            </div>
+          </el-form>
         </article>
       </section>
 
-      <section class="workspace single">
-        <div class="console">
-          <h2>用户端接口联调</h2>
-          <div class="actions">
-            <el-button @click="login">登录</el-button>
-            <el-button @click="loadKnowledge">知识库</el-button>
-            <el-button @click="loadFeed">广场</el-button>
-            <el-button @click="loadMessages">消息</el-button>
-            <el-button @click="askAi">AI 问答</el-button>
-            <el-button @click="loadFeedback">反馈/FAQ</el-button>
-          </div>
+      <section class="result-grid">
+        <article class="card wide">
+          <h3>用户端数据</h3>
           <pre>{{ clientOutput }}</pre>
-        </div>
+        </article>
       </section>
     </section>
 
@@ -62,28 +96,61 @@
           <p class="eyebrow">Admin Portal</p>
           <h2>管理端</h2>
         </div>
-        <el-tag type="success">面向平台管理员</el-tag>
+        <el-tag type="success">管理员操作</el-tag>
       </div>
 
-      <section class="workspace">
-        <div class="admin">
-          <h2>管理端六大模块</h2>
-          <el-table :data="adminModules" size="small">
-            <el-table-column prop="name" label="模块" width="150" />
-            <el-table-column prop="scope" label="管理范围" />
-            <el-table-column prop="status" label="本地 MVP 状态" width="130" />
-          </el-table>
-        </div>
+      <section class="form-grid">
+        <article class="card">
+          <h3>知识审核</h3>
+          <el-form label-position="top">
+            <el-form-item label="文件 ID"><el-input-number v-model="knowledgeAudit.fileId" :min="1" /></el-form-item>
+            <el-form-item label="审核状态"><el-select v-model="knowledgeAudit.auditStatus"><el-option label="通过" value="APPROVED" /><el-option label="拒绝" value="REJECTED" /></el-select></el-form-item>
+            <el-form-item label="原因"><el-input v-model="knowledgeAudit.reason" /></el-form-item>
+            <el-button type="success" @click="auditKnowledge">提交审核</el-button>
+          </el-form>
+        </article>
 
-        <div class="console">
-          <h2>管理端接口联调</h2>
-          <div class="actions">
-            <el-button type="success" @click="loadAdmin">平台概览</el-button>
-            <el-button @click="loadAdminAudits">审核队列</el-button>
-            <el-button @click="loadFeedbackAdmin">工单处理</el-button>
+        <article class="card">
+          <h3>帖子审核</h3>
+          <el-form label-position="top">
+            <el-form-item label="帖子 ID"><el-input-number v-model="postAudit.postId" :min="1" /></el-form-item>
+            <el-form-item label="状态"><el-select v-model="postAudit.status"><el-option label="发布" value="PUBLISHED" /><el-option label="隐藏" value="HIDDEN" /></el-select></el-form-item>
+            <el-form-item label="原因"><el-input v-model="postAudit.reason" /></el-form-item>
+            <el-button type="success" @click="auditPost">提交审核</el-button>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>账号状态</h3>
+          <el-form label-position="top">
+            <el-form-item label="用户 ID"><el-input-number v-model="userStatus.userId" :min="1" /></el-form-item>
+            <el-form-item label="状态"><el-select v-model="userStatus.status"><el-option label="正常" value="ACTIVE" /><el-option label="禁用" value="DISABLED" /></el-select></el-form-item>
+            <el-button type="success" @click="updateUserStatus">更新状态</el-button>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>工单回复</h3>
+          <el-form label-position="top">
+            <el-form-item label="工单 ID"><el-input-number v-model="ticketReply.ticketId" :min="1" /></el-form-item>
+            <el-form-item label="状态"><el-select v-model="ticketReply.status"><el-option label="处理中" value="PROCESSING" /><el-option label="已解决" value="RESOLVED" /></el-select></el-form-item>
+            <el-form-item label="回复"><el-input v-model="ticketReply.reply" type="textarea" :rows="3" /></el-form-item>
+            <el-button type="success" @click="replyTicket">回复工单</el-button>
+          </el-form>
+        </article>
+      </section>
+
+      <section class="result-grid">
+        <article class="card wide">
+          <div class="card-head">
+            <h3>管理端数据</h3>
+            <div class="actions">
+              <el-button @click="loadAdmin">平台概览</el-button>
+              <el-button @click="loadAdminQueues">待处理数据</el-button>
+            </div>
           </div>
           <pre>{{ adminOutput }}</pre>
-        </div>
+        </article>
       </section>
     </section>
   </main>
@@ -94,31 +161,21 @@ import { ref } from 'vue';
 import { getData, postData } from './api/client';
 
 const activePortal = ref<'client' | 'admin'>('client');
-const clientOutput = ref('用户端：点击按钮联调本地接口。请先启动 Nacos、后端服务、AI 服务，再启动前端。');
-const adminOutput = ref('管理端：点击按钮查看审核、统计、账号和工单管理接口。');
+const clientOutput = ref('填写表单后提交，数据会通过本地后端保存。');
+const adminOutput = ref('管理端操作会真实修改状态并落盘。');
+const portalOptions = [{ label: '用户端', value: 'client' }, { label: '管理端', value: 'admin' }];
 
-const portalOptions = [
-  { label: '用户端', value: 'client' },
-  { label: '管理端', value: 'admin' }
-];
+const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
+const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
+const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
+const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善。' });
+const ticketForm = ref({ userId: 1, type: 'BUG', content: '这里填写使用中遇到的问题。' });
+const aiQuestion = ref('平台现在支持哪些核心功能？');
 
-const clientModules = [
-  { title: '知识库', owner: 'knowledge-service + ai-service', desc: '支持知识上传、检索、收藏、举报、转发和 AI 问答引用。', items: ['AI 问答', '知识存储', '检索浏览', '用户榜单'] },
-  { title: '论坛', owner: 'community-service', desc: '支持发帖、修改、评论、草稿暂存和帖子详情。', items: ['发帖', '草稿暂存', '评论互动', '帖子修改'] },
-  { title: '消息', owner: 'message-service + user-service', desc: '支持私信、通知、消息清理和用户关系动作。', items: ['私信聊天', '互动提醒', '关注关系', '清除记录'] },
-  { title: '广场', owner: 'community-service', desc: '只展示已关注用户动态，支持快捷评论和收藏。', items: ['关注信息流', '作者筛选', '内容跳转', '快捷互动'] },
-  { title: '个人中心', owner: 'user-service', desc: '提供个人资料、登录态、关注动作和后续个人内容入口。', items: ['个人信息', '登录注册', '关注操作', '账号状态'] },
-  { title: '用户反馈', owner: 'message-service', desc: '支持 FAQ、工单提交、工单列表和客服回复管理入口。', items: ['FAQ', '提交反馈', '工单记录', '处理进度'] }
-];
-
-const adminModules = [
-  { name: '知识库管理', scope: '资源审核、分类维护、AI 解析状态、违规举报处理', status: '已接入接口' },
-  { name: '论坛管理', scope: '帖子审核、评论管理、草稿追踪、广场互动管理', status: '已接入接口' },
-  { name: '消息互动管理', scope: '私信监管、互动提醒、聊天归档、消息清理', status: '已接入接口' },
-  { name: '平台数据统计', scope: '用户、知识、论坛、消息、反馈的本地统计汇总', status: '前端聚合' },
-  { name: '用户账号管理', scope: '资料审核、账号状态、社交关系、个人内容追踪', status: '已接入接口' },
-  { name: '工单反馈管理', scope: '客服配置、工单处理、进度跟踪、FAQ 维护', status: '已接入接口' }
-];
+const knowledgeAudit = ref({ fileId: 1, auditStatus: 'APPROVED', reason: '内容符合规范' });
+const postAudit = ref({ postId: 1, status: 'PUBLISHED', reason: '内容正常' });
+const userStatus = ref({ userId: 1, status: 'ACTIVE' });
+const ticketReply = ref({ ticketId: 3001, status: 'PROCESSING', reply: '已收到反馈，正在处理。' });
 
 function formatData(data: unknown) {
   return JSON.stringify(data, null, 2);
@@ -126,82 +183,91 @@ function formatData(data: unknown) {
 
 function formatError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return `请求失败：${message}\n\n请确认 start-nacos.bat 和 start-local.bat 已重新启动，旧服务窗口需要先关闭。`;
+  return `请求失败：${message}\n\n请确认 Nacos、后端、AI 服务和前端均已重新启动。`;
 }
 
 async function runClient(action: () => Promise<unknown>) {
   clientOutput.value = '请求中...';
-  try {
-    clientOutput.value = formatData(await action());
-  } catch (error) {
-    clientOutput.value = formatError(error);
-  }
+  try { clientOutput.value = formatData(await action()); } catch (error) { clientOutput.value = formatError(error); }
 }
 
 async function runAdmin(action: () => Promise<unknown>) {
   adminOutput.value = '请求中...';
-  try {
-    adminOutput.value = formatData(await action());
-  } catch (error) {
-    adminOutput.value = formatError(error);
-  }
+  try { adminOutput.value = formatData(await action()); } catch (error) { adminOutput.value = formatError(error); }
 }
 
-async function login() {
-  await runClient(() => postData('/user/login', { username: 'demo', password: 'demo' }));
+async function registerUser() {
+  await runClient(() => postData('/user/register', authForm.value));
+}
+
+async function loginUser() {
+  await runClient(() => postData('/user/login', { username: authForm.value.username, password: authForm.value.password }));
+}
+
+async function uploadKnowledge() {
+  await runClient(() => postData('/knowledge/upload', knowledgeForm.value));
 }
 
 async function loadKnowledge() {
   await runClient(async () => ({ files: await getData('/knowledge/list'), ranking: await getData('/knowledge/ranking') }));
 }
 
+async function createPost() {
+  await runClient(() => postData('/post/create', postForm.value));
+}
+
+async function createComment() {
+  await runClient(() => postData('/comment/create', commentForm.value));
+}
+
 async function loadFeed() {
   await runClient(() => getData('/square/feed'));
 }
 
-async function loadMessages() {
-  await runClient(async () => ({ notifications: await getData('/notification/list?userId=1'), messages: await getData('/message/list?sessionId=1') }));
-}
-
-async function askAi() {
-  await runClient(() => postData('/ai/chat', { question: '平台有哪些核心模块？', user_id: 1 }));
+async function createTicket() {
+  await runClient(() => postData('/feedback/ticket', ticketForm.value));
 }
 
 async function loadFeedback() {
   await runClient(async () => ({ faqs: await getData('/feedback/faqs'), tickets: await getData('/feedback/tickets?userId=1') }));
 }
 
-async function loadAdmin() {
-  await runAdmin(async () => {
-    const [users, knowledge, forum, messages, feedback] = await Promise.all([
-      getData('/user/admin/overview'),
-      getData('/knowledge/admin/overview'),
-      getData('/post/admin/overview'),
-      getData('/message/admin/overview?userId=1'),
-      getData('/feedback/admin/overview?userId=1')
-    ]);
-
-    return {
-      userAdmin: users,
-      knowledgeAdmin: knowledge,
-      forumAdmin: forum,
-      messageAdmin: messages,
-      feedbackAdmin: feedback,
-      statistics: { modules: 6, status: '本地 MVP 聚合统计已接入' }
-    };
-  });
+async function askAi() {
+  await runClient(() => postData('/ai/chat', { question: aiQuestion.value, user_id: 1 }));
 }
 
-async function loadAdminAudits() {
+async function loadAdmin() {
   await runAdmin(async () => ({
-    knowledgeAudit: await getData('/knowledge/admin/audit'),
-    forumAudit: await getData('/post/admin/audit'),
-    userStatus: await getData('/user/admin/status')
+    userAdmin: await getData('/user/admin/overview'),
+    knowledgeAdmin: await getData('/knowledge/admin/overview'),
+    forumAdmin: await getData('/post/admin/overview'),
+    messageAdmin: await getData('/message/admin/overview?userId=1'),
+    feedbackAdmin: await getData('/feedback/admin/overview?userId=1')
   }));
 }
 
-async function loadFeedbackAdmin() {
-  await runAdmin(() => getData('/feedback/admin/overview?userId=1'));
+async function loadAdminQueues() {
+  await runAdmin(async () => ({
+    knowledgeFiles: await getData('/knowledge/list'),
+    posts: await getData('/square/feed'),
+    tickets: await getData('/feedback/tickets')
+  }));
+}
+
+async function auditKnowledge() {
+  await runAdmin(() => postData('/knowledge/admin/audit', knowledgeAudit.value));
+}
+
+async function auditPost() {
+  await runAdmin(() => postData('/post/admin/audit', postAudit.value));
+}
+
+async function updateUserStatus() {
+  await runAdmin(() => postData('/user/admin/status', userStatus.value));
+}
+
+async function replyTicket() {
+  await runAdmin(() => postData('/feedback/admin/reply', ticketReply.value));
 }
 
 async function refreshClient() {
@@ -216,161 +282,27 @@ async function refreshAdmin() {
 </script>
 
 <style scoped>
-.shell {
-  min-height: 100vh;
-  padding: 32px;
-  background: #f5f7fb;
-  color: #1f2937;
-}
-
-.hero,
-.portal,
-.workspace,
-.panel,
-.console,
-.admin {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 28px;
-  align-items: center;
-}
-
-.hero h1,
-.portal-head h2 {
-  margin: 0;
-}
-
-.hero-actions,
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.summary {
-  max-width: 820px;
-  line-height: 1.7;
-  color: #4b5563;
-}
-
-.eyebrow {
-  margin: 0 0 8px;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.portal-switch {
-  display: flex;
-  justify-content: center;
-  margin: 22px 0;
-}
-
-.portal {
-  padding: 24px;
-}
-
-.portal-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.admin-head .eyebrow {
-  color: #059669;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-}
-
-.panel,
-.console,
-.admin {
-  padding: 18px;
-}
-
-.panel-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.panel h3,
-.console h2,
-.admin h2 {
-  margin: 0 0 12px;
-}
-
-.panel p {
-  color: #4b5563;
-  line-height: 1.6;
-}
-
-.panel ul {
-  margin: 12px 0 0;
-  padding-left: 18px;
-  color: #374151;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
-  gap: 18px;
-  margin-top: 18px;
-  padding: 18px;
-  background: #f9fafb;
-}
-
-.workspace.single {
-  grid-template-columns: 1fr;
-}
-
-pre {
-  min-height: 280px;
-  margin: 16px 0 0;
-  padding: 16px;
-  overflow: auto;
-  border-radius: 8px;
-  background: #111827;
-  color: #d1fae5;
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-
+.shell { min-height: 100vh; padding: 32px; background: #f5f7fb; color: #1f2937; }
+.hero, .portal, .card { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+.hero { display: flex; justify-content: space-between; gap: 24px; padding: 28px; align-items: center; }
+.hero h1, .portal-head h2, .card h3 { margin: 0; }
+.summary { max-width: 880px; line-height: 1.7; color: #4b5563; }
+.eyebrow { margin: 0 0 8px; color: #2563eb; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+.portal-switch { display: flex; justify-content: center; margin: 22px 0; }
+.portal { padding: 24px; }
+.portal-head, .card-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
+.portal-head { padding-bottom: 16px; border-bottom: 1px solid #e5e7eb; }
+.admin-head .eyebrow { color: #059669; }
+.hero-actions, .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.result-grid { margin-top: 16px; }
+.card { padding: 18px; }
+.wide { min-width: 0; }
+pre { min-height: 260px; margin: 16px 0 0; padding: 16px; overflow: auto; border-radius: 8px; background: #111827; color: #d1fae5; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+:deep(.el-select) { width: 100%; }
 @media (max-width: 900px) {
-  .shell {
-    padding: 18px;
-  }
-
-  .hero,
-  .portal-head,
-  .workspace {
-    display: block;
-  }
-
-  .hero-actions {
-    margin-top: 16px;
-  }
-
-  .console {
-    margin-top: 16px;
-  }
+  .shell { padding: 18px; }
+  .hero, .portal-head, .card-head { display: block; }
+  .hero-actions, .actions { margin-top: 16px; }
 }
 </style>
