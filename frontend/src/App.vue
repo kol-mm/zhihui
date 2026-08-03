@@ -70,9 +70,12 @@
             <div class="actions">
               <el-button type="primary" @click="createPost">发布帖子</el-button>
               <el-button @click="createComment">发表评论</el-button>
+              <el-button @click="saveDraft">保存草稿</el-button>
+              <el-button @click="collectPost">收藏帖子</el-button>
               <el-button @click="loadFeed">刷新广场</el-button>
               <el-button @click="loadPostDetail">查看详情</el-button>
               <el-button @click="loadComments">评论列表</el-button>
+              <el-button @click="loadDrafts">我的草稿</el-button>
             </div>
           </el-form>
         </article>
@@ -100,6 +103,22 @@
               <el-button type="primary" @click="createTicket">提交工单</el-button>
               <el-button @click="askAi">AI 问答</el-button>
               <el-button @click="loadFeedback">刷新反馈</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>消息中心</h3>
+          <el-form label-position="top">
+            <el-form-item label="会话 ID"><el-input-number v-model="messageForm.sessionId" :min="1" /></el-form-item>
+            <el-form-item label="发送人 ID"><el-input-number v-model="messageForm.senderId" :min="1" /></el-form-item>
+            <el-form-item label="消息内容"><el-input v-model="messageForm.content" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item label="通知用户 ID"><el-input-number v-model="notificationUserId" :min="1" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="sendMessage">发送消息</el-button>
+              <el-button @click="loadMessages">消息列表</el-button>
+              <el-button @click="clearMessages">清空会话</el-button>
+              <el-button @click="loadNotifications">通知列表</el-button>
             </div>
           </el-form>
         </article>
@@ -154,6 +173,57 @@
                 <small v-if="ticket.reply">回复：{{ ticket.reply }}</small>
               </div>
               <el-tag>{{ ticket.status }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>我的草稿</h3>
+            <el-tag>{{ postDrafts.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="postDrafts.length === 0" description="暂无草稿，保存草稿后显示" />
+          <div v-else class="item-list">
+            <div v-for="draft in postDrafts" :key="draft.id" class="list-item">
+              <div>
+                <strong>#{{ draft.id }} {{ draft.title }}</strong>
+                <p>{{ draft.content }}</p>
+              </div>
+              <el-tag>草稿</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>私信消息</h3>
+            <el-tag>{{ messages.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="messages.length === 0" description="暂无消息，发送或刷新会话后显示" />
+          <div v-else class="item-list">
+            <div v-for="message in messages" :key="message.id" class="list-item">
+              <div>
+                <strong>会话 #{{ message.sessionId }} · 用户 {{ message.senderId }}</strong>
+                <p>{{ message.content }}</p>
+              </div>
+              <el-tag>{{ message.status }}</el-tag>
+            </div>
+          </div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head">
+            <h3>通知提醒</h3>
+            <el-tag>{{ notifications.length }} 条</el-tag>
+          </div>
+          <el-empty v-if="notifications.length === 0" description="暂无通知，点击通知列表加载" />
+          <div v-else class="item-list">
+            <div v-for="notice in notifications" :key="notice.id" class="list-item">
+              <div>
+                <strong>{{ notice.title }}</strong>
+                <p>{{ notice.content }}</p>
+              </div>
+              <el-tag :type="notice.read ? 'info' : 'warning'">{{ notice.read ? '已读' : '未读' }}</el-tag>
             </div>
           </div>
         </article>
@@ -318,6 +388,30 @@ type Ticket = {
   reply?: string;
 };
 
+type PostDraft = {
+  id: number;
+  userId: number;
+  title: string;
+  content: string;
+};
+
+type ChatMessage = {
+  id: number;
+  sessionId: number;
+  senderId: number;
+  content: string;
+  status: string;
+};
+
+type Notice = {
+  id: number;
+  userId: number;
+  type: string;
+  title: string;
+  content: string;
+  read: boolean;
+};
+
 type KnowledgeReport = {
   id?: number;
   userId: number;
@@ -335,6 +429,9 @@ const portalOptions = [{ label: '用户端', value: 'client' }, { label: '管理
 const knowledgeFiles = ref<KnowledgeFile[]>([]);
 const feedPosts = ref<Post[]>([]);
 const tickets = ref<Ticket[]>([]);
+const postDrafts = ref<PostDraft[]>([]);
+const messages = ref<ChatMessage[]>([]);
+const notifications = ref<Notice[]>([]);
 const adminKnowledgeFiles = ref<KnowledgeFile[]>([]);
 const knowledgeReports = ref<KnowledgeReport[]>([]);
 const adminTickets = ref<Ticket[]>([]);
@@ -348,6 +445,8 @@ const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善�
 const detailPostId = ref(1);
 const followForm = ref({ userId: 1, targetUserId: 2 });
 const ticketForm = ref({ userId: 1, type: 'BUG', content: '这里填写使用中遇到的问题。' });
+const messageForm = ref({ sessionId: 1, senderId: 1, content: '你好，这是本地私信测试。' });
+const notificationUserId = ref(1);
 const aiQuestion = ref('平台现在支持哪些核心功能？');
 
 const knowledgeAudit = ref({ fileId: 1, auditStatus: 'APPROVED', reason: '内容符合规范' });
@@ -448,6 +547,29 @@ async function createComment() {
   await runClient(() => postData('/comment/create', commentForm.value));
 }
 
+async function saveDraft() {
+  await runClient(async () => {
+    const saved = await postData('/post/draft', {
+      userId: postForm.value.userId,
+      title: postForm.value.title,
+      content: postForm.value.content
+    });
+    await loadDrafts();
+    return saved;
+  });
+}
+
+async function loadDrafts() {
+  await runClient(async () => postDrafts.value = await getData<PostDraft[]>(`/post/drafts?userId=${postForm.value.userId}`));
+}
+
+async function collectPost() {
+  await runClient(() => postData('/square/collect', {
+    userId: postForm.value.userId,
+    postId: detailPostId.value
+  }));
+}
+
 async function loadPostDetail() {
   await runClient(() => getData(`/post/detail?id=${detailPostId.value}`));
 }
@@ -485,6 +607,30 @@ async function loadFeedback() {
     faqs: await getData('/feedback/faqs'),
     tickets: tickets.value = await getData<Ticket[]>('/feedback/tickets?userId=1')
   }));
+}
+
+async function sendMessage() {
+  await runClient(async () => {
+    const sent = await postData('/message/send', messageForm.value);
+    await loadMessages();
+    return sent;
+  });
+}
+
+async function loadMessages() {
+  await runClient(async () => messages.value = await getData<ChatMessage[]>(`/message/list?sessionId=${messageForm.value.sessionId}`));
+}
+
+async function clearMessages() {
+  await runClient(async () => {
+    const cleared = await postData('/message/clear', { sessionId: messageForm.value.sessionId });
+    await loadMessages();
+    return cleared;
+  });
+}
+
+async function loadNotifications() {
+  await runClient(async () => notifications.value = await getData<Notice[]>(`/notification/list?userId=${notificationUserId.value}`));
 }
 
 async function askAi() {
@@ -531,6 +677,9 @@ async function refreshClient() {
   await loadKnowledge();
   await loadFeed();
   await loadFeedback();
+  await loadDrafts();
+  await loadMessages();
+  await loadNotifications();
 }
 
 async function refreshAdmin() {
