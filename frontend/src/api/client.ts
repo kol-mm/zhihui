@@ -47,3 +47,12 @@ export async function postData<T>(url: string, payload: unknown): Promise<T> {
     throw toReadableError(url, error);
   }
 }
+
+export async function deleteData<T>(url: string, payload?: unknown): Promise<T> {
+  try {
+    const response = await api.delete(url, { data: payload });
+    return normalizeApiResponse<T>(url, response.data);
+  } catch (error) {
+    throw toReadableError(url, error);
+  }
+}

@@ -59,10 +59,26 @@
             <el-form-item label="内容"><el-input v-model="postForm.content" type="textarea" :rows="3" /></el-form-item>
             <el-form-item label="评论 Post ID"><el-input-number v-model="commentForm.postId" :min="1" /></el-form-item>
             <el-form-item label="评论内容"><el-input v-model="commentForm.content" /></el-form-item>
+            <el-form-item label="详情 / 评论列表 Post ID"><el-input-number v-model="detailPostId" :min="1" /></el-form-item>
             <div class="actions">
               <el-button type="primary" @click="createPost">发布帖子</el-button>
               <el-button @click="createComment">发表评论</el-button>
               <el-button @click="loadFeed">刷新广场</el-button>
+              <el-button @click="loadPostDetail">查看详情</el-button>
+              <el-button @click="loadComments">评论列表</el-button>
+            </div>
+          </el-form>
+        </article>
+
+        <article class="card">
+          <h3>用户关注</h3>
+          <el-form label-position="top">
+            <el-form-item label="当前用户 ID"><el-input-number v-model="followForm.userId" :min="1" /></el-form-item>
+            <el-form-item label="关注目标用户 ID"><el-input-number v-model="followForm.targetUserId" :min="1" /></el-form-item>
+            <div class="actions">
+              <el-button type="primary" @click="followUser">关注</el-button>
+              <el-button @click="unfollowUser">取消关注</el-button>
+              <el-button @click="loadFollows">关注列表</el-button>
             </div>
           </el-form>
         </article>
@@ -158,7 +174,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { getData, postData } from './api/client';
+import { deleteData, getData, postData } from './api/client';
 
 const activePortal = ref<'client' | 'admin'>('client');
 const clientOutput = ref('填写表单后提交，数据会通过本地后端保存。');
@@ -169,6 +185,8 @@ const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User'
 const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
 const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
 const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善。' });
+const detailPostId = ref(1);
+const followForm = ref({ userId: 1, targetUserId: 2 });
 const ticketForm = ref({ userId: 1, type: 'BUG', content: '这里填写使用中遇到的问题。' });
 const aiQuestion = ref('平台现在支持哪些核心功能？');
 
@@ -220,8 +238,28 @@ async function createComment() {
   await runClient(() => postData('/comment/create', commentForm.value));
 }
 
+async function loadPostDetail() {
+  await runClient(() => getData(`/post/detail?id=${detailPostId.value}`));
+}
+
+async function loadComments() {
+  await runClient(() => getData(`/comment/list?postId=${detailPostId.value}`));
+}
+
 async function loadFeed() {
   await runClient(() => getData('/square/feed'));
+}
+
+async function followUser() {
+  await runClient(() => postData('/user/follow', followForm.value));
+}
+
+async function unfollowUser() {
+  await runClient(() => deleteData('/user/follow', followForm.value));
+}
+
+async function loadFollows() {
+  await runClient(() => getData(`/user/follows?userId=${followForm.value.userId}`));
 }
 
 async function createTicket() {
