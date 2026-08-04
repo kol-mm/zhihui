@@ -18,6 +18,7 @@
     </section>
 
     <section v-if="activePortal === 'client'" class="portal">
+      <FeatureControls portal="client" />
       <div class="portal-head">
         <div>
           <p class="eyebrow">Client Portal</p>
@@ -257,6 +258,7 @@
     </section>
 
     <section v-else class="portal">
+      <FeatureControls portal="admin" />
       <div class="portal-head admin-head">
         <div>
           <p class="eyebrow">Admin Portal</p>
@@ -453,6 +455,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { deleteData, getData, postData, setAuthToken } from './api/client';
+import FeatureControls from './components/FeatureControls.vue';
 
 type KnowledgeFile = {
   id: number;

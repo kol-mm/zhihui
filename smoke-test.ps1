@@ -10,14 +10,18 @@ $ErrorActionPreference = "Stop"
 
 $checks = @(
   @{ Name = "user-service"; Url = "$Gateway/user/health" },
+  @{ Name = "user-relations"; Url = "$Gateway/user/blocks?userId=1" },
   @{ Name = "knowledge-list"; Url = "$Gateway/knowledge/list" },
   @{ Name = "knowledge-storage"; Url = "$Gateway/knowledge/storage/status" },
   @{ Name = "knowledge-search"; Url = "$Gateway/knowledge/search/status" },
   @{ Name = "square-feed"; Url = "$Gateway/square/feed" },
+  @{ Name = "following-feed"; Url = "$Gateway/square/following-feed?followedUserIds=1" },
   @{ Name = "message-list"; Url = "$Gateway/message/list?sessionId=1" },
+  @{ Name = "message-sessions"; Url = "$Gateway/message/sessions" },
   @{ Name = "event-bus"; Url = "$Gateway/event/status" },
   @{ Name = "feedback-faq"; Url = "$Gateway/feedback/faqs" },
   @{ Name = "ai-service"; Url = "$AiService/ai/health" },
+  @{ Name = "ai-history"; Url = "$AiService/ai/history?user_id=1" },
   @{ Name = "ai-vector"; Url = "$AiService/ai/vector/status" }
 )
 
