@@ -39,6 +39,17 @@ mvn.cmd -s maven-settings.xml -pl gateway spring-boot:run
 The limiter is disabled in the default local profile, so local development does not require Redis.
 Rate-limit keys use the authenticated token hash, or the remote IP for unauthenticated requests.
 
+Initialize and verify MySQL before starting the business services:
+
+```powershell
+$env:MYSQL_USERNAME = "root"
+$env:MYSQL_PASSWORD = "your-password"
+.\verify-mysql.ps1
+```
+
+The script is idempotent. It creates all databases and tables, preserves existing business data,
+and ensures the default `demo` and `admin` accounts and basic lookup data exist.
+
 ## Production secrets
 
 Set `AI_KNOWLEDGE_JWT_SECRET`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and

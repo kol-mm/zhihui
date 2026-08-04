@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS user_follow (id BIGINT PRIMARY KEY AUTO_INCREMENT, us
 CREATE TABLE IF NOT EXISTS user_block (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, blocked_user_id BIGINT NOT NULL, reason VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_block(user_id, blocked_user_id));
 CREATE TABLE IF NOT EXISTS user_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, reporter_id BIGINT NOT NULL, target_user_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) NOT NULL DEFAULT 'PENDING', result VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_user_report_status(status, created_at));
 CREATE TABLE IF NOT EXISTS user_behavior_log (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, behavior_type VARCHAR(32) NOT NULL, target_type VARCHAR(32) NOT NULL, target_id BIGINT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY idx_user_behavior(user_id, behavior_type, created_at));
+INSERT INTO user (id, username, password_hash, nickname, status)
+VALUES
+  (1, 'demo', '$2a$10$s.FoZgtcejwp0LTrreQ2oO7yrGQ8pgeBuaXyIQvGx1WbD1awva9Ja', 'Demo User', 'ACTIVE'),
+  (2, 'admin', '$2a$10$HpKsfL9ZMThcXh4e8zmZeOcgwyNea4eqc6mXVWwYVFHGNrj2bywkS', 'Local Admin', 'ACTIVE')
+ON DUPLICATE KEY UPDATE username = VALUES(username);
 
 USE knowledge_db;
 CREATE TABLE IF NOT EXISTS knowledge_category (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL, parent_id BIGINT DEFAULT 0, sort_no INT DEFAULT 0);
@@ -34,6 +39,9 @@ CREATE TABLE IF NOT EXISTS knowledge_like (id BIGINT PRIMARY KEY AUTO_INCREMENT,
 CREATE TABLE IF NOT EXISTS knowledge_download (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_download_file(file_id));
 CREATE TABLE IF NOT EXISTS knowledge_forward (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_forward_user(user_id, created_at));
 CREATE TABLE IF NOT EXISTS knowledge_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO knowledge_category (id, name, parent_id, sort_no)
+VALUES (1, 'Product', 0, 10), (2, 'Engineering', 0, 20), (3, 'Operations', 0, 30)
+ON DUPLICATE KEY UPDATE name = VALUES(name), sort_no = VALUES(sort_no);
 
 USE community_db;
 CREATE TABLE IF NOT EXISTS post (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, status VARCHAR(32) DEFAULT 'PUBLISHED', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_post_user(user_id, created_at));
@@ -49,6 +57,9 @@ CREATE TABLE IF NOT EXISTS chat_message (id BIGINT PRIMARY KEY AUTO_INCREMENT, s
 CREATE TABLE IF NOT EXISTS notification (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, is_read TINYINT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS feedback_ticket (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'PENDING', official_reply TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS faq (id BIGINT PRIMARY KEY AUTO_INCREMENT, question VARCHAR(255) NOT NULL, answer TEXT NOT NULL, sort_no INT DEFAULT 0, enabled TINYINT DEFAULT 1);
+INSERT INTO faq (id, question, answer, sort_no, enabled)
+VALUES (1, 'How do I upload knowledge?', 'Open the knowledge library and choose Upload.', 10, 1)
+ON DUPLICATE KEY UPDATE question = VALUES(question), answer = VALUES(answer), enabled = VALUES(enabled);
 
 USE ai_db;
 CREATE TABLE IF NOT EXISTS ai_chat_session (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255), created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
