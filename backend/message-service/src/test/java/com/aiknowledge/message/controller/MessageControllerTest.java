@@ -100,6 +100,28 @@ class MessageControllerTest {
     }
 
     @Test
+    void privateMessageCreatesRecipientNotificationThatCanBeRead() {
+        var session = controller.createSession(userAuth, Map.of("targetUserId", 7L));
+        Long sessionId = ((Number) session.data().get("id")).longValue();
+        controller.send(userAuth, Map.of("sessionId", sessionId, "content", "notification body"));
+
+        String recipientAuth = "Bearer " + LocalAuth.issueToken("recipient", 7L, "USER");
+        var notifications = controller.notifications(recipientAuth, 7L);
+        Map<String, Object> createdNotification = notifications.data().stream()
+                .filter(item -> "notification body".equals(item.get("content")))
+                .findFirst().orElseThrow();
+        assertEquals("MESSAGE", createdNotification.get("type"));
+        assertEquals(false, createdNotification.get("read"));
+
+        Long notificationId = ((Number) createdNotification.get("id")).longValue();
+        assertEquals(500, controller.markNotificationRead(userAuth, Map.of("notificationId", notificationId)).code());
+        assertEquals(0, controller.markNotificationRead(recipientAuth, Map.of("notificationId", notificationId)).code());
+        assertEquals(true, controller.notifications(recipientAuth, 7L).data().stream()
+                .filter(item -> notificationId.equals(item.get("id"))).findFirst().orElseThrow().get("read"));
+        assertEquals(0, controller.markAllNotificationsRead(recipientAuth).code());
+    }
+
+    @Test
     void adminCanCreateAndDeleteFaq() {
         String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
         var created = controller.saveFaq(auth, Map.of("question", "How?", "answer", "Locally", "sortNo", 2));
@@ -122,5 +144,16 @@ class MessageControllerTest {
         assertEquals(0, tickets.code());
         assertFalse(tickets.data().isEmpty());
         assertEquals("button is not clickable", tickets.data().get(0).get("content"));
+
+        Long ticketId = ((Number) created.data().get("id")).longValue();
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin");
+        assertEquals(0, controller.replyTicket(adminAuth, Map.of(
+                "ticketId", ticketId,
+                "status", "RESOLVED",
+                "reply", "The button has been fixed."
+        )).code());
+        assertEquals(true, controller.notifications(userAuth, 1L).data().stream()
+                .anyMatch(item -> "FEEDBACK".equals(item.get("type"))
+                        && "The button has been fixed.".equals(item.get("content"))));
     }
 }

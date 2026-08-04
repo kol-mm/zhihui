@@ -162,6 +162,34 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public NotificationEntity saveNotification(NotificationEntity notification) {
+        notification.setId(notificationIds.incrementAndGet());
+        notification.setIsRead(0);
+        notification.setCreatedAt(LocalDateTime.now());
+        notifications.add(notification);
+        persist();
+        return notification;
+    }
+
+    @Override
+    public Optional<NotificationEntity> markNotificationRead(Long userId, Long notificationId) {
+        Optional<NotificationEntity> found = notifications.stream()
+                .filter(item -> item.getId().equals(notificationId) && item.getUserId().equals(userId))
+                .findFirst();
+        found.ifPresent(item -> { item.setIsRead(1); persist(); });
+        return found;
+    }
+
+    @Override
+    public int markAllNotificationsRead(Long userId) {
+        int[] count = {0};
+        notifications.stream().filter(item -> item.getUserId().equals(userId) && (item.getIsRead() == null || item.getIsRead() == 0))
+                .forEach(item -> { item.setIsRead(1); count[0]++; });
+        if (count[0] > 0) persist();
+        return count[0];
+    }
+
+    @Override
     public List<FaqEntity> listFaqs() {
         return faqs.stream()
                 .filter(faq -> faq.getEnabled() == null || faq.getEnabled() == 1)

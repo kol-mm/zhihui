@@ -56,6 +56,13 @@ public class MessageController {
         message.setContent(content);
         message.setStatus("NORMAL");
         ChatMessageEntity saved = messageStore.sendMessage(message);
+        Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
+        NotificationEntity notification = new NotificationEntity();
+        notification.setUserId(recipientId);
+        notification.setType("MESSAGE");
+        notification.setTitle("收到新的私信");
+        notification.setContent(content);
+        messageStore.saveNotification(notification);
         eventBus.publish("MESSAGE_SENT", String.valueOf(saved.getId()), Map.of(
                 "sessionId", saved.getSessionId(),
                 "senderId", saved.getSenderId(),
@@ -166,6 +173,28 @@ public class MessageController {
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
         return ApiResponse.ok(messageStore.listNotifications(userId).stream().map(this::toNotificationView).toList());
+    }
+
+    @PostMapping("/notification/read")
+    public ApiResponse<Map<String, Object>> markNotificationRead(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long notificationId = number(request.get("notificationId"), 0L);
+        return messageStore.markNotificationRead(userId, notificationId)
+                .map(item -> ApiResponse.ok(Map.of("notification", toNotificationView(item), "updated", true)))
+                .orElseGet(() -> ApiResponse.fail("notification not found"));
+    }
+
+    @PostMapping("/notification/read-all")
+    public ApiResponse<Map<String, Object>> markAllNotificationsRead(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        return ApiResponse.ok(Map.of("updated", messageStore.markAllNotificationsRead(userId)));
     }
 
     @GetMapping("/feedback/faqs")
@@ -282,6 +311,12 @@ public class MessageController {
         String reply = String.valueOf(request.getOrDefault("reply", ""));
         return messageStore.replyTicket(ticketId, status, reply)
                 .map(ticket -> {
+                    NotificationEntity notification = new NotificationEntity();
+                    notification.setUserId(ticket.getUserId());
+                    notification.setType("FEEDBACK");
+                    notification.setTitle("工单有新的处理结果");
+                    notification.setContent(ticket.getOfficialReply() == null ? "你的工单状态已更新。" : ticket.getOfficialReply());
+                    messageStore.saveNotification(notification);
                     eventBus.publish("FEEDBACK_TICKET_REPLIED", String.valueOf(ticket.getId()), Map.of(
                             "status", ticket.getStatus(),
                             "hasReply", ticket.getOfficialReply() != null && !ticket.getOfficialReply().isBlank()

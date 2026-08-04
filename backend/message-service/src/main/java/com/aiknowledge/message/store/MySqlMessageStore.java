@@ -109,6 +109,30 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override
+    public NotificationEntity saveNotification(NotificationEntity notification) {
+        notificationMapper.insert(notification);
+        return notification;
+    }
+
+    @Override
+    public Optional<NotificationEntity> markNotificationRead(Long userId, Long notificationId) {
+        NotificationEntity notification = notificationMapper.selectOne(Wrappers.<NotificationEntity>lambdaQuery()
+                .eq(NotificationEntity::getId, notificationId).eq(NotificationEntity::getUserId, userId));
+        if (notification == null) return Optional.empty();
+        notification.setIsRead(1);
+        notificationMapper.updateById(notification);
+        return Optional.of(notification);
+    }
+
+    @Override
+    public int markAllNotificationsRead(Long userId) {
+        NotificationEntity update = new NotificationEntity();
+        update.setIsRead(1);
+        return notificationMapper.update(update, Wrappers.<NotificationEntity>lambdaUpdate()
+                .eq(NotificationEntity::getUserId, userId).eq(NotificationEntity::getIsRead, 0));
+    }
+
+    @Override
     public List<FaqEntity> listFaqs() {
         return faqMapper.selectList(Wrappers.<FaqEntity>lambdaQuery()
                 .eq(FaqEntity::getEnabled, 1)

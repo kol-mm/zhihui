@@ -28,6 +28,12 @@ public interface MessageStore {
 
     List<NotificationEntity> listNotifications(Long userId);
 
+    NotificationEntity saveNotification(NotificationEntity notification);
+
+    Optional<NotificationEntity> markNotificationRead(Long userId, Long notificationId);
+
+    int markAllNotificationsRead(Long userId);
+
     List<FaqEntity> listFaqs();
 
     FaqEntity saveFaq(FaqEntity faq);
