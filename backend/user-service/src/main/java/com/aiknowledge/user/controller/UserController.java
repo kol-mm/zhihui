@@ -4,6 +4,10 @@ import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.store.UserStore;
+import com.aiknowledge.user.storage.UserAvatarStorageService;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -23,15 +29,50 @@ import java.util.Map;
 public class UserController {
     private final UserStore userStore;
     private final PasswordEncoder passwordEncoder;
+    private final UserAvatarStorageService avatarStorage;
 
-    public UserController(UserStore userStore, PasswordEncoder passwordEncoder) {
+    @Autowired
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage) {
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
+        this.avatarStorage = avatarStorage;
+    }
+
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder) {
+        this(userStore, passwordEncoder, new UserAvatarStorageService("local", "../data/user-avatars",
+                "http://127.0.0.1:9000", "ai-user-avatar", "aiknowledge", "ai-knowledge-local-change-me"));
     }
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
         return ApiResponse.ok(Map.of("service", "user-service", "time", Instant.now().toString()));
+    }
+
+    @PostMapping(value = "/avatar/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<Map<String, Object>> uploadAvatar(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam("file") MultipartFile file
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        try {
+            String avatarUrl = avatarStorage.save(file.getBytes());
+            return userStore.findById(userId)
+                    .flatMap(user -> userStore.updateProfile(userId, user.getNickname(), avatarUrl, user.getSignature()))
+                    .map(user -> ApiResponse.ok(toView(user)))
+                    .orElseGet(() -> ApiResponse.fail("user not found"));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        } catch (Exception error) {
+            return ApiResponse.fail("avatar upload failed: " + error.getMessage());
+        }
+    }
+
+    @GetMapping("/avatar/{token}")
+    public ResponseEntity<byte[]> avatar(@PathVariable String token) {
+        UserAvatarStorageService.StoredAvatar avatar = avatarStorage.read(token);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(avatar.contentType()))
+                .contentLength(avatar.bytes().length).body(avatar.bytes());
     }
 
     @PostMapping("/register")

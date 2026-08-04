@@ -10,3 +10,13 @@ spring:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+
+user:
+  avatar:
+    storage-mode: ${USER_AVATAR_STORAGE_MODE:${KNOWLEDGE_STORAGE_MODE:local}}
+    local-root: ../data/user-avatars
+    minio:
+      endpoint: http://127.0.0.1:9000
+      bucket: ai-user-avatar
+      access-key: ${MINIO_ACCESS_KEY:aiknowledge}
+      secret-key: ${MINIO_SECRET_KEY:ai-knowledge-local-change-me}

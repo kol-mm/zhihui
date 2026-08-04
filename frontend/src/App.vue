@@ -47,7 +47,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div class="user-avatar">{{ displayName.slice(0, 1).toUpperCase() }}</div>
+        <div class="user-avatar"><img v-if="avatarUrl" :src="resolveApiUrl(avatarUrl)" alt="avatar" /><span v-else>{{ displayName.slice(0, 1).toUpperCase() }}</span></div>
         <div><strong>{{ displayName }}</strong><span>{{ role === 'ADMIN' ? '平台管理员' : '社区用户' }}</span></div>
         <el-button :icon="SwitchButton" circle text title="退出登录" @click="logout" />
       </div>
@@ -59,6 +59,7 @@
         <el-button class="menu-button" :icon="Menu" circle text title="打开导航" @click="mobileMenuOpen = true" />
         <div><p>{{ portal === 'admin' ? '运营管理' : '知识社区' }}</p><h2>{{ currentTitle }}</h2></div>
         <div class="topbar-actions">
+          <el-upload v-if="portal === 'client' && activeView === 'profile'" :show-file-list="false" :auto-upload="false" accept="image/jpeg,image/png,image/gif,image/webp" :on-change="handleAvatarFile"><el-button :icon="Upload">上传头像</el-button></el-upload>
           <el-input v-if="portal === 'client'" v-model="globalSearch" class="global-search" placeholder="搜索知识与内容" :prefix-icon="Search" clearable @keyup.enter="runGlobalSearch" />
           <el-button :icon="Refresh" circle title="刷新当前数据" @click="refreshCurrentView" />
         </div>
@@ -217,6 +218,7 @@ const authenticated = ref(Boolean(getAuthToken()));
 const busy = ref(false); const aiBusy = ref(false); const mobileMenuOpen = ref(false);
 const username = ref(localStorage.getItem('ai-knowledge-username') || '');
 const displayName = ref(localStorage.getItem('ai-knowledge-name') || username.value || '用户');
+const avatarUrl = ref(localStorage.getItem('ai-knowledge-avatar') || '');
 const role = ref(localStorage.getItem('ai-knowledge-role') || 'USER');
 const currentUserId = ref(Number(localStorage.getItem('ai-knowledge-user-id') || 1));
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
@@ -286,7 +288,7 @@ async function registerAccount(){
   finally{ busy.value=false; }
 }
 
-async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await refreshCurrentView(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
+async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await refreshCurrentView(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await refreshCurrentView();}catch{logout();}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
@@ -339,7 +341,8 @@ async function loadAiHistory(){const history=await getData<{sessions:AiSession[]
 async function loadAiSession(id:number){aiSessionId.value=id;const history=await getData<{messages:{role:'user'|'assistant';content:string}[]}>(`/ai/history?user_id=${currentUserId.value}&session_id=${id}`);aiMessages.value=history.messages;}
 
 async function loadProfile(){const [user,follows,blocks,history,directory]=await Promise.all([getData<UserRecord>(`/user/info?username=${username.value}`),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`),getData<{blockedUserIds:number[]}>(`/user/blocks?userId=${currentUserId.value}`),getData<BehaviorRecord[]>(`/user/behaviors?userId=${currentUserId.value}`),getData<UserRecord[]>('/user/directory')]);profileForm.value={userId:user.id,nickname:user.nickname,avatarUrl:user.avatarUrl||'',signature:user.signature||''};displayName.value=user.nickname;followData.value=follows;blockedUserIds.value=blocks.blockedUserIds;behaviors.value=history.slice(-30).reverse();directoryUsers.value=directory.filter(item=>item.id!==currentUserId.value);if(!directoryUsers.value.some(item=>item.id===relationForm.value.targetUserId))relationForm.value.targetUserId=directoryUsers.value[0]?.id||0;await loadDrafts();await loadFeedback();await loadMyKnowledge();}
-async function saveProfile(){const user=await postData<UserRecord>('/user/profile',profileForm.value);displayName.value=user.nickname;localStorage.setItem('ai-knowledge-name',user.nickname);ElMessage.success('资料已保存');}
+async function saveProfile(){const user=await postData<UserRecord>('/user/profile',profileForm.value);displayName.value=user.nickname;avatarUrl.value=user.avatarUrl||'';localStorage.setItem('ai-knowledge-name',user.nickname);localStorage.setItem('ai-knowledge-avatar',avatarUrl.value);ElMessage.success('资料已保存');}
+async function handleAvatarFile(file: UploadFile){const raw=file.raw as UploadRawFile|undefined;if(!raw)return;const form=new FormData();form.append('file',raw);try{const user=await postFormData<UserRecord>('/user/avatar/upload',form);profileForm.value.avatarUrl=user.avatarUrl||'';avatarUrl.value=user.avatarUrl||'';localStorage.setItem('ai-knowledge-avatar',avatarUrl.value);ElMessage.success('头像已更新');}catch(error){notifyError(error);}}
 async function recordBehavior(action:string,targetType:string,targetId:number){await postData('/user/behavior',{userId:currentUserId.value,action,targetType,targetId});}
 async function followUser(){await postData('/user/follow',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已关注用户');}
 async function unfollowUser(){await deleteData('/user/follow',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已取消关注');}
