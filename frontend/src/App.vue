@@ -124,7 +124,7 @@
                 </article>
                 <el-empty v-if="!feedPosts.length" description="还没有动态，发布第一条帖子吧" />
               </section>
-              <aside class="surface community-side"><h3>我的创作</h3><button @click="loadDrafts"><Document />草稿箱<span>{{ drafts.length }}</span></button><button @click="loadMyPosts"><EditPen />我的帖子<ArrowRight /></button><h3>社区提示</h3><p>尊重原创，理性交流。发现不当内容可通过举报交由管理员处理。</p></aside>
+              <aside class="surface community-side"><h3>我的创作</h3><button @click="openDrafts"><Document />草稿箱<span>{{ drafts.length }}</span></button><button @click="loadMyPosts"><EditPen />我的帖子<ArrowRight /></button><h3>社区提示</h3><p>尊重原创，理性交流。发现不当内容可通过举报交由管理员处理。</p></aside>
             </div>
           </section>
 
@@ -181,6 +181,7 @@
       </el-tabs>
       <template #footer><el-button :icon="Refresh" @click="loadGovernance">刷新数据</el-button><el-button type="primary" @click="governanceDialog = false">完成</el-button></template>
     </el-dialog>
+    <el-dialog v-model="notificationsDialog" title="通知中心" width="min(620px, 92vw)"><div class="notification-list"><article v-for="notice in notifications" :key="notice.id"><span class="notification-symbol"><Bell /></span><div><strong>{{ notice.title }}</strong><p>{{ notice.content }}</p><small>{{ notice.type || 'SYSTEM' }} · {{ formatDate(notice.createdAt || '') }}</small></div><el-tag :type="notice.read ? 'info' : 'success'" size="small">{{ notice.read ? '已读' : '新通知' }}</el-tag></article><el-empty v-if="!notifications.length" description="暂无通知" /></div><template #footer><el-button :icon="Refresh" @click="openNotifications">刷新</el-button><el-button type="primary" @click="notificationsDialog = false">关闭</el-button></template></el-dialog>
   </div>
 </template>
 
@@ -195,7 +196,7 @@ type Post = { id:number; userId:number; title:string; content:string; status:str
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string };
 type ChatMessage = { id:number; sessionId:number; senderId:number; content:string; status:string };
-type Notice = { id:number; title:string; content:string; read:boolean };
+type Notice = { id:number; type?:string; title:string; content:string; read:boolean; createdAt?:string };
 type Draft = { id:number; title:string; content:string; userId:number };
 type Report = { id:number; fileId?:number; targetUserId?:number; reason:string; status:string };
 type Faq = { id:number; question:string; answer:string; sortNo:number };
@@ -216,7 +217,7 @@ const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client'
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
 const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const adminUserKeyword = ref('');
 const feedMode = ref<'all'|'following'>('all'); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
-const knowledgeDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false);
+const knowledgeDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false);
 
 const loginForm = ref({ username:'demo', password:'demo' });
 const registerForm = ref({ username:'', nickname:'', password:'' });
@@ -240,9 +241,9 @@ const aiQuestion = ref(''); const aiMessages = ref<{role:'user'|'assistant';cont
 const selectedPost = ref<Post>(); const comments = ref<Comment[]>([]); const commentText = ref('');
 const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
 
-const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'community',label:'社区广场',icon:markRaw(ChatDotRound)},{key:'messages',label:'消息中心',icon:markRaw(Message),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
+const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'community',label:'社区广场',icon:markRaw(ChatDotRound)},{key:'messages',label:'消息中心',icon:markRaw(Message)},{key:'notifications',label:'通知中心',icon:markRaw(Bell),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
 const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与 FAQ',icon:markRaw(Tickets)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
-const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigation : clientNavigation.map(item => item.key === 'messages' ? {...item,badge:notifications.value.length || 0} : item));
+const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigation : clientNavigation.map(item => item.key === 'notifications' ? {...item,badge:notifications.value.filter(notice=>!notice.read).length || 0} : item));
 const currentTitle = computed(() => currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
 const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
@@ -272,7 +273,7 @@ async function login(){ busy.value=true; try { const result=await postData<{toke
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
 function switchPortal(value:'client'|'admin'){ portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
-function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
+function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;openNotifications();return;} activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
 async function refreshCurrentView(){ try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ notifyError(error); } }
 async function runGlobalSearch(){ activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
@@ -290,6 +291,7 @@ async function loadFeed(mode:'all'|'following'=feedMode.value){ feedMode.value=m
 async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.content.trim()){ElMessage.warning('请填写标题和正文');return;} busy.value=true;try{await postData('/post/create',{...postForm.value,imageUrls:postForm.value.images.split('\n').map(v=>v.trim()).filter(Boolean).slice(0,9)});postDialog.value=false;postForm.value.title='';postForm.value.content='';postForm.value.images='';await loadFeed();ElMessage.success('帖子已发布');}catch(error){notifyError(error);}finally{busy.value=false;} }
 async function saveDraft(){ await postData('/post/draft',{userId:currentUserId.value,title:postForm.value.title||'未命名草稿',content:postForm.value.content});postDialog.value=false;await loadDrafts();ElMessage.success('草稿已保存'); }
 async function loadDrafts(){ drafts.value=await getData(`/post/drafts?userId=${currentUserId.value}`); }
+async function openDrafts(){activeView.value='profile';await loadProfile();}
 async function loadMyPosts(){ feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`); }
 async function likePost(post:Post){ await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);await loadFeed(); }
 async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
@@ -297,6 +299,7 @@ async function openComments(post:Post){ selectedPost.value=post;comments.value=a
 async function createComment(){ if(!commentText.value.trim()||!selectedPost.value)return;await postData('/comment/create',{postId:selectedPost.value.id,userId:currentUserId.value,content:commentText.value});commentText.value='';await openComments(selectedPost.value);ElMessage.success('评论已发布'); }
 
 async function loadMessageData(){ sessions.value=await getData('/message/sessions');notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);if(sessions.value.length&&!sessions.value.includes(messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0];await loadMessages(); }
+async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
 async function openSession(session:number){messageForm.value.sessionId=session;await loadMessages();}
 async function loadMessages(){messages.value=await getData(`/message/list?sessionId=${messageForm.value.sessionId}`);}
 function newConversation(){messageForm.value.sessionId=(sessions.value[sessions.value.length-1]||0)+1;messages.value=[];}
