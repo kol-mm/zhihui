@@ -279,6 +279,28 @@ public class MessageController {
         ));
     }
 
+    @GetMapping("/message/admin/sessions")
+    public ApiResponse<List<Map<String, Object>>> adminSessions(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        return ApiResponse.ok(messageStore.listSessions(null).stream().map(session -> {
+            Map<String, Object> view = toSessionView(session, session.getUserAId());
+            view.put("messageCount", messageStore.listMessages(session.getId()).size());
+            return view;
+        }).toList());
+    }
+
+    @GetMapping("/message/admin/list")
+    public ApiResponse<List<Map<String, Object>>> adminMessages(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam Long sessionId
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        if (messageStore.findSession(sessionId).isEmpty()) return ApiResponse.fail("chat session not found");
+        return ApiResponse.ok(messageStore.listMessages(sessionId).stream().map(this::toMessageView).toList());
+    }
+
     @GetMapping("/feedback/admin/overview")
     public ApiResponse<Map<String, Object>> feedbackAdminOverview(
             @RequestHeader(name = "Authorization", required = false) String authorization,

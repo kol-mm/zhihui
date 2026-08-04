@@ -110,7 +110,7 @@ public class InMemoryMessageStore implements MessageStore {
     @Override
     public List<ChatSessionEntity> listSessions(Long userId) {
         return sessions.stream()
-                .filter(session -> session.getUserAId().equals(userId) || session.getUserBId().equals(userId))
+                .filter(session -> userId == null || session.getUserAId().equals(userId) || session.getUserBId().equals(userId))
                 .sorted(Comparator.comparing(ChatSessionEntity::getUpdatedAt).reversed())
                 .toList();
     }

@@ -67,7 +67,7 @@ public class MySqlMessageStore implements MessageStore {
     @Override
     public List<ChatSessionEntity> listSessions(Long userId) {
         return sessionMapper.selectList(Wrappers.<ChatSessionEntity>lambdaQuery()
-                .and(query -> query.eq(ChatSessionEntity::getUserAId, userId)
+                .and(userId != null, query -> query.eq(ChatSessionEntity::getUserAId, userId)
                         .or().eq(ChatSessionEntity::getUserBId, userId))
                 .orderByDesc(ChatSessionEntity::getUpdatedAt));
     }
