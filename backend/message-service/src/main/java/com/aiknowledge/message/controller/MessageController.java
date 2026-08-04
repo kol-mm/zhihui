@@ -3,6 +3,7 @@ package com.aiknowledge.message.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.message.entity.ChatMessageEntity;
+import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
@@ -38,10 +39,17 @@ public class MessageController {
 
     @PostMapping("/message/send")
     public ApiResponse<Map<String, Object>> send(@RequestBody Map<String, Object> request) {
+        Long sessionId = number(request.get("sessionId"), 0L);
+        Long senderId = number(request.get("senderId"), 0L);
+        String content = String.valueOf(request.getOrDefault("content", "")).trim();
+        ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+        if (session == null) return ApiResponse.fail("chat session not found");
+        if (!isParticipant(session, senderId)) return ApiResponse.fail("user is not a participant of this session");
+        if (content.isBlank()) return ApiResponse.fail("message content is required");
         ChatMessageEntity message = new ChatMessageEntity();
-        message.setSessionId(number(request.get("sessionId"), 1L));
-        message.setSenderId(number(request.get("senderId"), 1L));
-        message.setContent(String.valueOf(request.getOrDefault("content", "")));
+        message.setSessionId(sessionId);
+        message.setSenderId(senderId);
+        message.setContent(content);
         message.setStatus("NORMAL");
         ChatMessageEntity saved = messageStore.sendMessage(message);
         eventBus.publish("MESSAGE_SENT", String.valueOf(saved.getId()), Map.of(
@@ -52,14 +60,43 @@ public class MessageController {
         return ApiResponse.ok(toMessageView(saved));
     }
 
+    @PostMapping("/message/session")
+    public ApiResponse<Map<String, Object>> createSession(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 0L);
+        Long targetUserId = number(request.get("targetUserId"), 0L);
+        if (userId <= 0 || targetUserId <= 0) return ApiResponse.fail("both users are required");
+        if (userId.equals(targetUserId)) return ApiResponse.fail("cannot create a private chat with yourself");
+        return ApiResponse.ok(toSessionView(messageStore.getOrCreateSession(userId, targetUserId), userId));
+    }
+
     @GetMapping("/message/list")
-    public ApiResponse<List<Map<String, Object>>> list(@RequestParam(name = "sessionId", defaultValue = "1") Long sessionId) {
+    public ApiResponse<List<Map<String, Object>>> list(
+            @RequestParam(name = "sessionId", defaultValue = "1") Long sessionId,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+        if (session == null) return ApiResponse.ok(List.of());
+        if (!isParticipant(session, userId)) return ApiResponse.fail("user is not a participant of this session");
         return ApiResponse.ok(messageStore.listMessages(sessionId).stream().map(this::toMessageView).toList());
     }
 
     @PostMapping("/message/clear")
-    public ApiResponse<Map<String, Object>> clear(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> clear(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
         Long sessionId = request.containsKey("sessionId") ? number(request.get("sessionId"), null) : null;
+        Long userId = number(request.get("userId"), 0L);
+        if (sessionId == null && !LocalAuth.isAdmin(authorization)) {
+            return ApiResponse.fail("admin authorization is required to clear all messages");
+        }
+        if (sessionId != null) {
+            ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+            if (session == null) return ApiResponse.fail("chat session not found");
+            if (!isParticipant(session, userId) && !LocalAuth.isAdmin(authorization)) {
+                return ApiResponse.fail("user is not a participant of this session");
+            }
+        }
         int removed = messageStore.clearMessages(sessionId);
         eventBus.publish("MESSAGE_CLEARED", sessionId == null ? "ALL" : String.valueOf(sessionId), Map.of("removed", removed));
         return ApiResponse.ok(Map.of("sessionId", sessionId == null ? "ALL" : sessionId, "removed", removed));
@@ -68,14 +105,24 @@ public class MessageController {
     @DeleteMapping("/message")
     public ApiResponse<Map<String, Object>> deleteMessage(@RequestBody Map<String, Object> request) {
         Long messageId = number(request.get("messageId"), 0L);
+        Long userId = number(request.get("userId"), 0L);
+        ChatMessageEntity message = messageStore.findMessage(messageId).orElse(null);
+        if (message == null) return ApiResponse.ok(Map.of("messageId", messageId, "removed", false));
+        ChatSessionEntity session = messageStore.findSession(message.getSessionId()).orElse(null);
+        if (session == null || !isParticipant(session, userId)) {
+            return ApiResponse.fail("user is not a participant of this session");
+        }
         boolean removed = messageStore.deleteMessage(messageId);
         if (removed) eventBus.publish("MESSAGE_DELETED", String.valueOf(messageId), Map.of("removed", true));
         return ApiResponse.ok(Map.of("messageId", messageId, "removed", removed));
     }
 
     @GetMapping("/message/sessions")
-    public ApiResponse<List<Long>> sessions() {
-        return ApiResponse.ok(messageStore.listSessionIds());
+    public ApiResponse<List<Map<String, Object>>> sessions(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ApiResponse.ok(messageStore.listSessions(userId).stream()
+                .map(session -> toSessionView(session, userId)).toList());
     }
 
     @GetMapping("/event/status")
@@ -224,6 +271,24 @@ public class MessageController {
         view.put("status", message.getStatus());
         view.put("createdAt", message.getCreatedAt());
         return view;
+    }
+
+    private Map<String, Object> toSessionView(ChatSessionEntity session, Long userId) {
+        List<ChatMessageEntity> messages = messageStore.listMessages(session.getId());
+        ChatMessageEntity latest = messages.isEmpty() ? null : messages.get(messages.size() - 1);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", session.getId());
+        view.put("userAId", session.getUserAId());
+        view.put("userBId", session.getUserBId());
+        view.put("otherUserId", session.getUserAId().equals(userId) ? session.getUserBId() : session.getUserAId());
+        view.put("status", session.getStatus());
+        view.put("updatedAt", session.getUpdatedAt());
+        view.put("lastMessage", latest == null ? "" : latest.getContent());
+        return view;
+    }
+
+    private boolean isParticipant(ChatSessionEntity session, Long userId) {
+        return userId != null && (userId.equals(session.getUserAId()) || userId.equals(session.getUserBId()));
     }
 
     private Map<String, Object> toNotificationView(NotificationEntity notification) {

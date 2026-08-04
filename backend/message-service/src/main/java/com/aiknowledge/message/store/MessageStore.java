@@ -1,6 +1,7 @@
 package com.aiknowledge.message.store;
 
 import com.aiknowledge.message.entity.ChatMessageEntity;
+import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
@@ -9,6 +10,12 @@ import java.util.List;
 import java.util.Optional;
 
 public interface MessageStore {
+    ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId);
+
+    Optional<ChatSessionEntity> findSession(Long sessionId);
+
+    List<ChatSessionEntity> listSessions(Long userId);
+
     ChatMessageEntity sendMessage(ChatMessageEntity message);
 
     List<ChatMessageEntity> listMessages(Long sessionId);
@@ -17,7 +24,7 @@ public interface MessageStore {
 
     boolean deleteMessage(Long messageId);
 
-    List<Long> listSessionIds();
+    Optional<ChatMessageEntity> findMessage(Long messageId);
 
     List<NotificationEntity> listNotifications(Long userId);
 

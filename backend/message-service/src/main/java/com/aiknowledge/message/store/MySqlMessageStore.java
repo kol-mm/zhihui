@@ -1,10 +1,12 @@
 package com.aiknowledge.message.store;
 
 import com.aiknowledge.message.entity.ChatMessageEntity;
+import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.mapper.ChatMessageMapper;
+import com.aiknowledge.message.mapper.ChatSessionMapper;
 import com.aiknowledge.message.mapper.FaqMapper;
 import com.aiknowledge.message.mapper.FeedbackTicketMapper;
 import com.aiknowledge.message.mapper.NotificationMapper;
@@ -20,25 +22,64 @@ import java.util.Optional;
 @Profile("mysql")
 public class MySqlMessageStore implements MessageStore {
     private final ChatMessageMapper messageMapper;
+    private final ChatSessionMapper sessionMapper;
     private final NotificationMapper notificationMapper;
     private final FeedbackTicketMapper ticketMapper;
     private final FaqMapper faqMapper;
 
     public MySqlMessageStore(
             ChatMessageMapper messageMapper,
+            ChatSessionMapper sessionMapper,
             NotificationMapper notificationMapper,
             FeedbackTicketMapper ticketMapper,
             FaqMapper faqMapper
     ) {
         this.messageMapper = messageMapper;
+        this.sessionMapper = sessionMapper;
         this.notificationMapper = notificationMapper;
         this.ticketMapper = ticketMapper;
         this.faqMapper = faqMapper;
     }
 
     @Override
+    public ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId) {
+        Long userAId = Math.min(firstUserId, secondUserId);
+        Long userBId = Math.max(firstUserId, secondUserId);
+        ChatSessionEntity existing = sessionMapper.selectOne(Wrappers.<ChatSessionEntity>lambdaQuery()
+                .eq(ChatSessionEntity::getUserAId, userAId)
+                .eq(ChatSessionEntity::getUserBId, userBId)
+                .last("LIMIT 1"));
+        if (existing != null) return existing;
+        ChatSessionEntity session = new ChatSessionEntity();
+        session.setUserAId(userAId);
+        session.setUserBId(userBId);
+        session.setStatus("ACTIVE");
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionMapper.insert(session);
+        return session;
+    }
+
+    @Override
+    public Optional<ChatSessionEntity> findSession(Long sessionId) {
+        return Optional.ofNullable(sessionMapper.selectById(sessionId));
+    }
+
+    @Override
+    public List<ChatSessionEntity> listSessions(Long userId) {
+        return sessionMapper.selectList(Wrappers.<ChatSessionEntity>lambdaQuery()
+                .and(query -> query.eq(ChatSessionEntity::getUserAId, userId)
+                        .or().eq(ChatSessionEntity::getUserBId, userId))
+                .orderByDesc(ChatSessionEntity::getUpdatedAt));
+    }
+
+    @Override
     public ChatMessageEntity sendMessage(ChatMessageEntity message) {
         messageMapper.insert(message);
+        ChatSessionEntity session = sessionMapper.selectById(message.getSessionId());
+        if (session != null) {
+            session.setUpdatedAt(message.getCreatedAt() == null ? LocalDateTime.now() : message.getCreatedAt());
+            sessionMapper.updateById(session);
+        }
         return message;
     }
 
@@ -56,9 +97,8 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override public boolean deleteMessage(Long messageId) { return messageMapper.deleteById(messageId) > 0; }
-    @Override public List<Long> listSessionIds() {
-        return messageMapper.selectList(Wrappers.emptyWrapper()).stream()
-                .map(ChatMessageEntity::getSessionId).distinct().sorted().toList();
+    @Override public Optional<ChatMessageEntity> findMessage(Long messageId) {
+        return Optional.ofNullable(messageMapper.selectById(messageId));
     }
 
     @Override

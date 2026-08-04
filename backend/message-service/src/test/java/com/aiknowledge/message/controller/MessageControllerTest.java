@@ -24,27 +24,46 @@ class MessageControllerTest {
 
     @Test
     void sentMessageCanBeListedAndCleared() {
+        ApiResponse<Map<String, Object>> session = controller.createSession(Map.of(
+                "userId", 1L,
+                "targetUserId", 7L
+        ));
+        Long sessionId = ((Number) session.data().get("id")).longValue();
         ApiResponse<Map<String, Object>> sent = controller.send(Map.of(
-                "sessionId", 7L,
+                "sessionId", sessionId,
                 "senderId", 1L,
                 "content", "hello"
         ));
         assertEquals(0, sent.code());
 
-        ApiResponse<List<Map<String, Object>>> messages = controller.list(7L);
+        ApiResponse<List<Map<String, Object>>> messages = controller.list(sessionId, 1L);
         assertEquals(0, messages.code());
         assertEquals(1, messages.data().size());
         assertEquals("hello", messages.data().get(0).get("content"));
-        assertEquals(List.of(7L), controller.sessions().data());
+        assertEquals(7L, controller.sessions(1L).data().get(0).get("otherUserId"));
+        assertEquals("hello", controller.sessions(1L).data().get(0).get("lastMessage"));
 
         Long messageId = ((Number) messages.data().get(0).get("id")).longValue();
-        assertEquals(true, controller.deleteMessage(Map.of("messageId", messageId)).data().get("removed"));
+        assertEquals(true, controller.deleteMessage(Map.of("messageId", messageId, "userId", 1L)).data().get("removed"));
 
-        controller.send(Map.of("sessionId", 7L, "senderId", 1L, "content", "again"));
+        controller.send(Map.of("sessionId", sessionId, "senderId", 1L, "content", "again"));
 
-        ApiResponse<Map<String, Object>> cleared = controller.clear(Map.of("sessionId", 7L));
+        ApiResponse<Map<String, Object>> cleared = controller.clear(null, Map.of("sessionId", sessionId, "userId", 1L));
         assertEquals(0, cleared.code());
         assertEquals(1, cleared.data().get("removed"));
+    }
+
+    @Test
+    void nonParticipantCannotReadOrSendPrivateMessages() {
+        var session = controller.createSession(Map.of("userId", 1L, "targetUserId", 2L));
+        Long sessionId = ((Number) session.data().get("id")).longValue();
+
+        assertEquals(500, controller.send(Map.of(
+                "sessionId", sessionId,
+                "senderId", 3L,
+                "content", "not allowed"
+        )).code());
+        assertEquals(500, controller.list(sessionId, 3L).code());
     }
 
     @Test
