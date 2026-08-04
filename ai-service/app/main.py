@@ -118,7 +118,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Knowledge Platform AI Service", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="AI Knowledge Platform AI Service", version="1.0.0", lifespan=lifespan)
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
