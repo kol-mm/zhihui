@@ -35,6 +35,12 @@ class MessageControllerTest {
         assertEquals(0, messages.code());
         assertEquals(1, messages.data().size());
         assertEquals("hello", messages.data().get(0).get("content"));
+        assertEquals(List.of(7L), controller.sessions().data());
+
+        Long messageId = ((Number) messages.data().get(0).get("id")).longValue();
+        assertEquals(true, controller.deleteMessage(Map.of("messageId", messageId)).data().get("removed"));
+
+        controller.send(Map.of("sessionId", 7L, "senderId", 1L, "content", "again"));
 
         ApiResponse<Map<String, Object>> cleared = controller.clear(Map.of("sessionId", 7L));
         assertEquals(0, cleared.code());

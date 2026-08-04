@@ -101,6 +101,18 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public boolean deleteMessage(Long messageId) {
+        boolean removed = messages.removeIf(message -> message.getId().equals(messageId));
+        if (removed) persist();
+        return removed;
+    }
+
+    @Override
+    public List<Long> listSessionIds() {
+        return messages.stream().map(ChatMessageEntity::getSessionId).distinct().sorted().toList();
+    }
+
+    @Override
     public List<NotificationEntity> listNotifications(Long userId) {
         return notifications.stream()
                 .filter(notification -> userId == null || notification.getUserId().equals(userId))

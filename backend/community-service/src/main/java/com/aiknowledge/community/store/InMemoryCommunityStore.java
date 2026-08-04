@@ -25,10 +25,14 @@ public class InMemoryCommunityStore implements CommunityStore {
     private final AtomicLong commentIds = new AtomicLong(100);
     private final AtomicLong draftIds = new AtomicLong(1000);
     private final AtomicLong collectIds = new AtomicLong(2000);
+    private final AtomicLong imageIds = new AtomicLong(3000);
+    private final AtomicLong likeIds = new AtomicLong(4000);
     private final List<PostEntity> posts = new CopyOnWriteArrayList<>();
     private final List<CommentEntity> comments = new CopyOnWriteArrayList<>();
     private final List<PostDraftEntity> drafts = new CopyOnWriteArrayList<>();
     private final List<PostCollectEntity> collects = new CopyOnWriteArrayList<>();
+    private final List<PostImageRecord> images = new CopyOnWriteArrayList<>();
+    private final List<PostLikeRecord> likes = new CopyOnWriteArrayList<>();
 
     public InMemoryCommunityStore() {
         State state = LocalJsonStore.read(storePath, State.class, new State());
@@ -43,10 +47,14 @@ public class InMemoryCommunityStore implements CommunityStore {
             if (state.collects != null) {
                 collects.addAll(state.collects);
             }
+            if (state.images != null) images.addAll(state.images);
+            if (state.likes != null) likes.addAll(state.likes);
             postIds.set(maxId(posts, 10L));
             commentIds.set(maxId(comments, 100L));
             draftIds.set(maxId(drafts, 1000L));
             collectIds.set(maxId(collects, 2000L));
+            imageIds.set(maxRecordId(images.stream().map(PostImageRecord::id).toList(), 3000L));
+            likeIds.set(maxRecordId(likes.stream().map(PostLikeRecord::id).toList(), 4000L));
             return;
         }
 
@@ -154,6 +162,51 @@ public class InMemoryCommunityStore implements CommunityStore {
         return found;
     }
 
+    @Override
+    public void savePostImages(Long postId, List<String> imageUrls) {
+        images.removeIf(item -> item.postId().equals(postId));
+        imageUrls.stream().filter(url -> url != null && !url.isBlank()).limit(9)
+                .forEach(url -> images.add(new PostImageRecord(imageIds.incrementAndGet(), postId, url, LocalDateTime.now())));
+        persist();
+    }
+
+    @Override
+    public List<String> listPostImages(Long postId) {
+        return images.stream().filter(item -> item.postId().equals(postId)).map(PostImageRecord::imageUrl).toList();
+    }
+
+    @Override
+    public boolean likePost(Long userId, Long postId) {
+        if (likes.stream().noneMatch(item -> item.userId().equals(userId) && item.postId().equals(postId))) {
+            likes.add(new PostLikeRecord(likeIds.incrementAndGet(), userId, postId, LocalDateTime.now()));
+            persist();
+        }
+        return true;
+    }
+
+    @Override
+    public long countPostLikes(Long postId) {
+        return likes.stream().filter(item -> item.postId().equals(postId)).count();
+    }
+
+    @Override
+    public boolean removeComment(Long commentId) {
+        boolean removed = comments.removeIf(item -> item.getId().equals(commentId));
+        if (removed) persist();
+        return removed;
+    }
+
+    @Override
+    public boolean removeDraft(Long draftId) {
+        boolean removed = drafts.removeIf(item -> item.getId().equals(draftId));
+        if (removed) persist();
+        return removed;
+    }
+
+    private long maxRecordId(List<Long> values, long fallback) {
+        return values.stream().filter(java.util.Objects::nonNull).mapToLong(Long::longValue).max().orElse(fallback);
+    }
+
     private long maxId(List<?> items, long fallback) {
         return items.stream()
                 .map(item -> {
@@ -183,6 +236,8 @@ public class InMemoryCommunityStore implements CommunityStore {
         state.comments = new ArrayList<>(comments);
         state.drafts = new ArrayList<>(drafts);
         state.collects = new ArrayList<>(collects);
+        state.images = new ArrayList<>(images);
+        state.likes = new ArrayList<>(likes);
         LocalJsonStore.write(storePath, state);
     }
 
@@ -191,5 +246,7 @@ public class InMemoryCommunityStore implements CommunityStore {
         public List<CommentEntity> comments = new ArrayList<>();
         public List<PostDraftEntity> drafts = new ArrayList<>();
         public List<PostCollectEntity> collects = new ArrayList<>();
+        public List<PostImageRecord> images = new ArrayList<>();
+        public List<PostLikeRecord> likes = new ArrayList<>();
     }
 }

@@ -8,6 +8,7 @@ import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 import com.aiknowledge.community.store.CommunityStore;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -40,7 +41,9 @@ public class CommunityController {
         post.setTitle(String.valueOf(request.getOrDefault("title", "Untitled post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PUBLISHED");
-        return ApiResponse.ok(toPostView(communityStore.savePost(post)));
+        PostEntity saved = communityStore.savePost(post);
+        communityStore.savePostImages(saved.getId(), stringList(request.get("imageUrls")));
+        return ApiResponse.ok(toPostView(saved));
     }
 
     @PutMapping("/post/update")
@@ -50,7 +53,9 @@ public class CommunityController {
         post.setTitle(String.valueOf(request.getOrDefault("title", "Updated post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PUBLISHED");
-        return ApiResponse.ok(toPostView(communityStore.updatePost(post)));
+        PostEntity updated = communityStore.updatePost(post);
+        if (request.containsKey("imageUrls")) communityStore.savePostImages(updated.getId(), stringList(request.get("imageUrls")));
+        return ApiResponse.ok(toPostView(updated));
     }
 
     @GetMapping("/post/detail")
@@ -94,6 +99,16 @@ public class CommunityController {
         return ApiResponse.ok(communityStore.feed(authorUserId).stream().map(this::toPostView).toList());
     }
 
+    @GetMapping("/square/following-feed")
+    public ApiResponse<List<Map<String, Object>>> followingFeed(
+            @RequestParam(name = "followedUserIds", defaultValue = "") String followedUserIds
+    ) {
+        List<Long> ids = java.util.Arrays.stream(followedUserIds.split(","))
+                .map(String::trim).filter(value -> !value.isBlank()).map(Long::valueOf).toList();
+        return ApiResponse.ok(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
+                .map(this::toPostView).toList());
+    }
+
     @PostMapping("/square/quick-comment")
     public ApiResponse<Map<String, Object>> quickComment(@RequestBody Map<String, Object> request) {
         CommentEntity comment = buildComment(request, "SQUARE");
@@ -108,6 +123,14 @@ public class CommunityController {
         collect.setSource("SQUARE");
         PostCollectEntity saved = communityStore.collectPost(collect);
         return ApiResponse.ok(Map.of("id", saved.getId(), "postId", saved.getPostId(), "collected", true, "source", saved.getSource()));
+    }
+
+    @PostMapping("/post/like")
+    public ApiResponse<Map<String, Object>> likePost(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long postId = number(request.get("postId"), 0L);
+        communityStore.likePost(userId, postId);
+        return ApiResponse.ok(Map.of("postId", postId, "liked", true, "likes", communityStore.countPostLikes(postId)));
     }
 
     @GetMapping("/post/admin/overview")
@@ -151,6 +174,26 @@ public class CommunityController {
                 .orElseGet(() -> ApiResponse.fail("post not found"));
     }
 
+    @DeleteMapping("/comment/admin")
+    public ApiResponse<Map<String, Object>> removeComment(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long commentId = number(request.get("commentId"), 0L);
+        return ApiResponse.ok(Map.of("commentId", commentId, "removed", communityStore.removeComment(commentId)));
+    }
+
+    @DeleteMapping("/post/admin/draft")
+    public ApiResponse<Map<String, Object>> removeDraft(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long draftId = number(request.get("draftId"), 0L);
+        return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
+    }
+
     private CommentEntity buildComment(Map<String, Object> request, String source) {
         CommentEntity comment = new CommentEntity();
         comment.setPostId(number(request.get("postId"), 0L));
@@ -169,6 +212,8 @@ public class CommunityController {
         view.put("title", post.getTitle());
         view.put("content", post.getContent());
         view.put("status", post.getStatus());
+        view.put("imageUrls", communityStore.listPostImages(post.getId()));
+        view.put("likes", communityStore.countPostLikes(post.getId()));
         view.put("createdAt", post.getCreatedAt());
         view.put("updatedAt", post.getUpdatedAt());
         return view;
@@ -205,5 +250,11 @@ public class CommunityController {
             return number.longValue();
         }
         return Long.valueOf(value.toString());
+    }
+
+    private List<String> stringList(Object value) {
+        if (value instanceof List<?> values) return values.stream().map(String::valueOf).toList();
+        if (value == null || value.toString().isBlank()) return List.of();
+        return java.util.Arrays.stream(value.toString().split(",")).map(String::trim).filter(item -> !item.isBlank()).toList();
     }
 }

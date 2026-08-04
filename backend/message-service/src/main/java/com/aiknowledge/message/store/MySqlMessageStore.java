@@ -55,6 +55,12 @@ public class MySqlMessageStore implements MessageStore {
                 .eq(sessionId != null, ChatMessageEntity::getSessionId, sessionId));
     }
 
+    @Override public boolean deleteMessage(Long messageId) { return messageMapper.deleteById(messageId) > 0; }
+    @Override public List<Long> listSessionIds() {
+        return messageMapper.selectList(Wrappers.emptyWrapper()).stream()
+                .map(ChatMessageEntity::getSessionId).distinct().sorted().toList();
+    }
+
     @Override
     public List<NotificationEntity> listNotifications(Long userId) {
         return notificationMapper.selectList(Wrappers.<NotificationEntity>lambdaQuery()

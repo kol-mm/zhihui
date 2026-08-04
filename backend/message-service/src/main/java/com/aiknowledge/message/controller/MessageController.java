@@ -9,6 +9,7 @@ import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.MessageStore;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -62,6 +63,19 @@ public class MessageController {
         int removed = messageStore.clearMessages(sessionId);
         eventBus.publish("MESSAGE_CLEARED", sessionId == null ? "ALL" : String.valueOf(sessionId), Map.of("removed", removed));
         return ApiResponse.ok(Map.of("sessionId", sessionId == null ? "ALL" : sessionId, "removed", removed));
+    }
+
+    @DeleteMapping("/message")
+    public ApiResponse<Map<String, Object>> deleteMessage(@RequestBody Map<String, Object> request) {
+        Long messageId = number(request.get("messageId"), 0L);
+        boolean removed = messageStore.deleteMessage(messageId);
+        if (removed) eventBus.publish("MESSAGE_DELETED", String.valueOf(messageId), Map.of("removed", true));
+        return ApiResponse.ok(Map.of("messageId", messageId, "removed", removed));
+    }
+
+    @GetMapping("/message/sessions")
+    public ApiResponse<List<Long>> sessions() {
+        return ApiResponse.ok(messageStore.listSessionIds());
     }
 
     @GetMapping("/event/status")

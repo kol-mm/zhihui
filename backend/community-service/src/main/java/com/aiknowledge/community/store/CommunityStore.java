@@ -7,6 +7,7 @@ import com.aiknowledge.community.entity.PostEntity;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 public interface CommunityStore {
     PostEntity savePost(PostEntity post);
@@ -28,4 +29,19 @@ public interface CommunityStore {
     PostCollectEntity collectPost(PostCollectEntity collect);
 
     Optional<PostEntity> auditPost(Long postId, String status, String reason);
+
+    void savePostImages(Long postId, List<String> imageUrls);
+
+    List<String> listPostImages(Long postId);
+
+    boolean likePost(Long userId, Long postId);
+
+    long countPostLikes(Long postId);
+
+    boolean removeComment(Long commentId);
+
+    boolean removeDraft(Long draftId);
+
+    record PostImageRecord(Long id, Long postId, String imageUrl, LocalDateTime createdAt) { }
+    record PostLikeRecord(Long id, Long userId, Long postId, LocalDateTime createdAt) { }
 }

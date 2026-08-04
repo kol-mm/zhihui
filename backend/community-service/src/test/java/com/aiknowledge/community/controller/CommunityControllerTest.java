@@ -23,14 +23,25 @@ class CommunityControllerTest {
         ApiResponse<Map<String, Object>> created = controller.createPost(Map.of(
                 "userId", 1L,
                 "title", "Community Persistence",
-                "content", "forum post"
+                "content", "forum post",
+                "imageUrls", List.of("local-file://one.png", "local-file://two.png")
         ));
         assertEquals(0, created.code());
+        assertEquals(2, ((List<?>) created.data().get("imageUrls")).size());
 
         ApiResponse<List<Map<String, Object>>> feed = controller.feed(null);
         assertEquals(0, feed.code());
         assertFalse(feed.data().isEmpty());
         assertEquals("Community Persistence", feed.data().get(0).get("title"));
+    }
+
+    @Test
+    void postCanBeLikedAndFollowingFeedCanBeFiltered() {
+        controller.createPost(Map.of("userId", 2L, "title", "followed", "content", "visible"));
+        var filtered = controller.followingFeed("2");
+        assertEquals(1, filtered.data().size());
+        Long postId = ((Number) filtered.data().get(0).get("id")).longValue();
+        assertEquals(1L, controller.likePost(Map.of("userId", 1L, "postId", postId)).data().get("likes"));
     }
 
     @Test

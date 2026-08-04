@@ -22,6 +22,8 @@ public class MySqlCommunityStore implements CommunityStore {
     private final CommentMapper commentMapper;
     private final PostDraftMapper draftMapper;
     private final PostCollectMapper collectMapper;
+    private final java.util.Map<Long, List<String>> localImages = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<String> localLikes = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public MySqlCommunityStore(
             PostMapper postMapper,
@@ -102,4 +104,11 @@ public class MySqlCommunityStore implements CommunityStore {
         postMapper.updateById(post);
         return Optional.of(post);
     }
+
+    @Override public void savePostImages(Long postId, List<String> imageUrls) { localImages.put(postId, List.copyOf(imageUrls)); }
+    @Override public List<String> listPostImages(Long postId) { return localImages.getOrDefault(postId, List.of()); }
+    @Override public boolean likePost(Long userId, Long postId) { return localLikes.add(userId + ":" + postId); }
+    @Override public long countPostLikes(Long postId) { return localLikes.stream().filter(key -> key.endsWith(":" + postId)).count(); }
+    @Override public boolean removeComment(Long commentId) { return commentMapper.deleteById(commentId) > 0; }
+    @Override public boolean removeDraft(Long draftId) { return draftMapper.deleteById(draftId) > 0; }
 }

@@ -15,6 +15,10 @@ public interface MessageStore {
 
     int clearMessages(Long sessionId);
 
+    boolean deleteMessage(Long messageId);
+
+    List<Long> listSessionIds();
+
     List<NotificationEntity> listNotifications(Long userId);
 
     List<FaqEntity> listFaqs();
