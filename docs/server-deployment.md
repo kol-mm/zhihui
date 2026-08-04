@@ -54,3 +54,11 @@ and ensures the default `demo` and `admin` accounts and basic lookup data exist.
 
 Set `AI_KNOWLEDGE_JWT_SECRET`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and
 `AI_API_KEY` through the server environment. Do not store these values in the repository.
+
+## Reverse proxy and HTTPS
+
+The production frontend uses the same-origin `/api` path by default. A ready-to-edit Nginx template is
+available at `deploy/nginx/ai-knowledge.conf`. Replace the domain, certificate paths, and frontend `root`,
+then validate the configuration with `nginx -t` before reloading Nginx.
+
+For a different API origin, set `VITE_API_BASE_URL` before running the frontend production build.
