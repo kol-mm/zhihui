@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import time
+from unittest import mock
 
 
 class AiServicePersistenceTest(unittest.TestCase):
@@ -23,6 +24,7 @@ class AiServicePersistenceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
         os.environ.pop("AI_DB_PATH", None)
+        os.environ.pop("AI_API_KEY", None)
 
     @staticmethod
     def issue_token(username: str, user_id: int, role: str) -> str:
@@ -94,6 +96,40 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(saved.data["configuration"]["match_limit"], 3)
         overview = self.main.ai_admin_overview(authorization=auth)
         self.assertIn("configuration", overview.data)
+
+    def test_openai_compatible_provider_uses_chat_completions(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def read() -> bytes:
+                return json.dumps({"choices": [{"message": {"content": "provider answer"}}]}).encode()
+
+        os.environ["AI_API_KEY"] = "test-key"
+        config = {
+            "provider": "openai-compatible",
+            "model": "test-model",
+            "base_url": "https://example.test/v1",
+            "temperature": 0.3,
+        }
+        with mock.patch.object(self.main.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
+            answer = self.main.compatible_answer("question", [], config)
+
+        self.assertEqual(answer, "provider answer")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://example.test/v1/chat/completions")
+        self.assertEqual(request.headers["Authorization"], "Bearer test-key")
+
+    def test_openai_compatible_provider_without_key_falls_back(self) -> None:
+        config = {"provider": "openai-compatible", "base_url": "https://example.test/v1"}
+        with mock.patch.object(self.main.urllib.request, "urlopen") as urlopen:
+            answer = self.main.compatible_answer("question", [], config)
+        self.assertIsNone(answer)
+        urlopen.assert_not_called()
 
 
 if __name__ == "__main__":
