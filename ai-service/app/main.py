@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import base64
 import json
 import math
 import os
@@ -11,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 
@@ -35,6 +37,12 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     user_id: int | None = None
     session_id: int | None = None
+
+
+class AiConfigRequest(BaseModel):
+    data_source_scope: str = "all-approved"
+    match_limit: int = Field(default=5, ge=1, le=20)
+    compliance_rule: str = "answer-with-references"
 
 
 def now_iso() -> str:
@@ -91,6 +99,12 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES ai_chat_session(id)
             );
+
+            CREATE TABLE IF NOT EXISTS ai_config (
+                config_key TEXT PRIMARY KEY,
+                config_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(knowledge_chunk)").fetchall()}
@@ -109,6 +123,47 @@ app = FastAPI(title="AI Knowledge Platform AI Service", version="0.3.0", lifespa
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
+
+
+def decode_segment(value: str) -> dict[str, Any]:
+    padding = "=" * (-len(value) % 4)
+    return json.loads(base64.urlsafe_b64decode(value + padding))
+
+
+def is_admin_token(authorization: str | None) -> bool:
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    secret = os.getenv("AI_KNOWLEDGE_JWT_SECRET", "local-dev-secret-change-before-production")
+    signature = hmac.new(secret.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
+    expected = base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    try:
+        header = decode_segment(parts[0])
+        payload = decode_segment(parts[1])
+        return (hmac.compare_digest(expected, parts[2]) and header.get("alg") == "HS256"
+                and payload.get("role") == "ADMIN" and int(payload.get("exp", 0)) > int(datetime.now().timestamp()))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def require_admin(authorization: str | None) -> None:
+    if not is_admin_token(authorization):
+        raise HTTPException(status_code=403, detail="admin authorization is required")
+
+
+def read_ai_config() -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "data_source_scope": "all-approved",
+        "match_limit": 5,
+        "compliance_rule": "answer-with-references",
+    }
+    with connect() as conn:
+        rows = conn.execute("SELECT config_key, config_value FROM ai_config").fetchall()
+    for row in rows:
+        value = row["config_value"]
+        defaults[row["config_key"]] = int(value) if row["config_key"] == "match_limit" else value
+    return defaults
 
 
 def split_text(text: str) -> list[str]:
@@ -321,12 +376,58 @@ def retrieve(request: ChatRequest) -> ApiResponse:
     return ApiResponse(data={"matches": retrieve_chunks(request.question)})
 
 
+@app.get("/ai/history", response_model=ApiResponse)
+def chat_history(user_id: int | None = None, session_id: int | None = None) -> ApiResponse:
+    init_db()
+    with connect() as conn:
+        sessions = conn.execute(
+            "SELECT id, user_id, title, created_at FROM ai_chat_session WHERE (? IS NULL OR user_id = ?) ORDER BY id DESC",
+            (user_id, user_id),
+        ).fetchall()
+        messages = conn.execute(
+            "SELECT id, session_id, role, content, created_at FROM ai_chat_message WHERE (? IS NULL OR session_id = ?) ORDER BY id",
+            (session_id, session_id),
+        ).fetchall()
+    return ApiResponse(data={"sessions": [row_to_dict(row) for row in sessions],
+                             "messages": [row_to_dict(row) for row in messages]})
+
+
+@app.get("/ai/admin/overview", response_model=ApiResponse)
+def ai_admin_overview(authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_admin(authorization)
+    health_data = health().data
+    return ApiResponse(data={**health_data, "configuration": read_ai_config(),
+                             "capabilities": ["data-source-scope", "matching-rules", "chat-audit", "chunk-review"]})
+
+
+@app.get("/ai/admin/chunks", response_model=ApiResponse)
+def admin_chunks(authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_admin(authorization)
+    with connect() as conn:
+        rows = conn.execute("SELECT id, file_id, title, content, created_at FROM knowledge_chunk ORDER BY id DESC LIMIT 200").fetchall()
+    return ApiResponse(data={"chunks": [row_to_dict(row) for row in rows]})
+
+
+@app.post("/ai/admin/config", response_model=ApiResponse)
+def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_admin(authorization)
+    values = request.model_dump()
+    with connect() as conn:
+        for key, value in values.items():
+            conn.execute(
+                "INSERT INTO ai_config(config_key, config_value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value, updated_at=excluded.updated_at",
+                (key, str(value), now_iso()),
+            )
+    return ApiResponse(data={"configuration": read_ai_config(), "updated": True})
+
+
 @app.post("/ai/chat", response_model=ApiResponse)
 def chat(request: ChatRequest) -> ApiResponse:
     init_db()
     session_id = ensure_session(request)
     user_message = save_message(session_id, "user", request.question)
-    matched = retrieve_chunks(request.question, limit=5)
+    matched = retrieve_chunks(request.question, limit=int(read_ai_config()["match_limit"]))
 
     if matched:
         context = "；".join(chunk["content"] for chunk in matched[:2])

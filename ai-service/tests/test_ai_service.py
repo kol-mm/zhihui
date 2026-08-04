@@ -2,6 +2,11 @@ import os
 import math
 import tempfile
 import unittest
+import base64
+import hashlib
+import hmac
+import json
+import time
 
 
 class AiServicePersistenceTest(unittest.TestCase):
@@ -59,6 +64,27 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(health_response.data["chunk_count"], 2)
         self.assertEqual(health_response.data["session_count"], 1)
         self.assertEqual(health_response.data["vector_dimension"], 128)
+
+        history = self.main.chat_history(user_id=1)
+        self.assertEqual(len(history.data["sessions"]), 1)
+        self.assertEqual(len(history.data["messages"]), 2)
+
+    def test_admin_can_manage_ai_configuration(self) -> None:
+        def segment(value: dict) -> str:
+            return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+
+        header = segment({"alg": "HS256", "typ": "JWT"})
+        payload = segment({"sub": "admin", "role": "ADMIN", "iat": int(time.time()), "exp": int(time.time()) + 600})
+        signing_input = f"{header}.{payload}"
+        signature = base64.urlsafe_b64encode(hmac.new(
+            b"local-dev-secret-change-before-production", signing_input.encode(), hashlib.sha256
+        ).digest()).decode().rstrip("=")
+        auth = f"Bearer {signing_input}.{signature}"
+
+        saved = self.main.save_ai_config(self.main.AiConfigRequest(match_limit=3), authorization=auth)
+        self.assertEqual(saved.data["configuration"]["match_limit"], 3)
+        overview = self.main.ai_admin_overview(authorization=auth)
+        self.assertIn("configuration", overview.data)
 
 
 if __name__ == "__main__":
