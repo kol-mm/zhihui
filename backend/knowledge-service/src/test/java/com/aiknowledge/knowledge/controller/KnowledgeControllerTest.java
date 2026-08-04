@@ -13,6 +13,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KnowledgeControllerTest {
     static {
@@ -73,6 +74,22 @@ class KnowledgeControllerTest {
         ApiResponse<Map<String, Object>> status = controller.searchStatus();
         assertEquals("local", status.data().get("mode"));
         assertEquals(false, status.data().get("elasticsearchReady"));
+    }
+
+    @Test
+    void readingKnowledgeReturnsItsBody() {
+        var uploaded = controller.upload(Map.of(
+                "userId", 1L,
+                "title", "Readable guide",
+                "fileType", "txt",
+                "content", "This is the complete readable body."
+        ));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var detail = controller.view(Map.of("fileId", fileId));
+
+        assertEquals(0, detail.code());
+        assertTrue(String.valueOf(detail.data().get("content")).contains("complete readable body"));
     }
 
     @Test

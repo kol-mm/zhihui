@@ -101,7 +101,13 @@ public class KnowledgeController {
     public ApiResponse<Map<String, Object>> view(@RequestBody Map<String, Object> request) {
         Long fileId = number(request.get("fileId"), 0L);
         return knowledgeStore.view(fileId)
-                .map(file -> ApiResponse.ok(toView(file)))
+                .map(file -> {
+                    Map<String, Object> detail = toView(file);
+                    detail.put("content", fullTextSearch.find(fileId)
+                            .map(LocalFullTextSearchService.SearchDocument::getContent)
+                            .orElse("该资源尚未保存可预览的正文。"));
+                    return ApiResponse.ok(detail);
+                })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
     }
 
