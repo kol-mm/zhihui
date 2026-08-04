@@ -11,10 +11,14 @@ $ErrorActionPreference = "Stop"
 $checks = @(
   @{ Name = "user-service"; Url = "$Gateway/user/health" },
   @{ Name = "knowledge-list"; Url = "$Gateway/knowledge/list" },
+  @{ Name = "knowledge-storage"; Url = "$Gateway/knowledge/storage/status" },
+  @{ Name = "knowledge-search"; Url = "$Gateway/knowledge/search/status" },
   @{ Name = "square-feed"; Url = "$Gateway/square/feed" },
   @{ Name = "message-list"; Url = "$Gateway/message/list?sessionId=1" },
+  @{ Name = "event-bus"; Url = "$Gateway/event/status" },
   @{ Name = "feedback-faq"; Url = "$Gateway/feedback/faqs" },
-  @{ Name = "ai-service"; Url = "$AiService/ai/health" }
+  @{ Name = "ai-service"; Url = "$AiService/ai/health" },
+  @{ Name = "ai-vector"; Url = "$AiService/ai/vector/status" }
 )
 
 $logDir = Split-Path -Parent $LogPath

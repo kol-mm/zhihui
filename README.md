@@ -7,8 +7,10 @@
 - 用户端六大模块：知识库、论坛、消息、广场、个人中心、用户反馈。
 - 管理端六大模块：知识库管理、论坛管理、消息互动管理、平台数据统计、用户账号管理、工单反馈管理。
 - 后端：Spring Cloud Gateway、Nacos Discovery、用户服务、知识库服务、论坛/广场服务、消息/反馈服务。
-- AI 服务：FastAPI，本地 SQLite 持久化知识切片、会话和聊天消息。
+- AI 服务：FastAPI，本地 SQLite 持久化知识切片、向量、会话和聊天消息。
 - 前端：Vue 3 + TypeScript + Vite + Element Plus，本地页面已拆分用户端 / 管理端两个入口，并可分别联调接口。
+- 本地基础能力：文件存储、事件总线、全文索引、向量检索均可直接运行，并保留 MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB 配置入口。
+- 鉴权：登录签发 HMAC-SHA256 JWT，包含用户、角色、签发时间和过期时间；管理端接口校验 ADMIN 角色。
 
 ## 本机依赖
 
@@ -166,4 +168,16 @@ AI 测试：
 ## 当前完成边界
 
 - 容器化部署：按要求暂不做。
-- 文件存储、消息事件、全文检索、向量检索、JWT/RBAC：纳入本地可用版本，优先实现本地可运行能力，再保留对 MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB 的可切换配置入口。
+- 文件存储、消息事件、全文检索、向量检索、JWT/RBAC：已完成本地可运行实现。
+- MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB：已保留配置入口；默认不依赖外部服务即可启动。
+
+## 可选能力配置
+
+    $env:AI_KNOWLEDGE_JWT_SECRET = "请替换为长随机字符串"
+    $env:AI_KNOWLEDGE_JWT_EXPIRES_SECONDS = "28800"
+    $env:AI_VECTOR_MODE = "local"
+    $env:AI_VECTOR_DIMENSION = "128"
+    $env:MILVUS_ENDPOINT = "http://127.0.0.1:19530"
+    $env:CHROMA_PATH = ".\\ai-service\\data\\chroma"
+
+本地配置文件还提供 `knowledge.storage.minio`、`message.event.rabbitmq` 和 `knowledge.search.elasticsearch` 节点。默认 `mode: local`，因此不安装外部中间件也能使用对应功能。

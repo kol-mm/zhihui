@@ -403,6 +403,18 @@
                 </div>
               </div>
             </el-tab-pane>
+            <el-tab-pane label="事件">
+              <el-empty v-if="adminEvents.length === 0" description="暂无事件日志" />
+              <div v-else class="item-list">
+                <div v-for="event in adminEvents" :key="event.id" class="list-item">
+                  <div>
+                    <strong>#{{ event.id }} {{ event.type }}</strong>
+                    <p>对象 {{ event.aggregateId }} · {{ event.createdAt }}</p>
+                  </div>
+                  <el-tag type="info">{{ event.status }}</el-tag>
+                </div>
+              </div>
+            </el-tab-pane>
           </el-tabs>
         </article>
 
@@ -513,6 +525,14 @@ type KnowledgeReport = {
   createdAt?: string;
 };
 
+type EventRecord = {
+  id: number;
+  type: string;
+  aggregateId: string;
+  status: string;
+  createdAt: string;
+};
+
 type StorageUploadResult = {
   fileUrl: string;
   objectName: string;
@@ -535,6 +555,7 @@ const adminUsers = ref<User[]>([]);
 const adminKnowledgeFiles = ref<KnowledgeFile[]>([]);
 const knowledgeReports = ref<KnowledgeReport[]>([]);
 const adminTickets = ref<Ticket[]>([]);
+const adminEvents = ref<EventRecord[]>([]);
 const adminOverview = ref<Record<string, Record<string, unknown>>>({});
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
@@ -584,6 +605,7 @@ const platformStatCards = computed(() => [
   { label: '社区帖子', value: String(metricValue('forumAdmin', 'publishedPosts')), hint: `${metricValue('forumAdmin', 'draftsTracked')} 篇草稿追踪` },
   { label: '反馈工单', value: String(metricValue('feedbackAdmin', 'tickets')), hint: `${metricValue('feedbackAdmin', 'pendingTickets')} 个待处理` },
   { label: '消息互动', value: String(metricValue('messageAdmin', 'sessionOneMessages')), hint: `${metricValue('messageAdmin', 'notifications')} 条通知` },
+  { label: '事件日志', value: String(metricValue('messageAdmin', 'storedEvents')), hint: '本地事件总线持久化' },
   { label: '知识举报', value: String(metricValue('knowledgeAdmin', 'reports')), hint: '用于内容安全复核' }
 ]);
 
@@ -857,7 +879,8 @@ async function loadAdminQueues() {
     knowledgeFiles: adminKnowledgeFiles.value = await getData<KnowledgeFile[]>('/knowledge/list'),
     knowledgeReports: knowledgeReports.value = await getData<KnowledgeReport[]>('/knowledge/admin/reports'),
     posts: await getData('/square/feed'),
-    tickets: adminTickets.value = await getData<Ticket[]>('/feedback/tickets')
+    tickets: adminTickets.value = await getData<Ticket[]>('/feedback/tickets'),
+    events: adminEvents.value = await getData<EventRecord[]>('/event/list?limit=50')
   }));
 }
 

@@ -119,6 +119,7 @@ public class MessageController {
                 "module", "消息互动管理",
                 "notifications", messageStore.listNotifications(userId).size(),
                 "sessionOneMessages", messageStore.listMessages(1L).size(),
+                "storedEvents", eventBus.list(200).size(),
                 "capabilities", List.of("私信监管", "互动提醒", "聊天归档", "消息清理")
         ));
     }
