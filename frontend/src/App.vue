@@ -9,12 +9,21 @@
         <el-form-item label="用户名"><el-input v-model="loginForm.username" size="large" autocomplete="username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="loginForm.password" size="large" type="password" show-password autocomplete="current-password" /></el-form-item>
         <el-button class="login-button" type="primary" size="large" :loading="busy" native-type="submit">登录</el-button>
+        <el-button class="register-entry" text type="primary" @click="registerDialog = true">没有账号？立即注册</el-button>
       </el-form>
       <div class="demo-accounts">
         <button type="button" @click="useAccount('demo', 'demo')"><span>用户体验账号</span><strong>demo / demo</strong></button>
         <button type="button" @click="useAccount('admin', 'admin123')"><span>管理体验账号</span><strong>admin / admin123</strong></button>
       </div>
     </section>
+    <el-dialog v-model="registerDialog" title="注册社区账号" width="min(460px, 92vw)">
+      <el-form label-position="top">
+        <el-form-item label="用户名"><el-input v-model="registerForm.username" autocomplete="username" /></el-form-item>
+        <el-form-item label="昵称"><el-input v-model="registerForm.nickname" /></el-form-item>
+        <el-form-item label="密码"><el-input v-model="registerForm.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="registerDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="registerAccount">注册并登录</el-button></template>
+    </el-dialog>
   </div>
 
   <div v-else class="app-layout">
@@ -121,7 +130,7 @@
 
           <section v-else-if="activeView === 'messages'" class="message-page">
             <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ notifications.length }} 条通知</p></div><el-button :icon="Plus" circle @click="newConversation" /></div><div class="session-list"><button v-for="session in sessions" :key="session" :class="{ active: messageForm.sessionId === session }" @click="openSession(session)"><div class="mini-avatar">{{ session }}</div><span><strong>会话 {{ session }}</strong><small>点击查看聊天记录</small></span></button></div><el-empty v-if="!sessions.length" description="暂无会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><div><strong>会话 {{ messageForm.sessionId }}</strong><span>本地私信</span></div><el-dropdown><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><small>#{{ message.id }}</small></div><el-empty v-if="!messages.length" description="开始一段新对话" /></div><div class="message-compose"><el-input v-model="messageForm.content" placeholder="输入消息" @keyup.enter="sendMessage" /><el-button type="primary" :icon="Promotion" @click="sendMessage">发送</el-button></div></section>
+            <section class="surface conversation-panel"><div class="conversation-head"><div><strong>会话 {{ messageForm.sessionId }}</strong><span>本地私信</span></div><el-dropdown><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item @click="clearAllMessages">清空全部会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>#{{ message.id }}</small><el-button :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" description="开始一段新对话" /></div><div class="message-compose"><el-input v-model="messageForm.content" placeholder="输入消息" @keyup.enter="sendMessage" /><el-button type="primary" :icon="Promotion" @click="sendMessage">发送</el-button></div></section>
           </section>
 
           <section v-else-if="activeView === 'ai'" class="ai-page">
@@ -132,6 +141,10 @@
           <section v-else class="page-stack">
             <div class="page-toolbar"><div><h3>个人中心</h3><p>管理资料、关注关系和反馈工单</p></div><el-button type="primary" @click="saveProfile">保存资料</el-button></div>
             <div class="profile-layout"><section class="surface profile-card"><div class="profile-avatar">{{ displayName.slice(0, 1).toUpperCase() }}</div><h3>{{ displayName }}</h3><p>@{{ username }}</p><el-tag>{{ role }}</el-tag><div class="profile-counts"><span><strong>{{ followData.followedUserIds?.length || 0 }}</strong>关注</span><span><strong>{{ followData.followerUserIds?.length || 0 }}</strong>粉丝</span><span><strong>{{ drafts.length }}</strong>草稿</span></div></section><section class="surface profile-form"><h3>基础资料</h3><el-form label-position="top"><el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item><el-form-item label="头像地址"><el-input v-model="profileForm.avatarUrl" /></el-form-item><el-form-item label="个性签名"><el-input v-model="profileForm.signature" type="textarea" :rows="3" /></el-form-item></el-form></section><section class="surface feedback-card"><div class="surface-head"><div><h3>我的反馈</h3><p>问题进度与官方回复</p></div><el-button :icon="Plus" circle @click="feedbackDialog = true" /></div><article v-for="ticket in tickets" :key="ticket.id"><div><strong>{{ ticket.type }}</strong><p>{{ ticket.content }}</p><small v-if="ticket.reply">官方回复：{{ ticket.reply }}</small></div><el-tag :type="ticket.status === 'RESOLVED' ? 'success' : 'warning'">{{ ticketStatusLabel(ticket.status) }}</el-tag></article><el-empty v-if="!tickets.length" description="暂无反馈工单" /></section></div>
+            <div class="two-column account-tools">
+              <section class="surface"><div class="surface-head"><div><h3>关系与安全</h3><p>管理关注、拉黑和用户举报</p></div></div><el-form label-position="top"><el-form-item label="目标用户 ID"><el-input-number v-model="relationForm.targetUserId" :min="1" /></el-form-item></el-form><div class="relation-actions"><el-button type="primary" @click="followUser">关注</el-button><el-button @click="unfollowUser">取消关注</el-button><el-button type="warning" @click="blockUser">拉黑</el-button><el-button @click="unblockUser">解除拉黑</el-button><el-button type="danger" text @click="reportUser">举报用户</el-button></div><div class="relation-summary"><span>已关注 <strong>{{ followData.followedUserIds?.join('、') || '无' }}</strong></span><span>黑名单 <strong>{{ blockedUserIds.join('、') || '无' }}</strong></span></div></section>
+              <section class="surface"><el-tabs><el-tab-pane label="行为足迹"><div class="activity-list"><article v-for="item in behaviors" :key="item.id"><span class="event-dot"></span><div><strong>{{ item.action }} · {{ item.targetType }}</strong><p>对象 #{{ item.targetId }}</p><small>{{ formatDate(item.createdAt) }}</small></div></article><el-empty v-if="!behaviors.length" description="暂无行为记录" /></div></el-tab-pane><el-tab-pane :label="`我的草稿 ${drafts.length}`"><article v-for="draft in drafts" :key="draft.id" class="draft-row"><div><strong>{{ draft.title }}</strong><p>{{ draft.content }}</p></div><el-tag size="small">草稿</el-tag></article><el-empty v-if="!drafts.length" description="暂无草稿" /></el-tab-pane></el-tabs></section>
+            </div>
           </section>
         </template>
 
@@ -159,6 +172,15 @@
     <el-dialog v-model="feedbackDialog" title="提交反馈" width="min(480px, 92vw)"><el-form label-position="top"><el-form-item label="反馈类型"><el-select v-model="feedbackForm.type"><el-option label="系统问题" value="BUG" /><el-option label="产品建议" value="SUGGESTION" /><el-option label="客服咨询" value="SUPPORT" /></el-select></el-form-item><el-form-item label="问题描述"><el-input v-model="feedbackForm.content" type="textarea" :rows="5" /></el-form-item></el-form><template #footer><el-button @click="feedbackDialog = false">取消</el-button><el-button type="primary" @click="createTicket">提交</el-button></template></el-dialog>
     <el-dialog v-model="ticketDialog" title="处理反馈工单" width="min(500px, 92vw)"><el-form label-position="top"><el-form-item label="处理状态"><el-select v-model="ticketReply.status"><el-option label="处理中" value="PROCESSING" /><el-option label="已解决" value="RESOLVED" /></el-select></el-form-item><el-form-item label="官方回复"><el-input v-model="ticketReply.reply" type="textarea" :rows="5" /></el-form-item></el-form><template #footer><el-button @click="ticketDialog = false">取消</el-button><el-button type="primary" @click="replyTicket">保存回复</el-button></template></el-dialog>
     <el-dialog v-model="faqDialog" :title="faqForm.id ? '编辑 FAQ' : '新增 FAQ'" width="min(500px, 92vw)"><el-form label-position="top"><el-form-item label="问题"><el-input v-model="faqForm.question" /></el-form-item><el-form-item label="答案"><el-input v-model="faqForm.answer" type="textarea" :rows="5" /></el-form-item><el-form-item label="排序"><el-input-number v-model="faqForm.sortNo" :min="0" /></el-form-item></el-form><template #footer><el-button @click="faqDialog = false">取消</el-button><el-button type="primary" @click="saveFaq">保存</el-button></template></el-dialog>
+    <el-dialog v-model="governanceDialog" title="深度内容审查" width="min(1000px, 94vw)" top="5vh">
+      <el-tabs v-model="governanceTab">
+        <el-tab-pane :label="`评论 ${adminComments.length}`" name="comments"><el-table :data="adminComments" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="postId" label="帖子" width="90" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column prop="content" label="评论内容" min-width="280" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click="deleteAdminComment(scope.row)">删除</el-button></template></el-table-column></el-table></el-tab-pane>
+        <el-tab-pane :label="`草稿 ${adminDrafts.length}`" name="drafts"><el-table :data="adminDrafts" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="content" label="内容" min-width="280" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click="deleteAdminDraft(scope.row)">删除</el-button></template></el-table-column></el-table></el-tab-pane>
+        <el-tab-pane :label="`AI 会话 ${aiAuditSessions.length}`" name="sessions"><el-table :data="aiAuditSessions" max-height="520"><el-table-column prop="id" label="ID" width="80" /><el-table-column prop="user_id" label="用户" width="100" /><el-table-column prop="title" label="会话标题" min-width="280" /><el-table-column prop="created_at" label="创建时间" min-width="180" /></el-table></el-tab-pane>
+        <el-tab-pane :label="`知识切片 ${aiChunks.length}`" name="chunks"><el-table :data="aiChunks" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="file_id" label="文件" width="90" /><el-table-column prop="title" label="标题" min-width="180" /><el-table-column prop="content" label="切片内容" min-width="360" show-overflow-tooltip /></el-table></el-tab-pane>
+      </el-tabs>
+      <template #footer><el-button :icon="Refresh" @click="loadGovernance">刷新数据</el-button><el-button type="primary" @click="governanceDialog = false">完成</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -178,8 +200,10 @@ type Draft = { id:number; title:string; content:string; userId:number };
 type Report = { id:number; fileId?:number; targetUserId?:number; reason:string; status:string };
 type Faq = { id:number; question:string; answer:string; sortNo:number };
 type EventRecord = { id:number; type:string; aggregateId:string; status:string; createdAt:string };
-type AiSession = { id:number; title:string; created_at:string };
-type Comment = { id:number; userId:number; content:string };
+type AiSession = { id:number; user_id?:number; title:string; created_at:string };
+type Comment = { id:number; postId?:number; userId:number; content:string };
+type BehaviorRecord = { id:number; action:string; targetType:string; targetId:number; createdAt:string };
+type AiChunk = { id:number; file_id:number; title:string; content:string; created_at:string };
 type NavigationItem = { key:string; label:string; icon:ReturnType<typeof markRaw>; badge?:number };
 
 const authenticated = ref(Boolean(getAuthToken()));
@@ -191,10 +215,11 @@ const currentUserId = ref(Number(localStorage.getItem('ai-knowledge-user-id') ||
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
 const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const adminUserKeyword = ref('');
-const feedMode = ref<'all'|'following'>('all'); const moderationTab = ref('knowledge');
-const knowledgeDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const commentDrawer = ref(false);
+const feedMode = ref<'all'|'following'>('all'); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
+const knowledgeDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false);
 
 const loginForm = ref({ username:'demo', password:'demo' });
+const registerForm = ref({ username:'', nickname:'', password:'' });
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
 const knowledgeForm = ref({ userId:currentUserId.value, title:'', filename:'knowledge.txt', fileType:'txt', content:'', fileUrl:'' });
 const postForm = ref({ userId:currentUserId.value, title:'', content:'', images:'' });
@@ -203,10 +228,12 @@ const feedbackForm = ref({ userId:currentUserId.value, type:'BUG', content:'' })
 const ticketReply = ref({ ticketId:0, status:'PROCESSING', reply:'' });
 const faqForm = ref({ id:0, question:'', answer:'', sortNo:10, enabled:1 });
 const aiConfig = ref({ data_source_scope:'all-approved', match_limit:5, compliance_rule:'answer-with-references' });
+const relationForm = ref({ targetUserId:2 });
 
 const knowledgeFiles = ref<KnowledgeFile[]>([]); const feedPosts = ref<Post[]>([]); const tickets = ref<Ticket[]>([]); const adminTickets = ref<Ticket[]>([]);
 const messages = ref<ChatMessage[]>([]); const notifications = ref<Notice[]>([]); const drafts = ref<Draft[]>([]); const sessions = ref<number[]>([]);
 const adminUsers = ref<UserRecord[]>([]); const knowledgeReports = ref<Report[]>([]); const userReports = ref<Report[]>([]); const faqs = ref<Faq[]>([]); const adminEvents = ref<EventRecord[]>([]);
+const blockedUserIds = ref<number[]>([]); const behaviors = ref<BehaviorRecord[]>([]); const adminComments = ref<Comment[]>([]); const adminDrafts = ref<Draft[]>([]); const aiChunks = ref<AiChunk[]>([]); const aiAuditSessions = ref<AiSession[]>([]);
 const adminOverview = ref<Record<string, Record<string, unknown>>>({}); const aiOverview = ref<Record<string, unknown>>({});
 const followData = ref<{ followedUserIds?:number[]; followerUserIds?:number[] }>({});
 const aiQuestion = ref(''); const aiMessages = ref<{role:'user'|'assistant';content:string}[]>([]); const aiSessions = ref<AiSession[]>([]); const aiSessionId = ref<number>();
@@ -214,7 +241,7 @@ const selectedPost = ref<Post>(); const comments = ref<Comment[]>([]); const com
 const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
 
 const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'community',label:'社区广场',icon:markRaw(ChatDotRound)},{key:'messages',label:'消息中心',icon:markRaw(Message),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
-const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与 FAQ',icon:markRaw(Tickets)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
+const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与 FAQ',icon:markRaw(Tickets)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
 const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigation : clientNavigation.map(item => item.key === 'messages' ? {...item,badge:notifications.value.length || 0} : item));
 const currentTitle = computed(() => currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
@@ -229,11 +256,23 @@ function formatDate(value:string){ return value ? new Date(value).toLocaleString
 function notifyError(error:unknown){ ElMessage.error(error instanceof Error?error.message:String(error)); }
 function useAccount(user:string,password:string){ loginForm.value={username:user,password}; }
 
+async function registerAccount(){
+  if(!registerForm.value.username.trim() || registerForm.value.password.length < 6){ ElMessage.warning('请输入用户名，密码至少 6 位'); return; }
+  busy.value=true;
+  try{
+    await postData('/user/register',registerForm.value);
+    loginForm.value={username:registerForm.value.username,password:registerForm.value.password};
+    registerDialog.value=false;
+    await login();
+  }catch(error){ notifyError(error); }
+  finally{ busy.value=false; }
+}
+
 async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await refreshCurrentView(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
 function switchPortal(value:'client'|'admin'){ portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
-function selectView(key:string){ activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
+function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
 async function refreshCurrentView(){ try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ notifyError(error); } }
 async function runGlobalSearch(){ activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
@@ -241,9 +280,9 @@ async function loadKnowledge(){ knowledgeFiles.value=await getData('/knowledge/l
 async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; }
 async function uploadKnowledge(){ if(!knowledgeForm.value.title.trim()||!knowledgeForm.value.content.trim()){ElMessage.warning('请填写标题和文件内容');return;} busy.value=true; try{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title}); await postData('/knowledge/upload',{userId:currentUserId.value,title:knowledgeForm.value.title,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content}); knowledgeDialog.value=false; knowledgeForm.value.title=''; knowledgeForm.value.content=''; await loadKnowledge(); ElMessage.success('知识已上传并建立索引');}catch(error){notifyError(error);}finally{busy.value=false;} }
 function openKnowledge(file:KnowledgeFile){ activeView.value='knowledge'; viewKnowledge(file); }
-async function viewKnowledge(file:KnowledgeFile){ await postData('/knowledge/view',{fileId:file.id}); ElMessage.success(`已记录阅读：${file.title}`); await loadKnowledge(); }
+async function viewKnowledge(file:KnowledgeFile){ await postData('/knowledge/view',{fileId:file.id}); await recordBehavior('VIEW','KNOWLEDGE',file.id); ElMessage.success(`已记录阅读：${file.title}`); await loadKnowledge(); }
 async function downloadKnowledge(file:KnowledgeFile){ await postData('/knowledge/download',{userId:currentUserId.value,fileId:file.id}); ElMessage.success('下载记录已保存'); await loadKnowledge(); }
-async function likeKnowledge(file:KnowledgeFile){ await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id}); ElMessage.success('已点赞'); await loadKnowledge(); }
+async function likeKnowledge(file:KnowledgeFile){ await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id}); await recordBehavior('LIKE','KNOWLEDGE',file.id); ElMessage.success('已点赞'); await loadKnowledge(); }
 async function collectKnowledge(file:KnowledgeFile){ await postData('/knowledge/collect',{userId:currentUserId.value,fileId:file.id}); ElMessage.success('已收藏'); }
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
 
@@ -252,7 +291,7 @@ async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.co
 async function saveDraft(){ await postData('/post/draft',{userId:currentUserId.value,title:postForm.value.title||'未命名草稿',content:postForm.value.content});postDialog.value=false;await loadDrafts();ElMessage.success('草稿已保存'); }
 async function loadDrafts(){ drafts.value=await getData(`/post/drafts?userId=${currentUserId.value}`); }
 async function loadMyPosts(){ feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`); }
-async function likePost(post:Post){ await postData('/post/like',{userId:currentUserId.value,postId:post.id});await loadFeed(); }
+async function likePost(post:Post){ await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);await loadFeed(); }
 async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
 async function openComments(post:Post){ selectedPost.value=post;comments.value=await getData(`/comment/list?postId=${post.id}`);commentDrawer.value=true; }
 async function createComment(){ if(!commentText.value.trim()||!selectedPost.value)return;await postData('/comment/create',{postId:selectedPost.value.id,userId:currentUserId.value,content:commentText.value});commentText.value='';await openComments(selectedPost.value);ElMessage.success('评论已发布'); }
@@ -263,13 +302,21 @@ async function loadMessages(){messages.value=await getData(`/message/list?sessio
 function newConversation(){messageForm.value.sessionId=(sessions.value[sessions.value.length-1]||0)+1;messages.value=[];}
 async function sendMessage(){if(!messageForm.value.content.trim())return;await postData('/message/send',messageForm.value);messageForm.value.content='';await loadMessageData();}
 async function clearCurrentSession(){await ElMessageBox.confirm('确认清空当前会话记录？','清空会话',{type:'warning'});await postData('/message/clear',{sessionId:messageForm.value.sessionId});await loadMessageData();}
+async function clearAllMessages(){await ElMessageBox.confirm('确认清空全部会话记录？此操作不可恢复。','清空全部会话',{type:'warning'});await postData('/message/clear',{});await loadMessageData();}
+async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id});await loadMessageData();ElMessage.success('消息已删除');}
 
 async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;aiMessages.value.push({role:'assistant',content:result.answer});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}
 async function loadAiHistory(){const history=await getData<{sessions:AiSession[]}> (`/ai/history?user_id=${currentUserId.value}`);aiSessions.value=history.sessions;}
 async function loadAiSession(id:number){aiSessionId.value=id;const history=await getData<{messages:{role:'user'|'assistant';content:string}[]}>(`/ai/history?user_id=${currentUserId.value}&session_id=${id}`);aiMessages.value=history.messages;}
 
-async function loadProfile(){const user=await getData<UserRecord>(`/user/info?username=${username.value}`);profileForm.value={userId:user.id,nickname:user.nickname,avatarUrl:user.avatarUrl||'',signature:user.signature||''};displayName.value=user.nickname;followData.value=await getData(`/user/follows?userId=${currentUserId.value}`);await loadDrafts();await loadFeedback();}
+async function loadProfile(){const [user,follows,blocks,history]=await Promise.all([getData<UserRecord>(`/user/info?username=${username.value}`),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`),getData<{blockedUserIds:number[]}>(`/user/blocks?userId=${currentUserId.value}`),getData<BehaviorRecord[]>(`/user/behaviors?userId=${currentUserId.value}`)]);profileForm.value={userId:user.id,nickname:user.nickname,avatarUrl:user.avatarUrl||'',signature:user.signature||''};displayName.value=user.nickname;followData.value=follows;blockedUserIds.value=blocks.blockedUserIds;behaviors.value=history;await loadDrafts();await loadFeedback();}
 async function saveProfile(){const user=await postData<UserRecord>('/user/profile',profileForm.value);displayName.value=user.nickname;localStorage.setItem('ai-knowledge-name',user.nickname);ElMessage.success('资料已保存');}
+async function recordBehavior(action:string,targetType:string,targetId:number){await postData('/user/behavior',{userId:currentUserId.value,action,targetType,targetId});}
+async function followUser(){await postData('/user/follow',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已关注用户');}
+async function unfollowUser(){await deleteData('/user/follow',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已取消关注');}
+async function blockUser(){await postData('/user/block',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已加入黑名单');}
+async function unblockUser(){await deleteData('/user/block',{userId:currentUserId.value,targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已解除拉黑');}
+async function reportUser(){const {value}=await ElMessageBox.prompt('请填写举报原因','举报用户',{inputValue:'发布不当内容'});await postData('/user/report',{reporterId:currentUserId.value,targetUserId:relationForm.value.targetUserId,reason:value});ElMessage.success('用户举报已提交');}
 async function loadFeedback(){tickets.value=await getData(`/feedback/tickets?userId=${currentUserId.value}`);}
 async function createTicket(){if(!feedbackForm.value.content.trim())return;await postData('/feedback/ticket',feedbackForm.value);feedbackDialog.value=false;feedbackForm.value.content='';await loadFeedback();ElMessage.success('反馈已提交');}
 
@@ -279,6 +326,9 @@ async function auditKnowledge(file:KnowledgeFile,status:string){await postData('
 async function auditPost(post:Post,status:string){await postData('/post/admin/audit',{postId:post.id,status,reason:'管理员审核'});await loadModeration();ElMessage.success('帖子状态已更新');}
 async function resolveKnowledgeReport(report:Report){await postData('/knowledge/admin/report/resolve',{reportId:report.id,status:'RESOLVED',result:'管理员已处理'});await loadModeration();}
 async function resolveUserReport(report:Report){await postData('/user/admin/report/resolve',{reportId:report.id,status:'RESOLVED',result:'管理员已处理'});await loadModeration();}
+async function loadGovernance(){const [commentsResult,draftsResult,chunksResult,historyResult]=await Promise.all([getData<Comment[]>('/comment/list'),getData<Draft[]>('/post/drafts'),getData<{chunks:AiChunk[]}>('/ai/admin/chunks'),getData<{sessions:AiSession[]}>('/ai/history')]);adminComments.value=commentsResult;adminDrafts.value=draftsResult;aiChunks.value=chunksResult.chunks;aiAuditSessions.value=historyResult.sessions;}
+async function deleteAdminComment(comment:Comment){await ElMessageBox.confirm('确认删除这条违规评论？','删除评论',{type:'warning'});await deleteData('/comment/admin',{commentId:comment.id});await loadGovernance();ElMessage.success('评论已删除');}
+async function deleteAdminDraft(draft:Draft){await ElMessageBox.confirm(`确认删除草稿“${draft.title}”？`,'删除草稿',{type:'warning'});await deleteData('/post/admin/draft',{draftId:draft.id});await loadGovernance();ElMessage.success('草稿已删除');}
 async function toggleUserStatus(user:UserRecord){await postData('/user/admin/status',{userId:user.id,status:user.status==='ACTIVE'?'DISABLED':'ACTIVE'});adminUsers.value=await getData('/user/admin/users');ElMessage.success('账号状态已更新');}
 async function loadTicketsAdmin(){[adminTickets.value,faqs.value]=await Promise.all([getData<Ticket[]>('/feedback/tickets'),getData<Faq[]>('/feedback/faqs')]);}
 function openTicketReply(ticket:Ticket){ticketReply.value={ticketId:ticket.id,status:ticket.status==='RESOLVED'?'RESOLVED':'PROCESSING',reply:ticket.reply||''};ticketDialog.value=true;}
