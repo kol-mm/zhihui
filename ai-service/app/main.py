@@ -8,6 +8,8 @@ import math
 import os
 import re
 import sqlite3
+import urllib.error
+import urllib.request
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -319,6 +321,44 @@ def save_message(session_id: int, role: str, content: str) -> dict[str, Any]:
     return row_to_dict(row)
 
 
+def local_answer(question: str, matched: list[dict[str, Any]]) -> str:
+    if matched:
+        context = "\n".join(chunk["content"] for chunk in matched[:2])
+        return f"Based on the local knowledge base, the most relevant material for '{question}' is:\n{context}"
+    return f"The local knowledge base has no matching references yet. Your question was recorded: '{question}'"
+
+
+def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
+    api_key = os.getenv("AI_API_KEY", "").strip()
+    base_url = str(config.get("base_url", "")).strip().rstrip("/")
+    if not api_key or not base_url:
+        return None
+    context = "\n\n".join(
+        f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
+    ) or "No matching knowledge references were found."
+    payload = {
+        "model": str(config.get("model") or "local-rag"),
+        "temperature": float(config.get("temperature", 0.2)),
+        "messages": [
+            {"role": "system", "content": "Answer using the supplied knowledge references. Be concise and cite references when available.\n\n" + context},
+            {"role": "user", "content": question},
+        ],
+    }
+    request = urllib.request.Request(
+        base_url + "/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(os.getenv("AI_API_TIMEOUT", "30"))) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        content = body.get("choices", [{}])[0].get("message", {}).get("content")
+        return str(content).strip() if content else None
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+        return None
+
+
 @app.get("/ai/health", response_model=ApiResponse)
 def health() -> ApiResponse:
     init_db()
@@ -470,7 +510,21 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
     init_db()
     session_id = ensure_session(request, user_id)
     user_message = save_message(session_id, "user", request.question)
-    matched = retrieve_chunks(request.question, limit=int(read_ai_config()["match_limit"]))
+    config = read_ai_config()
+    matched = retrieve_chunks(request.question, limit=int(config["match_limit"]))
+    answer = compatible_answer(request.question, matched, config) if config.get("provider") == "openai-compatible" else None
+    if not answer:
+        answer = local_answer(request.question, matched)
+    assistant_message = save_message(session_id, "assistant", answer)
+    return ApiResponse(
+        data={
+            "session_id": session_id,
+            "answer": answer,
+            "references": matched,
+            "messages": [user_message, assistant_message],
+            "created_at": assistant_message["created_at"],
+        }
+    )
 
     if matched:
         context = "；".join(chunk["content"] for chunk in matched[:2])
