@@ -41,7 +41,7 @@ spring:
         - id: message-service
           uri: lb://message-service
           predicates:
-            - Path=/message/**,/notification/**,/feedback/**
+            - Path=/message/**,/notification/**,/feedback/**,/event/**
         - id: ai-service
           uri: ${AI_SERVICE_URL:http://127.0.0.1:8200}
           predicates:
