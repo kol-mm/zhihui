@@ -4,9 +4,23 @@ server:
 spring:
   application:
     name: community-service
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 90MB
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
   cloud:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+
+community:
+  media:
+    storage-mode: ${COMMUNITY_STORAGE_MODE:${KNOWLEDGE_STORAGE_MODE:local}}
+    local-root: ../data/community-media
+    minio:
+      endpoint: http://127.0.0.1:9000
+      bucket: ai-community
+      access-key: ${MINIO_ACCESS_KEY:aiknowledge}
+      secret-key: ${MINIO_SECRET_KEY:ai-knowledge-local-change-me}

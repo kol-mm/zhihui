@@ -17,7 +17,12 @@ class CommunityControllerTest {
     }
 
     private final CommunityController controller =
-            new CommunityController(new InMemoryCommunityStore());
+            new CommunityController(
+                    new InMemoryCommunityStore(),
+                    new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                            "local", "target/test-community-media", "http://127.0.0.1:9000",
+                            "ai-community", "test", "test-password")
+            );
     private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
     private final String secondUserAuth = "Bearer " + LocalAuth.issueToken("author", 2L, "USER");
 
@@ -36,6 +41,19 @@ class CommunityControllerTest {
         assertEquals(0, feed.code());
         assertFalse(feed.data().isEmpty());
         assertEquals("Community Persistence", feed.data().get(0).get("title"));
+    }
+
+    @Test
+    void imageCanBeUploadedAndReadFromMediaEndpoint() {
+        byte[] png = new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 0};
+        var file = new org.springframework.mock.web.MockMultipartFile("files", "cover.png", "image/png", png);
+        var uploaded = controller.uploadImages(userAuth, List.of(file));
+        assertEquals(0, uploaded.code());
+        String url = String.valueOf(((List<?>) uploaded.data().get("imageUrls")).get(0));
+        var response = controller.media(url.substring(url.lastIndexOf('/') + 1));
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("image/png", response.getHeaders().getContentType().toString());
+        assertEquals(png.length, response.getBody().length);
     }
 
     @Test

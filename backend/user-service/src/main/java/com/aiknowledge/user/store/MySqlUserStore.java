@@ -2,6 +2,12 @@ package com.aiknowledge.user.store;
 
 import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.entity.UserFollowEntity;
+import com.aiknowledge.user.entity.UserBlockEntity;
+import com.aiknowledge.user.entity.UserBehaviorLogEntity;
+import com.aiknowledge.user.entity.UserReportEntity;
+import com.aiknowledge.user.mapper.UserBlockMapper;
+import com.aiknowledge.user.mapper.UserBehaviorLogMapper;
+import com.aiknowledge.user.mapper.UserReportMapper;
 import com.aiknowledge.user.mapper.UserFollowMapper;
 import com.aiknowledge.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -17,13 +23,18 @@ import java.util.Optional;
 public class MySqlUserStore implements UserStore {
     private final UserMapper userMapper;
     private final UserFollowMapper followMapper;
-    private final InMemoryUserStore localRelations;
+    private final UserBlockMapper blockMapper;
+    private final UserBehaviorLogMapper behaviorMapper;
+    private final UserReportMapper reportMapper;
 
     public MySqlUserStore(UserMapper userMapper, UserFollowMapper followMapper,
-                          org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
+                          UserBlockMapper blockMapper, UserBehaviorLogMapper behaviorMapper,
+                          UserReportMapper reportMapper) {
         this.userMapper = userMapper;
         this.followMapper = followMapper;
-        this.localRelations = new InMemoryUserStore(passwordEncoder);
+        this.blockMapper = blockMapper;
+        this.behaviorMapper = behaviorMapper;
+        this.reportMapper = reportMapper;
     }
 
     @Override
@@ -111,12 +122,76 @@ public class MySqlUserStore implements UserStore {
         return followMapper.selectList(Wrappers.<UserFollowEntity>lambdaQuery().eq(UserFollowEntity::getTargetUserId, userId))
                 .stream().map(UserFollowEntity::getUserId).toList();
     }
-    @Override public boolean block(Long userId, Long targetUserId) { unfollow(userId, targetUserId); return localRelations.block(userId, targetUserId); }
-    @Override public boolean unblock(Long userId, Long targetUserId) { return localRelations.unblock(userId, targetUserId); }
-    @Override public List<Long> listBlockedIds(Long userId) { return localRelations.listBlockedIds(userId); }
-    @Override public UserReport reportUser(Long reporterId, Long targetUserId, String reason) { return localRelations.reportUser(reporterId, targetUserId, reason); }
-    @Override public List<UserReport> listUserReports() { return localRelations.listUserReports(); }
-    @Override public Optional<UserReport> resolveUserReport(Long reportId, String status, String result) { return localRelations.resolveUserReport(reportId, status, result); }
-    @Override public BehaviorRecord recordBehavior(Long userId, String action, String targetType, Long targetId) { return localRelations.recordBehavior(userId, action, targetType, targetId); }
-    @Override public List<BehaviorRecord> listBehaviors(Long userId) { return localRelations.listBehaviors(userId); }
+    @Override
+    public boolean block(Long userId, Long targetUserId) {
+        unfollow(userId, targetUserId);
+        UserBlockEntity existing = blockMapper.selectOne(Wrappers.<UserBlockEntity>lambdaQuery()
+                .eq(UserBlockEntity::getUserId, userId).eq(UserBlockEntity::getBlockedUserId, targetUserId));
+        if (existing != null) return false;
+        UserBlockEntity block = new UserBlockEntity();
+        block.setUserId(userId); block.setBlockedUserId(targetUserId); block.setCreatedAt(LocalDateTime.now());
+        blockMapper.insert(block);
+        return true;
+    }
+
+    @Override
+    public boolean unblock(Long userId, Long targetUserId) {
+        return blockMapper.delete(Wrappers.<UserBlockEntity>lambdaQuery()
+                .eq(UserBlockEntity::getUserId, userId).eq(UserBlockEntity::getBlockedUserId, targetUserId)) > 0;
+    }
+
+    @Override
+    public List<Long> listBlockedIds(Long userId) {
+        return blockMapper.selectList(Wrappers.<UserBlockEntity>lambdaQuery()
+                        .eq(UserBlockEntity::getUserId, userId).orderByDesc(UserBlockEntity::getCreatedAt))
+                .stream().map(UserBlockEntity::getBlockedUserId).toList();
+    }
+
+    @Override
+    public UserReport reportUser(Long reporterId, Long targetUserId, String reason) {
+        UserReportEntity report = new UserReportEntity();
+        report.setReporterId(reporterId); report.setTargetUserId(targetUserId); report.setReason(reason);
+        report.setStatus("PENDING"); report.setCreatedAt(LocalDateTime.now()); report.setUpdatedAt(LocalDateTime.now());
+        reportMapper.insert(report);
+        return toReport(report);
+    }
+
+    @Override
+    public List<UserReport> listUserReports() {
+        return reportMapper.selectList(Wrappers.<UserReportEntity>lambdaQuery()
+                        .orderByDesc(UserReportEntity::getCreatedAt))
+                .stream().map(this::toReport).toList();
+    }
+
+    @Override
+    public Optional<UserReport> resolveUserReport(Long reportId, String status, String result) {
+        UserReportEntity report = reportMapper.selectById(reportId);
+        if (report == null) return Optional.empty();
+        report.setStatus(status); report.setResult(result); report.setUpdatedAt(LocalDateTime.now());
+        reportMapper.updateById(report);
+        return Optional.of(toReport(report));
+    }
+
+    @Override
+    public BehaviorRecord recordBehavior(Long userId, String action, String targetType, Long targetId) {
+        UserBehaviorLogEntity behavior = new UserBehaviorLogEntity();
+        behavior.setUserId(userId); behavior.setBehaviorType(action); behavior.setTargetType(targetType);
+        behavior.setTargetId(targetId); behavior.setCreatedAt(LocalDateTime.now());
+        behaviorMapper.insert(behavior);
+        return new BehaviorRecord(behavior.getId(), userId, action, targetType, targetId, behavior.getCreatedAt());
+    }
+
+    @Override
+    public List<BehaviorRecord> listBehaviors(Long userId) {
+        return behaviorMapper.selectList(Wrappers.<UserBehaviorLogEntity>lambdaQuery()
+                        .eq(userId != null, UserBehaviorLogEntity::getUserId, userId)
+                        .orderByDesc(UserBehaviorLogEntity::getCreatedAt))
+                .stream().map(item -> new BehaviorRecord(item.getId(), item.getUserId(), item.getBehaviorType(),
+                        item.getTargetType(), item.getTargetId(), item.getCreatedAt())).toList();
+    }
+
+    private UserReport toReport(UserReportEntity report) {
+        return new UserReport(report.getId(), report.getReporterId(), report.getTargetUserId(), report.getReason(),
+                report.getStatus(), report.getResult(), report.getCreatedAt(), report.getUpdatedAt());
+    }
 }

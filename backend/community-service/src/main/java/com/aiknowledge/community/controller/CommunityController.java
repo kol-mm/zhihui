@@ -7,6 +7,7 @@ import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 import com.aiknowledge.community.store.CommunityStore;
+import com.aiknowledge.community.storage.CommunityMediaStorageService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +16,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -24,9 +29,44 @@ import java.util.Map;
 @RestController
 public class CommunityController {
     private final CommunityStore communityStore;
+    private final CommunityMediaStorageService mediaStorage;
 
-    public CommunityController(CommunityStore communityStore) {
+    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage) {
         this.communityStore = communityStore;
+        this.mediaStorage = mediaStorage;
+    }
+
+    @PostMapping(value = "/post/media/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<Map<String, Object>> uploadImages(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam("files") List<MultipartFile> files
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
+        if (files.isEmpty() || files.size() > 9) return ApiResponse.fail("select between 1 and 9 images");
+        try {
+            List<byte[]> contents = new java.util.ArrayList<>();
+            for (MultipartFile file : files) {
+                byte[] bytes = file.getBytes();
+                mediaStorage.validate(bytes);
+                contents.add(bytes);
+            }
+            List<String> imageUrls = new java.util.ArrayList<>();
+            for (int index = 0; index < files.size(); index++) {
+                imageUrls.add(mediaStorage.save(files.get(index).getOriginalFilename(), contents.get(index)));
+            }
+            return ApiResponse.ok(Map.of("imageUrls", imageUrls, "count", imageUrls.size()));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        } catch (Exception error) {
+            return ApiResponse.fail("image upload failed: " + error.getMessage());
+        }
+    }
+
+    @GetMapping("/post/media/{token}")
+    public ResponseEntity<byte[]> media(@PathVariable String token) {
+        CommunityMediaStorageService.StoredMedia media = mediaStorage.read(token);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(media.contentType()))
+                .contentLength(media.bytes().length).body(media.bytes());
     }
 
     @GetMapping("/post/health")

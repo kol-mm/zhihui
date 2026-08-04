@@ -10,3 +10,18 @@ spring:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+
+knowledge:
+  storage:
+    mode: ${KNOWLEDGE_STORAGE_MODE:local}
+    local-root: ../data/uploads
+    minio:
+      endpoint: http://127.0.0.1:9000
+      bucket: ai-knowledge
+      access-key: ${MINIO_ACCESS_KEY:aiknowledge}
+      secret-key: ${MINIO_SECRET_KEY:ai-knowledge-local-change-me}
+  search:
+    mode: local
+    elasticsearch:
+      endpoint: http://127.0.0.1:9200
+      index: ai-knowledge

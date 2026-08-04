@@ -5,6 +5,12 @@ export const api = axios.create({
   timeout: 8000
 });
 
+export function resolveApiUrl(path: string): string {
+  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  if (!path.startsWith('/')) return path;
+  return `${String(api.defaults.baseURL || '').replace(/\/$/, '')}${path}`;
+}
+
 const AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
 
 export function setAuthToken(token: string) {
