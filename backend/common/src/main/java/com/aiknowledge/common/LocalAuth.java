@@ -1,11 +1,24 @@
 package com.aiknowledge.common;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 public final class LocalAuth {
-    private static final String PREFIX = "local-dev-token.";
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
+    private static final String HEADER = encodeJson(Map.of("alg", "HS256", "typ", "JWT"));
+    private static final long DEFAULT_EXPIRY_SECONDS = 8 * 60 * 60;
 
     private LocalAuth() {
     }
@@ -15,14 +28,37 @@ public final class LocalAuth {
     }
 
     public static String issueToken(String username) {
-        String role = roleForUsername(username);
-        String payload = username + ":" + role;
-        return PREFIX + Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+        long issuedAt = Instant.now().getEpochSecond();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sub", username);
+        payload.put("role", roleForUsername(username));
+        payload.put("iat", issuedAt);
+        payload.put("exp", issuedAt + expirySeconds());
+        payload.put("jti", UUID.randomUUID().toString());
+        String encodedPayload = encodeJson(payload);
+        String signingInput = HEADER + "." + encodedPayload;
+        return signingInput + "." + sign(signingInput);
+    }
+
+    public static boolean isAuthenticated(String authorization) {
+        return claims(authorization) != null;
     }
 
     public static boolean isAdmin(String authorization) {
-        return "ADMIN".equals(parseRole(authorization));
+        Claims claims = claims(authorization);
+        return claims != null && "ADMIN".equals(claims.role());
+    }
+
+    public static String username(String authorization) {
+        Claims claims = claims(authorization);
+        return claims == null ? "" : claims.username();
+    }
+
+    public static ApiResponse<Map<String, Object>> requireUser(String authorization) {
+        if (isAuthenticated(authorization)) {
+            return null;
+        }
+        return ApiResponse.fail("valid user authorization is required");
     }
 
     public static ApiResponse<Map<String, Object>> requireAdmin(String authorization) {
@@ -32,24 +68,93 @@ public final class LocalAuth {
         return ApiResponse.fail("admin authorization is required");
     }
 
-    private static String parseRole(String authorization) {
-        if (authorization == null || authorization.isBlank()) {
-            return "";
+    public static Map<String, Object> session(String authorization) {
+        Claims claims = claims(authorization);
+        if (claims == null) {
+            return Map.of("authenticated", false);
         }
-        String token = authorization.trim();
-        if (token.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            token = token.substring(7).trim();
+        return Map.of(
+                "authenticated", true,
+                "username", claims.username(),
+                "role", claims.role(),
+                "issuedAt", claims.issuedAt(),
+                "expiresAt", claims.expiresAt()
+        );
+    }
+
+    private static Claims claims(String authorization) {
+        String token = bearerToken(authorization);
+        String[] parts = token.split("\\.");
+        if (parts.length != 3 || !"HS256".equals(headerAlgorithm(parts[0]))) {
+            return null;
         }
-        if (!token.startsWith(PREFIX)) {
-            return "";
+        String signingInput = parts[0] + "." + parts[1];
+        if (!MessageDigest.isEqual(sign(signingInput).getBytes(StandardCharsets.US_ASCII), parts[2].getBytes(StandardCharsets.US_ASCII))) {
+            return null;
         }
         try {
-            String encoded = token.substring(PREFIX.length());
-            String decoded = new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
-            String[] parts = decoded.split(":", 2);
-            return parts.length == 2 ? parts[1] : "";
-        } catch (IllegalArgumentException ex) {
+            Map<String, Object> payload = JSON.readValue(DECODER.decode(parts[1]), new TypeReference<>() {});
+            String username = String.valueOf(payload.getOrDefault("sub", ""));
+            String role = String.valueOf(payload.getOrDefault("role", ""));
+            long issuedAt = number(payload.get("iat"));
+            long expiresAt = number(payload.get("exp"));
+            if (username.isBlank() || role.isBlank() || expiresAt <= Instant.now().getEpochSecond()) {
+                return null;
+            }
+            return new Claims(username, role, issuedAt, expiresAt);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String headerAlgorithm(String encodedHeader) {
+        try {
+            Map<String, Object> header = JSON.readValue(DECODER.decode(encodedHeader), new TypeReference<>() {});
+            return String.valueOf(header.getOrDefault("alg", ""));
+        } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private static String bearerToken(String authorization) {
+        if (authorization == null || authorization.isBlank()) { return ""; }
+        String token = authorization.trim();
+        return token.regionMatches(true, 0, "Bearer ", 0, 7) ? token.substring(7).trim() : token;
+    }
+
+    private static String encodeJson(Map<String, Object> value) {
+        try {
+            return ENCODER.encodeToString(JSON.writeValueAsBytes(value));
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to encode jwt", error);
+        }
+    }
+
+    private static String sign(String signingInput) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return ENCODER.encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.US_ASCII)));
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to sign jwt", error);
+        }
+    }
+
+    private static String secret() {
+        String configured = System.getenv("AI_KNOWLEDGE_JWT_SECRET");
+        return configured == null || configured.isBlank() ? "local-dev-secret-change-before-production" : configured;
+    }
+
+    private static long expirySeconds() {
+        String configured = System.getenv("AI_KNOWLEDGE_JWT_EXPIRES_SECONDS");
+        if (configured == null || configured.isBlank()) { return DEFAULT_EXPIRY_SECONDS; }
+        try { return Math.max(60, Long.parseLong(configured)); } catch (NumberFormatException ignored) { return DEFAULT_EXPIRY_SECONDS; }
+    }
+
+    private static long number(Object value) {
+        return value instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(value));
+    }
+
+    private record Claims(String username, String role, long issuedAt, long expiresAt) {
     }
 }

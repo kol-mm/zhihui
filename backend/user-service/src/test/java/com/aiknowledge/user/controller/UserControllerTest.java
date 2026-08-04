@@ -1,6 +1,7 @@
 package com.aiknowledge.user.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.store.InMemoryUserStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -27,6 +28,25 @@ class UserControllerTest {
 
         assertEquals(0, response.code());
         assertNotNull(response.data().get("token"));
+        String token = String.valueOf(response.data().get("token"));
+        assertEquals(3, token.split("\\.").length);
+        assertEquals(true, LocalAuth.isAuthenticated("Bearer " + token));
+        assertEquals(false, LocalAuth.isAdmin("Bearer " + token));
+        assertEquals(false, LocalAuth.isAuthenticated("Bearer " + token + "tampered"));
+
+        ApiResponse<Map<String, Object>> session = controller.session("Bearer " + token);
+        assertEquals(0, session.code());
+        assertEquals("demo", session.data().get("username"));
+        assertEquals("USER", session.data().get("role"));
+    }
+
+    @Test
+    void adminTokenContainsAdminRole() {
+        ApiResponse<Map<String, Object>> response =
+                controller.login(Map.of("username", "admin", "password", "admin123"));
+        assertEquals(0, response.code());
+        String token = String.valueOf(response.data().get("token"));
+        assertEquals(true, LocalAuth.isAdmin("Bearer " + token));
     }
 
     @Test

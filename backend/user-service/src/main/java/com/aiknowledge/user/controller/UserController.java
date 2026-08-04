@@ -71,6 +71,16 @@ public class UserController {
         ));
     }
 
+    @GetMapping("/session")
+    public ApiResponse<Map<String, Object>> session(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) {
+            return ApiResponse.fail("valid user authorization is required");
+        }
+        return ApiResponse.ok(LocalAuth.session(authorization));
+    }
+
     @GetMapping("/info")
     public ApiResponse<Map<String, Object>> info(@RequestParam(name = "username", defaultValue = "demo") String username) {
         return userStore.findByUsername(username)
