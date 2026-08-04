@@ -65,6 +65,16 @@ Windows 下如果想双击启动，请使用：
     .\start-local.ps1 -SkipBuild
     .\start-local.ps1 -SkipNacos
     .\start-local.ps1 -SkipFrontend
+    .\start-local.ps1 -SkipSmokeTest
+
+双击 `start-local.bat` 默认执行受控重启：先完成构建和依赖检查，再停止上次由脚本记录的进程，所有健康检查及接口验收通过后才提示成功。脚本不会仅凭端口占用判断服务正常。
+
+停止或重启整套本地服务：
+
+    .\stop-local.ps1
+    .\restart-local.ps1 -SkipBuild
+
+启动器把进程号记录在 `logs/local-processes.json`，标准输出和错误日志分别写入 `logs/<service>.log` 与 `logs/<service>.error.log`。停止脚本会核对进程启动时间，只结束由本项目启动器记录的进程树。
 
 ## 启动后端
 

@@ -7,25 +7,36 @@ $NacosMarker = Join-Path $Logs "nacos-home.txt"
 $failed = $false
 
 if (Test-Path $ProcessFile) {
-    $entries = @(Get-Content $ProcessFile -Raw | ConvertFrom-Json)
-    foreach ($entry in ($entries | Sort-Object { [int]$_.pid } -Descending)) {
-        $pidValue = [int]$entry.pid
+    $parsedEntries = Get-Content $ProcessFile -Raw | ConvertFrom-Json
+    $entries = [System.Collections.ArrayList]::new()
+    foreach ($parsedEntry in $parsedEntries) { [void]$entries.Add($parsedEntry) }
+    foreach ($entry in $entries) {
+        $targets = @()
+        if ($entry.listenerPid) {
+            $targets += [pscustomobject]@{ pid = [int]$entry.listenerPid; startTimeUtc = [string]$entry.listenerStartTimeUtc; role = "listener" }
+        }
+        $targets += [pscustomobject]@{ pid = [int]$entry.pid; startTimeUtc = [string]$entry.startTimeUtc; role = "launcher" }
+
+        foreach ($target in $targets) {
+        $pidValue = [int]$target.pid
         $process = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
         if (-not $process) { continue }
 
-        $expected = [DateTime]::Parse([string]$entry.startTimeUtc).ToUniversalTime()
+        $expected = [DateTime]::Parse([string]$target.startTimeUtc).ToUniversalTime()
         $actual = $process.StartTime.ToUniversalTime()
         if ([Math]::Abs(($actual - $expected).TotalSeconds) -gt 2) {
-            Write-Host "[$($entry.name)] PID $pidValue was reused; refusing to stop it." -ForegroundColor Yellow
+            Write-Host "[$($entry.name)] $($target.role) PID $pidValue was reused; refusing to stop it." -ForegroundColor Yellow
             $failed = $true
             continue
         }
 
-        Write-Host "Stopping [$($entry.name)] process tree (PID $pidValue)..." -ForegroundColor Cyan
-        & taskkill.exe /PID $pidValue /T /F 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0 -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+        Write-Host "Stopping [$($entry.name)] $($target.role) process tree (PID $pidValue)..." -ForegroundColor Cyan
+        $killer = Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", $pidValue, "/T", "/F") `
+            -WindowStyle Hidden -Wait -PassThru
+        if ($killer.ExitCode -ne 0 -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
             Write-Host "[$($entry.name)] could not be stopped." -ForegroundColor Red
             $failed = $true
+        }
         }
     }
     if (-not $failed) { Remove-Item -LiteralPath $ProcessFile -Force -ErrorAction SilentlyContinue }

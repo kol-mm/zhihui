@@ -92,8 +92,10 @@ function Wait-Service {
             return
         }
         if ($Process -and $Process.HasExited) {
+            $Process.Refresh()
             Show-ServiceLogs $Name
-            throw "[$Name] exited before becoming ready (exit code $($Process.ExitCode))."
+            $exitCode = if ($null -ne $Process.ExitCode) { $Process.ExitCode } else { "unknown" }
+            throw "[$Name] exited before becoming ready (exit code $exitCode)."
         }
         Start-Sleep -Seconds ([Math]::Max(1, $WaitSeconds))
     } while ((Get-Date) -lt $deadline)
@@ -127,15 +129,25 @@ function Start-ManagedProcess {
         -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $outputLog -RedirectStandardError $errorLog
 
-    [void]$script:ManagedProcesses.Add([ordered]@{
+    $record = [ordered]@{
         name = $Name
         pid = $process.Id
         startTimeUtc = $process.StartTime.ToUniversalTime().ToString("o")
         port = $Port
-    })
+    }
+    [void]$script:ManagedProcesses.Add($record)
     Save-ProcessRegistry
     Write-Host "[$Name] process started (PID $($process.Id)). Waiting for health check..." -ForegroundColor Cyan
     Wait-Service -Name $Name -HealthUrl $HealthUrl -Process $process
+    $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($listener) {
+        $listenerProcess = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+        if ($listenerProcess) {
+            $record.listenerPid = $listenerProcess.Id
+            $record.listenerStartTimeUtc = $listenerProcess.StartTime.ToUniversalTime().ToString("o")
+            Save-ProcessRegistry
+        }
+    }
     return $process
 }
 
@@ -143,34 +155,9 @@ try {
     Write-Host "Starting AI Knowledge Platform local usable version..." -ForegroundColor Cyan
     Write-Host "Project: $Root"
 
-    if ($Restart) {
-        Write-Host "Stopping processes recorded by the previous local run..." -ForegroundColor Cyan
-        & (Join-Path $Root "stop-local.ps1") -KeepNacos:$SkipNacos
-        if ($LASTEXITCODE -ne 0) { throw "Failed to stop the previous local run." }
-    }
-
     $PowerShellExe = Assert-Command "powershell.exe" "PowerShell is required on Windows."
     $MavenExe = Assert-Command "mvn.cmd" "Install Maven 3.6+ and add it to PATH."
     if (-not $SkipFrontend) { $NpmExe = Assert-Command "npm.cmd" "Install Node.js 20+ and add npm to PATH." }
-
-    if (-not $SkipNacos) {
-        if (Test-HealthUrl "http://127.0.0.1:8848/nacos/v1/console/health/readiness") {
-            Write-Host "[nacos] already healthy on port 8848." -ForegroundColor Yellow
-        } else {
-            $nacosHome = $env:NACOS_HOME
-            if (-not $nacosHome) {
-                $knownNacos = "D:\software\nacos-server-2.3.2\nacos"
-                if (Test-Path (Join-Path $knownNacos "bin\startup.cmd")) { $nacosHome = $knownNacos }
-            }
-            $startup = if ($nacosHome) { Join-Path $nacosHome "bin\startup.cmd" } else { "" }
-            if (-not $nacosHome -or -not (Test-Path $startup)) {
-                throw "Nacos was not found. Set NACOS_HOME to the Nacos root directory or use -SkipNacos."
-            }
-            Start-Process -FilePath $startup -ArgumentList "-m", "standalone" -WorkingDirectory (Split-Path $startup) -WindowStyle Hidden | Out-Null
-            Set-Content -Path $NacosMarker -Value $nacosHome -Encoding UTF8
-            Wait-Service -Name "nacos" -HealthUrl "http://127.0.0.1:8848/nacos/v1/console/health/readiness" -Process $null
-        }
-    }
 
     if (-not $SkipBuild) {
         Write-Host "[backend] building and installing modules..." -ForegroundColor Cyan
@@ -194,9 +181,34 @@ try {
         }
     }
 
+    if ($Restart) {
+        Write-Host "Stopping processes recorded by the previous local run..." -ForegroundColor Cyan
+        & (Join-Path $Root "stop-local.ps1") -KeepNacos:$SkipNacos
+        if ($LASTEXITCODE -ne 0) { throw "Failed to stop the previous local run." }
+    }
+
+    if (-not $SkipNacos) {
+        if (Test-HealthUrl "http://127.0.0.1:8848/nacos/v1/console/health/readiness") {
+            Write-Host "[nacos] already healthy on port 8848." -ForegroundColor Yellow
+        } else {
+            $nacosHome = $env:NACOS_HOME
+            if (-not $nacosHome) {
+                $knownNacos = "D:\software\nacos-server-2.3.2\nacos"
+                if (Test-Path (Join-Path $knownNacos "bin\startup.cmd")) { $nacosHome = $knownNacos }
+            }
+            $startup = if ($nacosHome) { Join-Path $nacosHome "bin\startup.cmd" } else { "" }
+            if (-not $nacosHome -or -not (Test-Path $startup)) {
+                throw "Nacos was not found. Set NACOS_HOME to the Nacos root directory or use -SkipNacos."
+            }
+            Start-Process -FilePath $startup -ArgumentList "-m", "standalone" -WorkingDirectory (Split-Path $startup) -WindowStyle Hidden | Out-Null
+            Set-Content -Path $NacosMarker -Value $nacosHome -Encoding UTF8
+            Wait-Service -Name "nacos" -HealthUrl "http://127.0.0.1:8848/nacos/v1/console/health/readiness" -Process $null
+        }
+    }
+
     if (-not $SkipAi) {
         Start-ManagedProcess -Name "ai-service" -FilePath $PowerShellExe `
-            -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $AiService "run.ps1")) `
+            -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f (Join-Path $AiService "run.ps1"))) `
             -WorkingDirectory $AiService -Port 8200 -HealthUrl "http://127.0.0.1:8200/ai/health" | Out-Null
     }
 
