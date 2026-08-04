@@ -104,6 +104,14 @@
             <div class="page-toolbar"><div><h3>知识库</h3><p>检索、阅读并管理社区知识资源</p></div><el-button type="primary" :icon="Upload" @click="knowledgeDialog = true">上传资料</el-button></div>
             <section class="surface filter-bar"><el-input v-model="knowledgeKeyword" placeholder="输入标题或正文关键词" :prefix-icon="Search" clearable @keyup.enter="searchKnowledge" /><el-select v-model="knowledgeType" placeholder="全部格式" clearable><el-option label="Word" value="docx" /><el-option label="PDF" value="pdf" /><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select><el-button :icon="Search" @click="searchKnowledge">搜索</el-button></section>
             <section class="surface">
+              <div class="category-filter">
+                <el-radio-group v-model="knowledgeCategoryId" size="small">
+                  <el-radio-button :value="0">全部 {{ knowledgeFiles.length }}</el-radio-button>
+                  <el-radio-button v-for="category in knowledgeCategories" :key="category.id" :value="category.id">
+                    {{ category.name }} {{ categoryCount(category.id) }}
+                  </el-radio-button>
+                </el-radio-group>
+              </div>
               <div v-if="filteredKnowledge.length" class="knowledge-grid">
                 <article v-for="file in filteredKnowledge" :key="file.id" class="knowledge-card">
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || 'DOC' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
@@ -199,7 +207,7 @@ import { ElMessage, ElMessageBox, type UploadFile, type UploadRawFile } from 'el
 import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View } from '@element-plus/icons-vue';
 import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
 
-type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; views?:number; downloads?:number; likes?:number };
+type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; views?:number; downloads?:number; likes?:number };
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string };
@@ -227,7 +235,7 @@ const role = ref(localStorage.getItem('ai-knowledge-role') || 'USER');
 const currentUserId = ref(Number(localStorage.getItem('ai-knowledge-user-id') || 1));
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
-const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const adminUserKeyword = ref('');
+const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const knowledgeCategoryId = ref(0); const adminUserKeyword = ref('');
 const feedMode = ref<'all'|'following'>('all'); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false);
 
@@ -266,7 +274,7 @@ const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览'
 const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigation : clientNavigation.map(item => item.key === 'notifications' ? {...item,badge:notifications.value.filter(notice=>!notice.read).length || 0} : item));
 const currentTitle = computed(() => currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
-const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
+const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
 const filteredAdminUsers = computed(() => adminUsers.value.filter(user => `${user.username}${user.nickname}`.toLowerCase().includes(adminUserKeyword.value.toLowerCase())));
 const adminMetrics = computed(() => [{label:'注册用户',value:metricValue('userAdmin','totalUsers'),hint:`${metricValue('userAdmin','activeUsers')} 个正常账号`,color:'green',icon:markRaw(UserFilled)},{label:'知识资源',value:metricValue('knowledgeAdmin','totalFiles'),hint:`${metricValue('knowledgeAdmin','pendingAudit')} 个待审核`,color:'blue',icon:markRaw(Files)},{label:'社区帖子',value:metricValue('forumAdmin','publishedPosts'),hint:'全站内容产出',color:'amber',icon:markRaw(ChatDotRound)},{label:'反馈工单',value:metricValue('feedbackAdmin','tickets'),hint:`${metricValue('feedbackAdmin','pendingTickets')} 个待处理`,color:'red',icon:markRaw(Tickets)}]);
 const healthItems = computed(() => [{label:'网关与用户服务',ok:systemHealth.value.user},{label:'知识与全文检索',ok:systemHealth.value.knowledge},{label:'社区与消息服务',ok:systemHealth.value.community&&systemHealth.value.message},{label:'AI 向量检索',ok:systemHealth.value.ai}]);
@@ -274,6 +282,7 @@ const currentMessageSession = computed(() => sessions.value.find(session => sess
 const currentMessagePartner = computed(() => currentMessageSession.value ? sessionPartner(currentMessageSession.value) : undefined);
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
+function categoryCount(categoryId:number){ return knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length; }
 function auditLabel(status:string){ return ({APPROVED:'已通过',PENDING:'待审核',REJECTED:'已驳回'} as Record<string,string>)[status] || status; }
 function ticketStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已解决'} as Record<string,string>)[status] || status; }
 function behaviorActionLabel(action:string){return ({VIEW:'浏览',LIKE:'点赞',COLLECT:'收藏',COMMENT:'评论',UPLOAD:'上传'} as Record<string,string>)[action]||action;}
