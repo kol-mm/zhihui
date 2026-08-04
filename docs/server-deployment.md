@@ -62,3 +62,7 @@ available at `deploy/nginx/ai-knowledge.conf`. Replace the domain, certificate p
 then validate the configuration with `nginx -t` before reloading Nginx.
 
 For a different API origin, set `VITE_API_BASE_URL` before running the frontend production build.
+
+After all services are running, execute `verify-production.ps1`. It performs read-only checks for required
+secrets, infrastructure ports, gateway routes, AI health, and MinIO health. A non-zero exit code means the
+server is not ready to receive production traffic.
