@@ -88,6 +88,25 @@ public class UserController {
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
+    @GetMapping("/directory")
+    public ApiResponse<java.util.List<Map<String, Object>>> directory(
+            @RequestParam(name = "keyword", defaultValue = "") String keyword
+    ) {
+        String query = keyword.trim().toLowerCase();
+        return ApiResponse.ok(userStore.listUsers().stream()
+                .filter(user -> "ACTIVE".equals(user.getStatus()))
+                .filter(user -> query.isBlank()
+                        || user.getUsername().toLowerCase().contains(query)
+                        || user.getNickname().toLowerCase().contains(query))
+                .limit(20)
+                .map(user -> Map.<String, Object>of(
+                        "id", user.getId(),
+                        "username", user.getUsername(),
+                        "nickname", user.getNickname(),
+                        "avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl()))
+                .toList());
+    }
+
     @PostMapping("/profile")
     public ApiResponse<Map<String, Object>> updateProfile(@RequestBody Map<String, Object> request) {
         Long userId = number(request.get("userId"), 1L);

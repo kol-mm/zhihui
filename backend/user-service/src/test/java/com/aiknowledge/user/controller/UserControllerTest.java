@@ -10,7 +10,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UserControllerTest {
     static {
@@ -61,6 +63,27 @@ class UserControllerTest {
         ApiResponse<Map<String, Object>> login =
                 controller.login(Map.of("username", "alice", "password", "secret123"));
         assertEquals(0, login.code());
+    }
+
+    @Test
+    void directoryReturnsActivePublicProfilesWithoutCredentials() {
+        controller.register(Map.of(
+                "username", "directory-user",
+                "password", "secret123",
+                "nickname", "Directory User"
+        ));
+
+        var response = controller.directory("directory");
+
+        assertEquals(0, response.code());
+        assertFalse(response.data().isEmpty());
+        Map<String, Object> user = response.data().get(0);
+        assertNotNull(user.get("id"));
+        assertEquals("directory-user", user.get("username"));
+        assertEquals("Directory User", user.get("nickname"));
+        assertTrue(user.containsKey("avatarUrl"));
+        assertFalse(user.containsKey("password"));
+        assertFalse(user.containsKey("passwordHash"));
     }
 
     @Test

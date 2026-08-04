@@ -93,6 +93,24 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void publicListHidesPendingKnowledgeButAdminCanIncludeIt() {
+        var uploaded = controller.upload(Map.of(
+                "userId", 1L,
+                "title", "Pending private draft",
+                "fileType", "txt",
+                "content", "This content is waiting for review."
+        ));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var publicList = controller.list(null, false);
+        assertFalse(publicList.data().stream().anyMatch(file -> fileId.equals(file.get("id"))));
+
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        var adminList = controller.list(adminAuth, true);
+        assertTrue(adminList.data().stream().anyMatch(file -> fileId.equals(file.get("id"))));
+    }
+
+    @Test
     void adminCanResolveKnowledgeReport() {
         controller.report(Map.of("userId", 1L, "fileId", 1L, "reason", "review"));
         String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");

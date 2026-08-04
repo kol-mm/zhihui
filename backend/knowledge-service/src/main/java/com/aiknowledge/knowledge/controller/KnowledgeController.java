@@ -76,8 +76,14 @@ public class KnowledgeController {
     }
 
     @GetMapping("/list")
-    public ApiResponse<List<Map<String, Object>>> list() {
-        return ApiResponse.ok(knowledgeStore.listFiles().stream().map(this::toView).toList());
+    public ApiResponse<List<Map<String, Object>>> list(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "includeAll", defaultValue = "false") boolean includeAll
+    ) {
+        boolean canViewAll = includeAll && LocalAuth.isAdmin(authorization);
+        return ApiResponse.ok(knowledgeStore.listFiles().stream()
+                .filter(file -> canViewAll || "APPROVED".equals(file.getAuditStatus()))
+                .map(this::toView).toList());
     }
 
     @GetMapping("/search")
