@@ -2,6 +2,7 @@ package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.community.store.InMemoryCommunityStore;
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +11,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CommunityControllerTest {
     static {
@@ -25,6 +28,22 @@ class CommunityControllerTest {
             );
     private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
     private final String secondUserAuth = "Bearer " + LocalAuth.issueToken("author", 2L, "USER");
+
+    @Test
+    void disabledCommunityRejectsUserWrites() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("community_enabled", true)).thenReturn(false);
+        CommunityController disabled = new CommunityController(
+                new InMemoryCommunityStore(),
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password"),
+                new com.aiknowledge.community.notification.CommunityNotificationClient(false, "", ""),
+                config
+        );
+        assertEquals(500, disabled.createPost(userAuth, Map.of("title", "blocked", "content", "blocked")).code());
+        assertEquals(0, disabled.feed(null).data().size());
+    }
 
     @Test
     void createdPostAppearsInFeed() {

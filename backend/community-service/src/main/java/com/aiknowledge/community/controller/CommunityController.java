@@ -2,6 +2,7 @@ package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
@@ -33,13 +34,20 @@ public class CommunityController {
     private final CommunityStore communityStore;
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
+    private final PlatformConfigClient platformConfig;
 
     @Autowired
     public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
-                               CommunityNotificationClient notificationClient) {
+                               CommunityNotificationClient notificationClient, PlatformConfigClient platformConfig) {
         this.communityStore = communityStore;
         this.mediaStorage = mediaStorage;
         this.notificationClient = notificationClient;
+        this.platformConfig = platformConfig;
+    }
+
+    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
+                               CommunityNotificationClient notificationClient) {
+        this(communityStore, mediaStorage, notificationClient, null);
     }
 
     public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage) {
@@ -52,6 +60,7 @@ public class CommunityController {
             @RequestParam("files") List<MultipartFile> files
     ) {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         if (files.isEmpty() || files.size() > 9) return ApiResponse.fail("select between 1 and 9 images");
         try {
             List<byte[]> contents = new java.util.ArrayList<>();
@@ -91,6 +100,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostEntity post = new PostEntity();
         post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "Untitled post")));
@@ -106,6 +116,7 @@ public class CommunityController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestBody Map<String, Object> request
     ) {
+        if (!communityEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("id"), 0L);
         PostEntity existing = communityStore.findPost(postId).orElse(null);
         if (existing == null) return ApiResponse.fail("post not found");
@@ -122,6 +133,7 @@ public class CommunityController {
 
     @GetMapping("/post/detail")
     public ApiResponse<Map<String, Object>> detail(@RequestParam(name = "id", defaultValue = "1") Long id) {
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         return communityStore.findPost(id)
                 .map(post -> {
                     Map<String, Object> detail = toPostView(post);
@@ -138,6 +150,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         CommentEntity comment = buildComment(request, "POST", userId);
         CommentEntity saved = communityStore.saveComment(comment);
         communityStore.findPost(saved.getPostId()).ifPresent(post ->
@@ -147,6 +160,7 @@ public class CommunityController {
 
     @GetMapping("/comment/list")
     public ApiResponse<List<Map<String, Object>>> comments(@RequestParam(name = "postId", required = false) Long postId) {
+        if (!communityEnabled()) return ApiResponse.ok(List.of());
         return ApiResponse.ok(communityStore.listComments(postId).stream().map(this::toCommentView).toList());
     }
 
@@ -157,6 +171,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostDraftEntity draft = new PostDraftEntity();
         draft.setUserId(userId);
         draft.setTitle(String.valueOf(request.getOrDefault("title", "Untitled draft")));
@@ -177,6 +192,7 @@ public class CommunityController {
 
     @GetMapping("/square/feed")
     public ApiResponse<List<Map<String, Object>>> feed(@RequestParam(name = "authorUserId", required = false) Long authorUserId) {
+        if (!communityEnabled()) return ApiResponse.ok(List.of());
         return ApiResponse.ok(communityStore.feed(authorUserId).stream().map(this::toPostView).toList());
     }
 
@@ -184,6 +200,7 @@ public class CommunityController {
     public ApiResponse<List<Map<String, Object>>> followingFeed(
             @RequestParam(name = "followedUserIds", defaultValue = "") String followedUserIds
     ) {
+        if (!communityEnabled()) return ApiResponse.ok(List.of());
         List<Long> ids = java.util.Arrays.stream(followedUserIds.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).map(Long::valueOf).toList();
         return ApiResponse.ok(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
@@ -197,6 +214,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         CommentEntity comment = buildComment(request, "SQUARE", userId);
         CommentEntity saved = communityStore.saveComment(comment);
         communityStore.findPost(saved.getPostId()).ifPresent(post ->
@@ -211,6 +229,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostCollectEntity collect = new PostCollectEntity();
         collect.setUserId(userId);
         collect.setPostId(number(request.get("postId"), 0L));
@@ -226,6 +245,7 @@ public class CommunityController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("postId"), 0L);
         communityStore.likePost(userId, postId);
         return ApiResponse.ok(Map.of("postId", postId, "liked", true, "likes", communityStore.countPostLikes(postId)));
@@ -354,5 +374,9 @@ public class CommunityController {
         if (value instanceof List<?> values) return values.stream().map(String::valueOf).toList();
         if (value == null || value.toString().isBlank()) return List.of();
         return java.util.Arrays.stream(value.toString().split(",")).map(String::trim).filter(item -> !item.isBlank()).toList();
+    }
+
+    private boolean communityEnabled() {
+        return platformConfig == null || platformConfig.enabled("community_enabled", true);
     }
 }

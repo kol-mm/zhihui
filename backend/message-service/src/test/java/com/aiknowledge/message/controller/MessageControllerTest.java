@@ -2,6 +2,7 @@ package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class MessageControllerTest {
     static {
@@ -23,6 +26,19 @@ class MessageControllerTest {
                     new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events")
             );
     private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
+
+    @Test
+    void disabledNotificationsRejectUserAccess() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("notifications_enabled", true)).thenReturn(false);
+        MessageController disabled = new MessageController(
+                new InMemoryMessageStore(),
+                new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events"),
+                config
+        );
+        assertEquals(500, disabled.notifications(userAuth, 1L).code());
+        assertEquals(500, disabled.markAllNotificationsRead(userAuth).code());
+    }
 
     @Test
     void sentMessageCanBeListedAndCleared() {

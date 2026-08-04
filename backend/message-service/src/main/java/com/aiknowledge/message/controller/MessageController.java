@@ -2,6 +2,7 @@ package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.message.entity.ChatMessageEntity;
 import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -26,10 +28,17 @@ import java.util.Map;
 public class MessageController {
     private final MessageStore messageStore;
     private final LocalEventBusService eventBus;
+    private final PlatformConfigClient platformConfig;
 
-    public MessageController(MessageStore messageStore, LocalEventBusService eventBus) {
+    @Autowired
+    public MessageController(MessageStore messageStore, LocalEventBusService eventBus, PlatformConfigClient platformConfig) {
         this.messageStore = messageStore;
         this.eventBus = eventBus;
+        this.platformConfig = platformConfig;
+    }
+
+    public MessageController(MessageStore messageStore, LocalEventBusService eventBus) {
+        this(messageStore, eventBus, null);
     }
 
     @GetMapping("/message/health")
@@ -57,12 +66,14 @@ public class MessageController {
         message.setStatus("NORMAL");
         ChatMessageEntity saved = messageStore.sendMessage(message);
         Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
+        if (notificationsEnabled()) {
         NotificationEntity notification = new NotificationEntity();
         notification.setUserId(recipientId);
         notification.setType("MESSAGE");
         notification.setTitle("收到新的私信");
         notification.setContent(content);
         messageStore.saveNotification(notification);
+        }
         eventBus.publish("MESSAGE_SENT", String.valueOf(saved.getId()), Map.of(
                 "sessionId", saved.getSessionId(),
                 "senderId", saved.getSenderId(),
@@ -170,6 +181,7 @@ public class MessageController {
     ) {
         Long authenticatedUserId = LocalAuth.userId(authorization);
         if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!notificationsEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("notifications feature is disabled");
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
         return ApiResponse.ok(messageStore.listNotifications(userId).stream().map(this::toNotificationView).toList());
@@ -182,6 +194,7 @@ public class MessageController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!notificationsEnabled()) return ApiResponse.fail("notifications feature is disabled");
         Long notificationId = number(request.get("notificationId"), 0L);
         return messageStore.markNotificationRead(userId, notificationId)
                 .map(item -> ApiResponse.ok(Map.of("notification", toNotificationView(item), "updated", true)))
@@ -194,6 +207,7 @@ public class MessageController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!notificationsEnabled()) return ApiResponse.fail("notifications feature is disabled");
         return ApiResponse.ok(Map.of("updated", messageStore.markAllNotificationsRead(userId)));
     }
 
@@ -420,6 +434,10 @@ public class MessageController {
         view.put("createdAt", ticket.getCreatedAt());
         view.put("updatedAt", ticket.getUpdatedAt());
         return view;
+    }
+
+    private boolean notificationsEnabled() {
+        return platformConfig == null || platformConfig.enabled("notifications_enabled", true);
     }
 
     private Long number(Object value, Long fallback) {

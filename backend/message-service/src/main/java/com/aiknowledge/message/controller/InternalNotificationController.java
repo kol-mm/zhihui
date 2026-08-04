@@ -1,9 +1,11 @@
 package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.store.MessageStore;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -15,13 +17,23 @@ import java.util.Map;
 public class InternalNotificationController {
     private final MessageStore messageStore;
     private final String internalToken;
+    private final PlatformConfigClient platformConfig;
 
+    @Autowired
     public InternalNotificationController(
             MessageStore messageStore,
-            @Value("${internal.notification-token:ai-knowledge-local-internal}") String internalToken
+            @Value("${internal.notification-token:ai-knowledge-local-internal}") String internalToken,
+            PlatformConfigClient platformConfig
     ) {
         this.messageStore = messageStore;
         this.internalToken = internalToken;
+        this.platformConfig = platformConfig;
+    }
+
+    public InternalNotificationController(MessageStore messageStore, String internalToken) {
+        this.messageStore = messageStore;
+        this.internalToken = internalToken;
+        this.platformConfig = null;
     }
 
     @PostMapping("/internal/notification")
@@ -30,6 +42,9 @@ public class InternalNotificationController {
             @RequestBody Map<String, Object> request
     ) {
         if (!internalToken.equals(token)) return ApiResponse.fail("internal authorization is required");
+        if (platformConfig != null && !platformConfig.enabled("notifications_enabled", true)) {
+            return ApiResponse.fail("notifications feature is disabled");
+        }
         Long userId = number(request.get("userId"));
         String title = String.valueOf(request.getOrDefault("title", "New notification")).trim();
         String content = String.valueOf(request.getOrDefault("content", "")).trim();
