@@ -245,11 +245,28 @@ public class KnowledgeController {
 
     @GetMapping("/ranking")
     public ApiResponse<List<Map<String, Object>>> ranking() {
-        return ApiResponse.ok(List.of(
-                Map.of("rank", 1, "userId", 1L, "nickname", "Demo User", "uploads", 12, "views", 386, "downloads", 92, "violations", 0),
-                Map.of("rank", 2, "userId", 2L, "nickname", "Knowledge Builder", "uploads", 8, "views", 241, "downloads", 56, "violations", 1),
-                Map.of("rank", 3, "userId", 3L, "nickname", "AI Learner", "uploads", 5, "views", 180, "downloads", 33, "violations", 0)
-        ));
+        Map<Long, List<KnowledgeFileEntity>> filesByUser = knowledgeStore.listFiles().stream()
+                .filter(file -> file.getUserId() != null)
+                .collect(java.util.stream.Collectors.groupingBy(KnowledgeFileEntity::getUserId));
+        List<Map<String, Object>> ranking = filesByUser.entrySet().stream()
+                .map(entry -> {
+                    int views = entry.getValue().stream().mapToInt(file -> file.getViews() == null ? 0 : file.getViews()).sum();
+                    int downloads = entry.getValue().stream().mapToInt(file -> file.getDownloads() == null ? 0 : file.getDownloads()).sum();
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("userId", entry.getKey());
+                    item.put("nickname", "User " + entry.getKey());
+                    item.put("uploads", entry.getValue().size());
+                    item.put("views", views);
+                    item.put("downloads", downloads);
+                    item.put("score", entry.getValue().size() * 10 + views + downloads * 2);
+                    item.put("violations", 0);
+                    return item;
+                })
+                .sorted(java.util.Comparator.comparingInt(item -> -((Number) item.get("score")).intValue()))
+                .limit(20)
+                .toList();
+        for (int index = 0; index < ranking.size(); index++) ranking.get(index).put("rank", index + 1);
+        return ApiResponse.ok(ranking);
     }
 
     @PostMapping("/collect")

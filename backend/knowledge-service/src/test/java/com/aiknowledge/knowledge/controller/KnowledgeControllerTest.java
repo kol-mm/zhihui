@@ -45,6 +45,27 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void rankingIsCalculatedFromStoredKnowledgeActivity() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Ranking source",
+                "fileType", "txt",
+                "content", "ranking content"
+        ));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        controller.view(userAuth, Map.of("fileId", fileId));
+        controller.download(userAuth, Map.of("fileId", fileId));
+
+        var ranking = controller.ranking();
+        assertFalse(ranking.data().isEmpty());
+        Map<String, Object> currentUser = ranking.data().stream()
+                .filter(item -> Long.valueOf(1L).equals(((Number) item.get("userId")).longValue()))
+                .findFirst().orElseThrow();
+        assertTrue(((Number) currentUser.get("uploads")).intValue() >= 1);
+        assertTrue(((Number) currentUser.get("views")).intValue() >= 1);
+        assertTrue(((Number) currentUser.get("downloads")).intValue() >= 1);
+    }
+
+    @Test
     void textFileCanBeSavedToLocalStorage() {
         ApiResponse<Map<String, Object>> stored = controller.storageUpload(userAuth, Map.of(
                 "filename", "rag-note.txt",
