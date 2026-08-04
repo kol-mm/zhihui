@@ -49,6 +49,9 @@ class AiConfigRequest(BaseModel):
     model: str = "local-rag"
     base_url: str = ""
     temperature: float = Field(default=0.2, ge=0, le=2)
+    max_upload_mb: int = Field(default=25, ge=1, le=200)
+    notifications_enabled: bool = True
+    community_enabled: bool = True
 
 
 def now_iso() -> str:
@@ -181,6 +184,9 @@ def read_ai_config() -> dict[str, Any]:
         "model": "local-rag",
         "base_url": "",
         "temperature": 0.2,
+        "max_upload_mb": 25,
+        "notifications_enabled": True,
+        "community_enabled": True,
     }
     with connect() as conn:
         rows = conn.execute("SELECT config_key, config_value FROM ai_config").fetchall()
@@ -190,6 +196,10 @@ def read_ai_config() -> dict[str, Any]:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] == "temperature":
             defaults[row["config_key"]] = float(value)
+        elif row["config_key"] in {"max_upload_mb"}:
+            defaults[row["config_key"]] = int(value)
+        elif row["config_key"] in {"notifications_enabled", "community_enabled"}:
+            defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
         else:
             defaults[row["config_key"]] = value
     return defaults
