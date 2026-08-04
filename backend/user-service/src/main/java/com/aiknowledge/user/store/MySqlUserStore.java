@@ -17,10 +17,13 @@ import java.util.Optional;
 public class MySqlUserStore implements UserStore {
     private final UserMapper userMapper;
     private final UserFollowMapper followMapper;
+    private final InMemoryUserStore localRelations;
 
-    public MySqlUserStore(UserMapper userMapper, UserFollowMapper followMapper) {
+    public MySqlUserStore(UserMapper userMapper, UserFollowMapper followMapper,
+                          org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
         this.userMapper = userMapper;
         this.followMapper = followMapper;
+        this.localRelations = new InMemoryUserStore(passwordEncoder);
     }
 
     @Override
@@ -103,4 +106,17 @@ public class MySqlUserStore implements UserStore {
                 .map(UserFollowEntity::getTargetUserId)
                 .toList();
     }
+
+    @Override public List<Long> listFollowerIds(Long userId) {
+        return followMapper.selectList(Wrappers.<UserFollowEntity>lambdaQuery().eq(UserFollowEntity::getTargetUserId, userId))
+                .stream().map(UserFollowEntity::getUserId).toList();
+    }
+    @Override public boolean block(Long userId, Long targetUserId) { unfollow(userId, targetUserId); return localRelations.block(userId, targetUserId); }
+    @Override public boolean unblock(Long userId, Long targetUserId) { return localRelations.unblock(userId, targetUserId); }
+    @Override public List<Long> listBlockedIds(Long userId) { return localRelations.listBlockedIds(userId); }
+    @Override public UserReport reportUser(Long reporterId, Long targetUserId, String reason) { return localRelations.reportUser(reporterId, targetUserId, reason); }
+    @Override public List<UserReport> listUserReports() { return localRelations.listUserReports(); }
+    @Override public Optional<UserReport> resolveUserReport(Long reportId, String status, String result) { return localRelations.resolveUserReport(reportId, status, result); }
+    @Override public BehaviorRecord recordBehavior(Long userId, String action, String targetType, Long targetId) { return localRelations.recordBehavior(userId, action, targetType, targetId); }
+    @Override public List<BehaviorRecord> listBehaviors(Long userId) { return localRelations.listBehaviors(userId); }
 }

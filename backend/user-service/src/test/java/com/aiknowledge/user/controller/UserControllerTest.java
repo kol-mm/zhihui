@@ -71,5 +71,20 @@ class UserControllerTest {
         ApiResponse<Map<String, Object>> follows = controller.follows(1L);
         assertEquals(0, follows.code());
         assertEquals(java.util.List.of(2L), follows.data().get("followedUserIds"));
+        assertEquals(java.util.List.of(1L), controller.follows(2L).data().get("followerUserIds"));
+    }
+
+    @Test
+    void blockReportAndBehaviorArePersisted() {
+        assertEquals(0, controller.block(Map.of("userId", 1L, "targetUserId", 2L)).code());
+        assertEquals(java.util.List.of(2L), controller.blocks(1L).data().get("blockedUserIds"));
+
+        var report = controller.reportUser(Map.of("reporterId", 1L, "targetUserId", 2L, "reason", "spam"));
+        assertEquals("PENDING", report.data().status());
+
+        var behavior = controller.recordBehavior(Map.of(
+                "userId", 1L, "action", "VIEW", "targetType", "KNOWLEDGE", "targetId", 9L));
+        assertEquals("VIEW", behavior.data().action());
+        assertEquals(1, controller.behaviors(1L).data().size());
     }
 }

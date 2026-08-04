@@ -117,7 +117,58 @@ public class UserController {
 
     @GetMapping("/follows")
     public ApiResponse<Map<String, Object>> follows(@RequestParam(name = "userId", defaultValue = "1") Long userId) {
-        return ApiResponse.ok(Map.of("userId", userId, "followedUserIds", userStore.listFollowTargets(userId)));
+        return ApiResponse.ok(Map.of(
+                "userId", userId,
+                "followedUserIds", userStore.listFollowTargets(userId),
+                "followerUserIds", userStore.listFollowerIds(userId)
+        ));
+    }
+
+    @PostMapping("/block")
+    public ApiResponse<Map<String, Object>> block(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long targetUserId = number(request.get("targetUserId"), 0L);
+        userStore.block(userId, targetUserId);
+        return ApiResponse.ok(Map.of("userId", userId, "blockedUserId", targetUserId, "blocked", true));
+    }
+
+    @DeleteMapping("/block")
+    public ApiResponse<Map<String, Object>> unblock(@RequestBody Map<String, Object> request) {
+        Long userId = number(request.get("userId"), 1L);
+        Long targetUserId = number(request.get("targetUserId"), 0L);
+        userStore.unblock(userId, targetUserId);
+        return ApiResponse.ok(Map.of("userId", userId, "blockedUserId", targetUserId, "blocked", false));
+    }
+
+    @GetMapping("/blocks")
+    public ApiResponse<Map<String, Object>> blocks(@RequestParam(name = "userId", defaultValue = "1") Long userId) {
+        return ApiResponse.ok(Map.of("userId", userId, "blockedUserIds", userStore.listBlockedIds(userId)));
+    }
+
+    @PostMapping("/report")
+    public ApiResponse<UserStore.UserReport> reportUser(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(userStore.reportUser(
+                number(request.get("reporterId"), 1L),
+                number(request.get("targetUserId"), 0L),
+                String.valueOf(request.getOrDefault("reason", "未填写原因"))
+        ));
+    }
+
+    @PostMapping("/behavior")
+    public ApiResponse<UserStore.BehaviorRecord> recordBehavior(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(userStore.recordBehavior(
+                number(request.get("userId"), 1L),
+                String.valueOf(request.getOrDefault("action", "VIEW")),
+                String.valueOf(request.getOrDefault("targetType", "UNKNOWN")),
+                number(request.get("targetId"), 0L)
+        ));
+    }
+
+    @GetMapping("/behaviors")
+    public ApiResponse<java.util.List<UserStore.BehaviorRecord>> behaviors(
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        return ApiResponse.ok(userStore.listBehaviors(userId));
     }
 
     @GetMapping("/admin/overview")
@@ -145,6 +196,27 @@ public class UserController {
             return ApiResponse.fail("admin authorization is required");
         }
         return ApiResponse.ok(userStore.listUsers().stream().map(this::toView).toList());
+    }
+
+    @GetMapping("/admin/reports")
+    public ApiResponse<java.util.List<UserStore.UserReport>> adminReports(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        return ApiResponse.ok(userStore.listUserReports());
+    }
+
+    @PostMapping("/admin/report/resolve")
+    public ApiResponse<UserStore.UserReport> resolveUserReport(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        return userStore.resolveUserReport(
+                        number(request.get("reportId"), 0L),
+                        String.valueOf(request.getOrDefault("status", "RESOLVED")),
+                        String.valueOf(request.getOrDefault("result", "已处理")))
+                .map(ApiResponse::ok).orElseGet(() -> ApiResponse.fail("report not found"));
     }
 
     @PostMapping("/admin/status")
