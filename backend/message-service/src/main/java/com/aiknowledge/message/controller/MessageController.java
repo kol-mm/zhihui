@@ -6,6 +6,7 @@ import com.aiknowledge.message.entity.ChatMessageEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
+import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.MessageStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,9 +23,11 @@ import java.util.Map;
 @RestController
 public class MessageController {
     private final MessageStore messageStore;
+    private final LocalEventBusService eventBus;
 
-    public MessageController(MessageStore messageStore) {
+    public MessageController(MessageStore messageStore, LocalEventBusService eventBus) {
         this.messageStore = messageStore;
+        this.eventBus = eventBus;
     }
 
     @GetMapping("/message/health")
@@ -39,7 +42,13 @@ public class MessageController {
         message.setSenderId(number(request.get("senderId"), 1L));
         message.setContent(String.valueOf(request.getOrDefault("content", "")));
         message.setStatus("NORMAL");
-        return ApiResponse.ok(toMessageView(messageStore.sendMessage(message)));
+        ChatMessageEntity saved = messageStore.sendMessage(message);
+        eventBus.publish("MESSAGE_SENT", String.valueOf(saved.getId()), Map.of(
+                "sessionId", saved.getSessionId(),
+                "senderId", saved.getSenderId(),
+                "status", saved.getStatus()
+        ));
+        return ApiResponse.ok(toMessageView(saved));
     }
 
     @GetMapping("/message/list")
@@ -51,7 +60,18 @@ public class MessageController {
     public ApiResponse<Map<String, Object>> clear(@RequestBody Map<String, Object> request) {
         Long sessionId = request.containsKey("sessionId") ? number(request.get("sessionId"), null) : null;
         int removed = messageStore.clearMessages(sessionId);
+        eventBus.publish("MESSAGE_CLEARED", sessionId == null ? "ALL" : String.valueOf(sessionId), Map.of("removed", removed));
         return ApiResponse.ok(Map.of("sessionId", sessionId == null ? "ALL" : sessionId, "removed", removed));
+    }
+
+    @GetMapping("/event/status")
+    public ApiResponse<Map<String, Object>> eventStatus() {
+        return ApiResponse.ok(eventBus.status());
+    }
+
+    @GetMapping("/event/list")
+    public ApiResponse<List<Map<String, Object>>> events(@RequestParam(name = "limit", defaultValue = "50") Integer limit) {
+        return ApiResponse.ok(eventBus.list(limit).stream().map(this::toEventView).toList());
     }
 
     @GetMapping("/notification/list")
@@ -72,7 +92,13 @@ public class MessageController {
         ticket.setContent(String.valueOf(request.getOrDefault("content", "")));
         ticket.setStatus("PENDING");
         ticket.setOfficialReply("");
-        return ApiResponse.ok(toTicketView(messageStore.createTicket(ticket)));
+        FeedbackTicketEntity saved = messageStore.createTicket(ticket);
+        eventBus.publish("FEEDBACK_TICKET_CREATED", String.valueOf(saved.getId()), Map.of(
+                "userId", saved.getUserId(),
+                "type", saved.getType(),
+                "status", saved.getStatus()
+        ));
+        return ApiResponse.ok(toTicketView(saved));
     }
 
     @GetMapping("/feedback/tickets")
@@ -128,11 +154,25 @@ public class MessageController {
         String status = String.valueOf(request.getOrDefault("status", "PROCESSING"));
         String reply = String.valueOf(request.getOrDefault("reply", ""));
         return messageStore.replyTicket(ticketId, status, reply)
-                .map(ticket -> ApiResponse.ok(Map.of(
-                        "ticket", toTicketView(ticket),
-                        "updated", true
-                )))
+                .map(ticket -> {
+                    eventBus.publish("FEEDBACK_TICKET_REPLIED", String.valueOf(ticket.getId()), Map.of(
+                            "status", ticket.getStatus(),
+                            "hasReply", ticket.getOfficialReply() != null && !ticket.getOfficialReply().isBlank()
+                    ));
+                    return ApiResponse.ok(Map.of("ticket", toTicketView(ticket), "updated", true));
+                })
                 .orElseGet(() -> ApiResponse.fail("ticket not found"));
+    }
+
+    private Map<String, Object> toEventView(LocalEventBusService.EventRecord event) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", event.getId());
+        view.put("type", event.getType());
+        view.put("aggregateId", event.getAggregateId());
+        view.put("payload", event.getPayload());
+        view.put("status", event.getStatus());
+        view.put("createdAt", event.getCreatedAt());
+        return view;
     }
 
     private Map<String, Object> toMessageView(ChatMessageEntity message) {

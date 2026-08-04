@@ -1,6 +1,7 @@
 package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
 
@@ -16,7 +17,10 @@ class MessageControllerTest {
     }
 
     private final MessageController controller =
-            new MessageController(new InMemoryMessageStore());
+            new MessageController(
+                    new InMemoryMessageStore(),
+                    new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events")
+            );
 
     @Test
     void sentMessageCanBeListedAndCleared() {
@@ -35,6 +39,25 @@ class MessageControllerTest {
         ApiResponse<Map<String, Object>> cleared = controller.clear(Map.of("sessionId", 7L));
         assertEquals(0, cleared.code());
         assertEquals(1, cleared.data().get("removed"));
+    }
+
+    @Test
+    void eventBusStoresBusinessEventsAndExposesStatus() {
+        controller.createTicket(Map.of(
+                "userId", 1L,
+                "type", "SUPPORT",
+                "content", "need help"
+        ));
+
+        ApiResponse<Map<String, Object>> status = controller.eventStatus();
+        assertEquals(0, status.code());
+        assertEquals("local", status.data().get("mode"));
+        assertEquals(false, status.data().get("rabbitReady"));
+
+        ApiResponse<List<Map<String, Object>>> events = controller.events(20);
+        assertEquals(0, events.code());
+        assertFalse(events.data().isEmpty());
+        assertEquals("FEEDBACK_TICKET_CREATED", events.data().get(0).get("type"));
     }
 
     @Test
