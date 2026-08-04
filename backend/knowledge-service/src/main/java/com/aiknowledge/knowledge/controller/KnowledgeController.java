@@ -5,16 +5,25 @@ import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
 import com.aiknowledge.knowledge.storage.LocalFileStorageService;
+import com.aiknowledge.knowledge.storage.DocumentTextExtractor;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,15 +34,78 @@ public class KnowledgeController {
     private final KnowledgeStore knowledgeStore;
     private final LocalFileStorageService fileStorage;
     private final LocalFullTextSearchService fullTextSearch;
+    private final DocumentTextExtractor textExtractor;
 
     public KnowledgeController(
             KnowledgeStore knowledgeStore,
             LocalFileStorageService fileStorage,
-            LocalFullTextSearchService fullTextSearch
+            LocalFullTextSearchService fullTextSearch,
+            DocumentTextExtractor textExtractor
     ) {
         this.knowledgeStore = knowledgeStore;
         this.fileStorage = fileStorage;
         this.fullTextSearch = fullTextSearch;
+        this.textExtractor = textExtractor;
+    }
+
+    @PostMapping(value = "/file/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<Map<String, Object>> uploadFile(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam("file") MultipartFile multipartFile,
+            @RequestParam(name = "title", defaultValue = "") String title
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (multipartFile.isEmpty()) return ApiResponse.fail("file is required");
+        if (multipartFile.getSize() > 25L * 1024 * 1024) return ApiResponse.fail("file size must not exceed 25 MB");
+        String filename = multipartFile.getOriginalFilename() == null ? "knowledge.txt" : multipartFile.getOriginalFilename();
+        try {
+            byte[] bytes = multipartFile.getBytes();
+            String fileType = textExtractor.extension(filename);
+            String content = textExtractor.extract(filename, bytes).trim();
+            Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
+            KnowledgeFileEntity file = new KnowledgeFileEntity();
+            file.setUserId(userId);
+            file.setTitle(title == null || title.isBlank() ? filename : title.trim());
+            file.setFileUrl(String.valueOf(stored.get("fileUrl")));
+            file.setFileType(fileType);
+            file.setParseStatus(content.isBlank() ? "EMPTY" : "INDEXED");
+            file.setAuditStatus("PENDING");
+            file.setViews(0);
+            file.setDownloads(0);
+            KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
+            if (!content.isBlank()) fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
+            Map<String, Object> view = toView(saved);
+            view.put("size", bytes.length);
+            view.put("storageMode", stored.get("storageMode"));
+            return ApiResponse.ok(view);
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        } catch (Exception error) {
+            return ApiResponse.fail("file upload failed: " + error.getMessage());
+        }
+    }
+
+    @GetMapping("/file/{fileId}")
+    public ResponseEntity<byte[]> fileContent(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @PathVariable Long fileId
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED);
+        KnowledgeFileEntity file = knowledgeStore.find(fileId)
+                .orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND));
+        boolean allowed = "APPROVED".equals(file.getAuditStatus()) || userId.equals(file.getUserId()) || LocalAuth.isAdmin(authorization);
+        if (!allowed) throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
+        LocalFileStorageService.StoredContent stored = fileStorage.read(file.getFileUrl());
+        knowledgeStore.download(userId, fileId);
+        String downloadName = file.getTitle() + (file.getFileType() == null || file.getFileType().isBlank() ? "" : "." + file.getFileType());
+        ContentDisposition disposition = ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .contentLength(stored.bytes().length)
+                .body(stored.bytes());
     }
 
     @GetMapping("/health")
@@ -96,15 +168,27 @@ public class KnowledgeController {
     }
 
     @GetMapping("/search")
-    public ApiResponse<List<Map<String, Object>>> search(@RequestParam(name = "keyword", defaultValue = "") String keyword) {
-        return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream().map(this::toView).toList());
+    public ApiResponse<List<Map<String, Object>>> search(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", defaultValue = "") String keyword
+    ) {
+        return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream()
+                .filter(file -> canView(file, authorization))
+                .map(this::toView).toList());
     }
 
     @GetMapping("/search/fulltext")
     public ApiResponse<List<Map<String, Object>>> fullTextSearch(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam(name = "keyword", defaultValue = "") String keyword
     ) {
-        return ApiResponse.ok(fullTextSearch.search(keyword));
+        return ApiResponse.ok(fullTextSearch.search(keyword).stream()
+                .filter(result -> {
+                    Object value = result.get("fileId");
+                    Long fileId = value instanceof Number number ? number.longValue() : number(value == null ? null : value.toString(), null);
+                    return fileId != null && knowledgeStore.find(fileId).map(file -> canView(file, authorization)).orElse(false);
+                })
+                .toList());
     }
 
     @GetMapping("/search/status")
@@ -113,9 +197,13 @@ public class KnowledgeController {
     }
 
     @PostMapping("/view")
-    public ApiResponse<Map<String, Object>> view(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> view(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
         Long fileId = number(request.get("fileId"), 0L);
         return knowledgeStore.view(fileId)
+                .filter(file -> canView(file, authorization))
                 .map(file -> {
                     Map<String, Object> detail = toView(file);
                     detail.put("content", fullTextSearch.find(fileId)
@@ -292,6 +380,13 @@ public class KnowledgeController {
         view.put("likes", knowledgeStore.likeCount(file.getId()));
         view.put("createdAt", file.getCreatedAt());
         return view;
+    }
+
+    private boolean canView(KnowledgeFileEntity file, String authorization) {
+        Long userId = LocalAuth.userId(authorization);
+        return userId != null && ("APPROVED".equals(file.getAuditStatus())
+                || userId.equals(file.getUserId())
+                || LocalAuth.isAdmin(authorization));
     }
 
     private Long number(Object value, Long fallback) {

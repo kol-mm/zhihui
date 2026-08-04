@@ -94,6 +94,11 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public Optional<KnowledgeFileEntity> find(Long fileId) {
+        return files.stream().filter(file -> file.getId().equals(fileId)).findFirst();
+    }
+
+    @Override
     public Optional<KnowledgeFileEntity> view(Long fileId) {
         Optional<KnowledgeFileEntity> found = files.stream()
                 .filter(file -> file.getId().equals(fileId))

@@ -1,5 +1,7 @@
 param(
     [switch]$SkipNacos,
+    [switch]$SkipMinio,
+    [switch]$UseExternalMinio,
     [switch]$SkipBuild,
     [switch]$SkipAi,
     [switch]$SkipFrontend,
@@ -155,9 +157,38 @@ try {
     Write-Host "Starting AI Knowledge Platform local usable version..." -ForegroundColor Cyan
     Write-Host "Project: $Root"
 
+    if ($SkipMinio -and $UseExternalMinio) {
+        throw "SkipMinio and UseExternalMinio cannot be used together."
+    }
+
     $PowerShellExe = Assert-Command "powershell.exe" "PowerShell is required on Windows."
     $MavenExe = Assert-Command "mvn.cmd" "Install Maven 3.6+ and add it to PATH."
     if (-not $SkipFrontend) { $NpmExe = Assert-Command "npm.cmd" "Install Node.js 20+ and add npm to PATH." }
+
+    if ($UseExternalMinio) {
+        if (-not (Test-HealthUrl "http://127.0.0.1:9000/minio/health/live")) {
+            throw "External MinIO is not healthy at http://127.0.0.1:9000. Start it before running this command."
+        }
+        if (-not $env:MINIO_ACCESS_KEY) { $env:MINIO_ACCESS_KEY = "minioadmin" }
+        if (-not $env:MINIO_SECRET_KEY) { $env:MINIO_SECRET_KEY = "minioadmin" }
+        $env:KNOWLEDGE_STORAGE_MODE = "minio"
+        Write-Host "[minio] using externally managed service on port 9000." -ForegroundColor Yellow
+    } elseif (-not $SkipMinio) {
+        $MinioExe = $env:MINIO_EXE
+        if (-not $MinioExe) {
+            $knownMinio = Get-ChildItem -LiteralPath "D:\software" -Recurse -Filter "minio.exe" -File -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
+            if ($knownMinio -and (Test-Path -LiteralPath $knownMinio)) { $MinioExe = $knownMinio }
+        }
+        if (-not $MinioExe -or -not (Test-Path -LiteralPath $MinioExe)) {
+            throw "MinIO executable was not found. Set MINIO_EXE or use -SkipMinio for local file storage."
+        }
+        if (-not $env:MINIO_ACCESS_KEY) { $env:MINIO_ACCESS_KEY = "aiknowledge" }
+        if (-not $env:MINIO_SECRET_KEY) { $env:MINIO_SECRET_KEY = "ai-knowledge-local-change-me" }
+        $env:MINIO_ROOT_USER = $env:MINIO_ACCESS_KEY
+        $env:MINIO_ROOT_PASSWORD = $env:MINIO_SECRET_KEY
+        $env:KNOWLEDGE_STORAGE_MODE = "minio"
+    }
 
     if (-not $SkipBuild) {
         Write-Host "[backend] building and installing modules..." -ForegroundColor Cyan
@@ -196,6 +227,16 @@ try {
         Write-Host "Stopping processes recorded by the previous local run..." -ForegroundColor Cyan
         & (Join-Path $Root "stop-local.ps1") -KeepNacos:$SkipNacos
         if ($LASTEXITCODE -ne 0) { throw "Failed to stop the previous local run." }
+    }
+
+    if (-not $SkipMinio -and -not $UseExternalMinio) {
+        $minioData = Join-Path $Root "data\minio"
+        New-Item -ItemType Directory -Force -Path $minioData | Out-Null
+        Start-ManagedProcess -Name "minio" -FilePath $MinioExe `
+            -ArgumentList @("server", ('"{0}"' -f $minioData), "--address", "127.0.0.1:9000", "--console-address", "127.0.0.1:9001") `
+            -WorkingDirectory (Split-Path $MinioExe) -Port 9000 -HealthUrl "http://127.0.0.1:9000/minio/health/live" | Out-Null
+    } elseif ($SkipMinio -and -not $env:KNOWLEDGE_STORAGE_MODE) {
+        $env:KNOWLEDGE_STORAGE_MODE = "local"
     }
 
     if (-not $SkipNacos) {

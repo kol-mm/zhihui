@@ -24,7 +24,8 @@ class KnowledgeControllerTest {
             new KnowledgeController(
                     new InMemoryKnowledgeStore(),
                     new LocalFileStorageService("target/test-uploads", "local", "http://127.0.0.1:9000", "ai-knowledge"),
-                    new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge")
+                    new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge"),
+                    new com.aiknowledge.knowledge.storage.DocumentTextExtractor()
             );
     private final String userAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("demo");
 
@@ -37,7 +38,7 @@ class KnowledgeControllerTest {
         ));
         assertEquals(0, upload.code());
 
-        ApiResponse<List<Map<String, Object>>> search = controller.search("RAG");
+        ApiResponse<List<Map<String, Object>>> search = controller.search(userAuth, "RAG");
         assertEquals(0, search.code());
         assertFalse(search.data().isEmpty());
         assertEquals("RAG Architecture", search.data().get(0).get("title"));
@@ -53,8 +54,22 @@ class KnowledgeControllerTest {
 
         assertEquals(0, stored.code());
         assertEquals("local", stored.data().get("storageMode"));
-        assertEquals(true, String.valueOf(stored.data().get("fileUrl")).startsWith("local-file://"));
-        assertEquals(true, Files.exists(Path.of(String.valueOf(stored.data().get("localPath")))));
+        assertEquals(true, String.valueOf(stored.data().get("fileUrl")).startsWith("storage://"));
+    }
+
+    @Test
+    void multipartTextFileIsStoredIndexedAndDownloadable() {
+        var multipart = new org.springframework.mock.web.MockMultipartFile(
+                "file", "production-guide.md", "text/markdown", "# Production\nUse signed identities.".getBytes());
+
+        var uploaded = controller.uploadFile(userAuth, multipart, "Production guide");
+
+        assertEquals(0, uploaded.code());
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        assertEquals("INDEXED", uploaded.data().get("parseStatus"));
+        var download = controller.fileContent(userAuth, fileId);
+        assertEquals(200, download.getStatusCode().value());
+        assertTrue(new String(download.getBody()).contains("signed identities"));
     }
 
     @Test
@@ -67,7 +82,7 @@ class KnowledgeControllerTest {
         ));
         assertEquals(0, upload.code());
 
-        ApiResponse<List<Map<String, Object>>> search = controller.fullTextSearch("Elasticsearch");
+        ApiResponse<List<Map<String, Object>>> search = controller.fullTextSearch(userAuth, "Elasticsearch");
         assertEquals(0, search.code());
         assertFalse(search.data().isEmpty());
         assertEquals("Vector Search Guide", search.data().get(0).get("title"));
@@ -87,7 +102,7 @@ class KnowledgeControllerTest {
         ));
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
 
-        var detail = controller.view(Map.of("fileId", fileId));
+        var detail = controller.view(userAuth, Map.of("fileId", fileId));
 
         assertEquals(0, detail.code());
         assertTrue(String.valueOf(detail.data().get("content")).contains("complete readable body"));
@@ -105,6 +120,11 @@ class KnowledgeControllerTest {
 
         var publicList = controller.list(null, false);
         assertFalse(publicList.data().stream().anyMatch(file -> fileId.equals(file.get("id"))));
+
+        String otherAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("other", 3L, "USER");
+        var hiddenDetail = controller.view(otherAuth, Map.of("fileId", fileId));
+        assertEquals(500, hiddenDetail.code());
+        assertTrue(controller.fullTextSearch(otherAuth, "waiting for review").data().isEmpty());
 
         String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
         var adminList = controller.list(adminAuth, true);

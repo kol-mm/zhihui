@@ -10,6 +10,7 @@ public interface KnowledgeStore {
     KnowledgeFileEntity saveFile(KnowledgeFileEntity file);
     List<KnowledgeFileEntity> listFiles();
     List<KnowledgeFileEntity> searchFiles(String keyword);
+    Optional<KnowledgeFileEntity> find(Long fileId);
     Optional<KnowledgeFileEntity> view(Long fileId);
     Optional<KnowledgeFileEntity> download(Long userId, Long fileId);
     int like(Long userId, Long fileId);

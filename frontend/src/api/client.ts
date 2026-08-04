@@ -70,6 +70,24 @@ export async function postData<T>(url: string, payload: unknown): Promise<T> {
   }
 }
 
+export async function postFormData<T>(url: string, payload: FormData): Promise<T> {
+  try {
+    const response = await api.post(url, payload, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60000 });
+    return normalizeApiResponse<T>(url, response.data);
+  } catch (error) {
+    throw toReadableError(url, error);
+  }
+}
+
+export async function downloadData(url: string): Promise<Blob> {
+  try {
+    const response = await api.get(url, { responseType: 'blob', timeout: 60000 });
+    return response.data as Blob;
+  } catch (error) {
+    throw toReadableError(url, error);
+  }
+}
+
 export async function putData<T>(url: string, payload: unknown): Promise<T> {
   try {
     const response = await api.put(url, payload);

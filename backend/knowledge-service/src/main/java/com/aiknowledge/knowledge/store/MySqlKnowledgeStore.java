@@ -58,6 +58,11 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public Optional<KnowledgeFileEntity> find(Long fileId) {
+        return Optional.ofNullable(fileMapper.selectById(fileId));
+    }
+
+    @Override
     public Optional<KnowledgeFileEntity> view(Long fileId) {
         KnowledgeFileEntity file = fileMapper.selectById(fileId);
         if (file == null) {

@@ -5,11 +5,13 @@ spring:
 
 knowledge:
   storage:
-    mode: local
+    mode: ${KNOWLEDGE_STORAGE_MODE:local}
     local-root: ../data/uploads
     minio:
       endpoint: http://127.0.0.1:9000
       bucket: ai-knowledge
+      access-key: ${MINIO_ACCESS_KEY:aiknowledge}
+      secret-key: ${MINIO_SECRET_KEY:ai-knowledge-local-change-me}
   search:
     mode: local
     elasticsearch:

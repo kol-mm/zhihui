@@ -66,8 +66,21 @@ Windows 下如果想双击启动，请使用：
 
     .\start-local.ps1 -SkipBuild
     .\start-local.ps1 -SkipNacos
+    .\start-local.ps1 -SkipMinio
     .\start-local.ps1 -SkipFrontend
     .\start-local.ps1 -SkipSmokeTest
+
+默认情况下，启动器会在项目的 `data/minio` 目录上自动启动并管理 MinIO。若 MinIO 已由你手动启动在 `9000` 端口，请使用外部服务模式；启动器只检查并复用它，不会登记或停止该 MinIO 进程：
+
+    .\start-local.ps1 -UseExternalMinio
+
+手动启动且未设置账号时，MinIO 的默认账号密码是 `minioadmin / minioadmin`，外部服务模式也使用这组默认值。自定义账号时应在同一个 PowerShell 窗口先设置：
+
+    $env:MINIO_ACCESS_KEY = "你的账号"
+    $env:MINIO_SECRET_KEY = "你的密码"
+    .\start-local.ps1 -UseExternalMinio
+
+`-SkipMinio` 表示完全不使用 MinIO并切换到本地文件目录，不能和 `-UseExternalMinio` 同时使用。
 
 双击 `start-local.bat` 默认执行受控重启：先完成构建和依赖检查，再停止上次由脚本记录的进程，所有健康检查及接口验收通过后才提示成功。脚本不会仅凭端口占用判断服务正常。
 
