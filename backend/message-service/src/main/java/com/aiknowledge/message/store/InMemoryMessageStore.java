@@ -129,6 +129,26 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public FaqEntity saveFaq(FaqEntity faq) {
+        if (faq.getId() == null) {
+            faq.setId(faqIds.incrementAndGet());
+            faqs.add(faq);
+        } else {
+            faqs.removeIf(item -> item.getId().equals(faq.getId()));
+            faqs.add(faq);
+        }
+        persist();
+        return faq;
+    }
+
+    @Override
+    public boolean deleteFaq(Long faqId) {
+        boolean removed = faqs.removeIf(item -> item.getId().equals(faqId));
+        if (removed) persist();
+        return removed;
+    }
+
+    @Override
     public FeedbackTicketEntity createTicket(FeedbackTicketEntity ticket) {
         ticket.setId(ticketIds.incrementAndGet());
         ticket.setCreatedAt(LocalDateTime.now());

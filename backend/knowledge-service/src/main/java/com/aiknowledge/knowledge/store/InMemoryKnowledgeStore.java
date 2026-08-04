@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class InMemoryKnowledgeStore implements KnowledgeStore {
     private final Path storePath = LocalJsonStore.dataFile("knowledge.json");
     private final AtomicLong ids = new AtomicLong(100);
+    private final AtomicLong reportIds = new AtomicLong(500);
     private final List<KnowledgeFileEntity> files = new CopyOnWriteArrayList<>();
     private final List<CollectRecord> collects = new CopyOnWriteArrayList<>();
     private final List<LikeRecord> likes = new CopyOnWriteArrayList<>();
@@ -37,6 +38,16 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
             }
             if (state.reports != null) {
                 reports.addAll(state.reports);
+            }
+            reportIds.set(reports.stream().map(ReportRecord::id).filter(java.util.Objects::nonNull)
+                    .mapToLong(Long::longValue).max().orElse(500L));
+            for (int index = 0; index < reports.size(); index++) {
+                ReportRecord report = reports.get(index);
+                if (report.id() == null) {
+                    LocalDateTime createdAt = report.createdAt() == null ? LocalDateTime.now() : report.createdAt();
+                    reports.set(index, new ReportRecord(reportIds.incrementAndGet(), report.userId(), report.fileId(),
+                            report.reason(), "PENDING", "", createdAt, createdAt));
+                }
             }
             ids.set(files.stream()
                     .map(KnowledgeFileEntity::getId)
@@ -145,7 +156,8 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
 
     @Override
     public void report(Long userId, Long fileId, String reason) {
-        reports.add(new ReportRecord(userId, fileId, reason, LocalDateTime.now()));
+        LocalDateTime now = LocalDateTime.now();
+        reports.add(new ReportRecord(reportIds.incrementAndGet(), userId, fileId, reason, "PENDING", "", now, now));
         persist();
     }
 
@@ -155,6 +167,21 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
                 .filter(record -> userId == null || record.userId().equals(userId))
                 .map(this::reportView)
                 .toList();
+    }
+
+    @Override
+    public Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result) {
+        for (int index = 0; index < reports.size(); index++) {
+            ReportRecord current = reports.get(index);
+            if (reportId.equals(current.id())) {
+                ReportRecord updated = new ReportRecord(current.id(), current.userId(), current.fileId(), current.reason(),
+                        status, result, current.createdAt(), LocalDateTime.now());
+                reports.set(index, updated);
+                persist();
+                return Optional.of(reportView(updated));
+            }
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -188,11 +215,14 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
 
     private Map<String, Object> reportView(ReportRecord record) {
         Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", record.id());
         view.put("userId", record.userId());
         view.put("fileId", record.fileId());
         view.put("reason", record.reason());
-        view.put("status", "PENDING");
+        view.put("status", record.status() == null ? "PENDING" : record.status());
+        view.put("result", record.result() == null ? "" : record.result());
         view.put("createdAt", record.createdAt());
+        view.put("updatedAt", record.updatedAt() == null ? record.createdAt() : record.updatedAt());
         return view;
     }
 
@@ -209,6 +239,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     public record LikeRecord(Long userId, Long fileId, LocalDateTime createdAt) {
     }
 
-    public record ReportRecord(Long userId, Long fileId, String reason, LocalDateTime createdAt) {
+    public record ReportRecord(Long id, Long userId, Long fileId, String reason, String status, String result,
+                               LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 }

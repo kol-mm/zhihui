@@ -78,6 +78,15 @@ class MessageControllerTest {
     }
 
     @Test
+    void adminCanCreateAndDeleteFaq() {
+        String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        var created = controller.saveFaq(auth, Map.of("question", "How?", "answer", "Locally", "sortNo", 2));
+        assertEquals("How?", created.data().get("question"));
+        Long faqId = ((Number) created.data().get("id")).longValue();
+        assertEquals(true, controller.deleteFaq(auth, Map.of("faqId", faqId)).data().get("removed"));
+    }
+
+    @Test
     void feedbackTicketCanBeCreatedAndListed() {
         ApiResponse<Map<String, Object>> created = controller.createTicket(Map.of(
                 "userId", 1L,

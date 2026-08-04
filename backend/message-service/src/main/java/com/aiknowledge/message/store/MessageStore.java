@@ -23,6 +23,10 @@ public interface MessageStore {
 
     List<FaqEntity> listFaqs();
 
+    FaqEntity saveFaq(FaqEntity faq);
+
+    boolean deleteFaq(Long faqId);
+
     FeedbackTicketEntity createTicket(FeedbackTicketEntity ticket);
 
     List<FeedbackTicketEntity> listTickets(Long userId);

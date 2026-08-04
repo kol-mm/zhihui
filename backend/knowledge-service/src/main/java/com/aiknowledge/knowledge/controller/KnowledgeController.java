@@ -195,6 +195,18 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeStore.listReports(null));
     }
 
+    @PostMapping("/admin/report/resolve")
+    public ApiResponse<Map<String, Object>> resolveReport(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        return knowledgeStore.resolveReport(number(request.get("reportId"), 0L),
+                        String.valueOf(request.getOrDefault("status", "RESOLVED")),
+                        String.valueOf(request.getOrDefault("result", "handled")))
+                .map(ApiResponse::ok).orElseGet(() -> ApiResponse.fail("report not found"));
+    }
+
     @PostMapping("/admin/audit")
     public ApiResponse<Map<String, Object>> audit(
             @RequestHeader(name = "Authorization", required = false) String authorization,

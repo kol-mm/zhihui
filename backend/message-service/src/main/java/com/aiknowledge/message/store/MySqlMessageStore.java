@@ -75,6 +75,12 @@ public class MySqlMessageStore implements MessageStore {
                 .orderByAsc(FaqEntity::getSortNo));
     }
 
+    @Override public FaqEntity saveFaq(FaqEntity faq) {
+        if (faq.getId() == null) faqMapper.insert(faq); else faqMapper.updateById(faq);
+        return faq;
+    }
+    @Override public boolean deleteFaq(Long faqId) { return faqMapper.deleteById(faqId) > 0; }
+
     @Override
     public FeedbackTicketEntity createTicket(FeedbackTicketEntity ticket) {
         ticketMapper.insert(ticket);

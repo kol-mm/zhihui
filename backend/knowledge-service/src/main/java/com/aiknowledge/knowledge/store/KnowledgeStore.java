@@ -18,5 +18,6 @@ public interface KnowledgeStore {
     List<Map<String, Object>> listCollects(Long userId);
     void report(Long userId, Long fileId, String reason);
     List<Map<String, Object>> listReports(Long userId);
+    Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result);
     Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason);
 }

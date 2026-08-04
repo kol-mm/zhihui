@@ -148,6 +148,17 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result) {
+        KnowledgeReportEntity report = reportMapper.selectById(reportId);
+        if (report == null) return Optional.empty();
+        report.setStatus(status);
+        reportMapper.updateById(report);
+        Map<String, Object> view = reportView(report);
+        view.put("result", result);
+        return Optional.of(view);
+    }
+
+    @Override
     public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
         KnowledgeFileEntity file = fileMapper.selectById(fileId);
         if (file == null) {

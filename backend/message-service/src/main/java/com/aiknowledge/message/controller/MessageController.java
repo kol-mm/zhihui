@@ -98,6 +98,31 @@ public class MessageController {
         return ApiResponse.ok(messageStore.listFaqs().stream().map(this::toFaqView).toList());
     }
 
+    @PostMapping("/feedback/admin/faq")
+    public ApiResponse<Map<String, Object>> saveFaq(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        FaqEntity faq = new FaqEntity();
+        if (request.get("id") != null) faq.setId(number(request.get("id"), null));
+        faq.setQuestion(String.valueOf(request.getOrDefault("question", "")));
+        faq.setAnswer(String.valueOf(request.getOrDefault("answer", "")));
+        faq.setSortNo(number(request.get("sortNo"), 0L).intValue());
+        faq.setEnabled(number(request.get("enabled"), 1L).intValue());
+        return ApiResponse.ok(toFaqView(messageStore.saveFaq(faq)));
+    }
+
+    @DeleteMapping("/feedback/admin/faq")
+    public ApiResponse<Map<String, Object>> deleteFaq(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long faqId = number(request.get("faqId"), 0L);
+        return ApiResponse.ok(Map.of("faqId", faqId, "removed", messageStore.deleteFaq(faqId)));
+    }
+
     @PostMapping("/feedback/ticket")
     public ApiResponse<Map<String, Object>> createTicket(@RequestBody Map<String, Object> request) {
         FeedbackTicketEntity ticket = new FeedbackTicketEntity();

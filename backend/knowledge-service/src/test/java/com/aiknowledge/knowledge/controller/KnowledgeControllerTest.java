@@ -74,4 +74,14 @@ class KnowledgeControllerTest {
         assertEquals("local", status.data().get("mode"));
         assertEquals(false, status.data().get("elasticsearchReady"));
     }
+
+    @Test
+    void adminCanResolveKnowledgeReport() {
+        controller.report(Map.of("userId", 1L, "fileId", 1L, "reason", "review"));
+        String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        var reports = controller.adminReports(auth);
+        Long reportId = ((Number) reports.data().get(0).get("id")).longValue();
+        var resolved = controller.resolveReport(auth, Map.of("reportId", reportId, "status", "RESOLVED", "result", "closed"));
+        assertEquals("RESOLVED", resolved.data().get("status"));
+    }
 }
