@@ -27,9 +27,10 @@
     </el-dialog>
   </div>
 
-  <div v-else class="app-layout">
+  <div v-else class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <aside class="sidebar" :class="{ open: mobileMenuOpen }">
       <div class="sidebar-brand">
+        <el-button class="sidebar-collapse" :icon="sidebarCollapsed ? ArrowRight : Menu" circle text :title="sidebarCollapsed ? '展开导航' : '收起导航'" @click="sidebarCollapsed = !sidebarCollapsed" />
         <div class="brand-mark small"><Reading /></div>
         <div><strong>知汇</strong><span>AI Knowledge</span></div>
       </div>
@@ -215,7 +216,7 @@ type AiMessageView = { role:'user'|'assistant'; content:string; references?:AiRe
 type NavigationItem = { key:string; label:string; icon:ReturnType<typeof markRaw>; badge?:number };
 
 const authenticated = ref(Boolean(getAuthToken()));
-const busy = ref(false); const aiBusy = ref(false); const mobileMenuOpen = ref(false);
+const busy = ref(false); const aiBusy = ref(false); const mobileMenuOpen = ref(false); const sidebarCollapsed = ref(false);
 const username = ref(localStorage.getItem('ai-knowledge-username') || '');
 const displayName = ref(localStorage.getItem('ai-knowledge-name') || username.value || '用户');
 const avatarUrl = ref(localStorage.getItem('ai-knowledge-avatar') || '');
