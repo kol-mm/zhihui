@@ -3,6 +3,7 @@ package com.aiknowledge.knowledge.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
 import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,10 +24,16 @@ import java.util.Map;
 public class KnowledgeController {
     private final KnowledgeStore knowledgeStore;
     private final LocalFileStorageService fileStorage;
+    private final LocalFullTextSearchService fullTextSearch;
 
-    public KnowledgeController(KnowledgeStore knowledgeStore, LocalFileStorageService fileStorage) {
+    public KnowledgeController(
+            KnowledgeStore knowledgeStore,
+            LocalFileStorageService fileStorage,
+            LocalFullTextSearchService fullTextSearch
+    ) {
         this.knowledgeStore = knowledgeStore;
         this.fileStorage = fileStorage;
+        this.fullTextSearch = fullTextSearch;
     }
 
     @GetMapping("/health")
@@ -59,7 +66,13 @@ public class KnowledgeController {
         file.setAuditStatus("PENDING");
         file.setViews(0);
         file.setDownloads(0);
-        return ApiResponse.ok(toView(knowledgeStore.saveFile(file)));
+        KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
+        String content = String.valueOf(request.getOrDefault("content", ""));
+        if (!content.isBlank()) {
+            fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
+            saved.setParseStatus("INDEXED");
+        }
+        return ApiResponse.ok(toView(saved));
     }
 
     @GetMapping("/list")
@@ -70,6 +83,18 @@ public class KnowledgeController {
     @GetMapping("/search")
     public ApiResponse<List<Map<String, Object>>> search(@RequestParam(name = "keyword", defaultValue = "") String keyword) {
         return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream().map(this::toView).toList());
+    }
+
+    @GetMapping("/search/fulltext")
+    public ApiResponse<List<Map<String, Object>>> fullTextSearch(
+            @RequestParam(name = "keyword", defaultValue = "") String keyword
+    ) {
+        return ApiResponse.ok(fullTextSearch.search(keyword));
+    }
+
+    @GetMapping("/search/status")
+    public ApiResponse<Map<String, Object>> searchStatus() {
+        return ApiResponse.ok(fullTextSearch.status());
     }
 
     @PostMapping("/view")

@@ -10,3 +10,8 @@ knowledge:
     minio:
       endpoint: http://127.0.0.1:9000
       bucket: ai-knowledge
+  search:
+    mode: local
+    elasticsearch:
+      endpoint: http://127.0.0.1:9200
+      index: ai-knowledge

@@ -63,6 +63,7 @@
             <el-form-item label="本地文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item>
             <el-form-item label="本地文件内容"><el-input v-model="knowledgeForm.content" type="textarea" :rows="3" /></el-form-item>
             <el-form-item label="文件地址"><el-input v-model="knowledgeForm.fileUrl" /></el-form-item>
+            <el-form-item label="全文搜索"><el-input v-model="knowledgeSearchKeyword" /></el-form-item>
             <el-form-item label="操作文件 ID"><el-input-number v-model="knowledgeAction.fileId" :min="1" /></el-form-item>
             <el-form-item label="举报原因"><el-input v-model="knowledgeAction.reason" /></el-form-item>
             <div class="actions">
@@ -74,6 +75,7 @@
               <el-button @click="reportKnowledge">举报</el-button>
               <el-button @click="loadKnowledgeCollects">我的收藏</el-button>
               <el-button @click="loadKnowledge">刷新列表</el-button>
+              <el-button @click="searchKnowledgeFullText">全文搜索</el-button>
             </div>
           </el-form>
         </article>
@@ -546,6 +548,7 @@ const knowledgeForm = ref({
   fileUrl: 'local://knowledge.txt'
 });
 const knowledgeAction = ref({ userId: 1, fileId: 1, reason: '内容不准确，需要复核' });
+const knowledgeSearchKeyword = ref('本地');
 const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
 const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善。' });
 const detailPostId = ref(1);
@@ -677,11 +680,15 @@ async function uploadKnowledge() {
       payload.fileUrl = stored.fileUrl;
       knowledgeForm.value.fileUrl = stored.fileUrl;
     }
-    const { content, filename, ...knowledgePayload } = payload;
+    const { filename, ...knowledgePayload } = payload;
     const created = await postData('/knowledge/upload', knowledgePayload);
     await loadKnowledge();
     return created;
   });
+}
+
+async function searchKnowledgeFullText() {
+  await runClient(() => getData(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeSearchKeyword.value)}`));
 }
 
 async function viewKnowledge() {
