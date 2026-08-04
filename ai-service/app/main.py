@@ -393,6 +393,16 @@ def health() -> ApiResponse:
     )
 
 
+@app.get("/ai/config/public", response_model=ApiResponse)
+def public_config() -> ApiResponse:
+    config = read_ai_config()
+    return ApiResponse(data={
+        "max_upload_mb": int(config.get("max_upload_mb", 25)),
+        "notifications_enabled": bool(config.get("notifications_enabled", True)),
+        "community_enabled": bool(config.get("community_enabled", True)),
+    })
+
+
 @app.post("/ai/parse", response_model=ApiResponse)
 def parse_document(request: TextRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_user(authorization)
