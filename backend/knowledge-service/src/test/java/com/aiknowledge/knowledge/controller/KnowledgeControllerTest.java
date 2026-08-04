@@ -83,7 +83,7 @@ class KnowledgeControllerTest {
         var multipart = new org.springframework.mock.web.MockMultipartFile(
                 "file", "production-guide.md", "text/markdown", "# Production\nUse signed identities.".getBytes());
 
-        var uploaded = controller.uploadFile(userAuth, multipart, "Production guide");
+        var uploaded = controller.uploadFile(userAuth, multipart, "Production guide", null);
 
         assertEquals(0, uploaded.code());
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
@@ -91,6 +91,17 @@ class KnowledgeControllerTest {
         var download = controller.fileContent(userAuth, fileId);
         assertEquals(200, download.getStatusCode().value());
         assertTrue(new String(download.getBody()).contains("signed identities"));
+    }
+
+    @Test
+    void adminCanManageKnowledgeCategories() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        var created = controller.saveCategory(adminAuth, Map.of("name", "Engineering", "sortNo", 5));
+        assertEquals(0, created.code());
+        Long categoryId = ((Number) created.data().get("id")).longValue();
+        assertTrue(controller.categories().data().stream().anyMatch(item -> categoryId.equals(item.get("id"))));
+        assertEquals(500, controller.saveCategory(userAuth, Map.of("name", "Denied")).code());
+        assertEquals(true, controller.deleteCategory(adminAuth, Map.of("categoryId", categoryId)).data().get("removed"));
     }
 
     @Test

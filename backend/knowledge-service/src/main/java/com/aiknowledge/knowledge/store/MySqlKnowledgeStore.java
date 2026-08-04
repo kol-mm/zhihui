@@ -6,12 +6,14 @@ import com.aiknowledge.knowledge.entity.KnowledgeLikeEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeReportEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeDownloadEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeForwardEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 import com.aiknowledge.knowledge.mapper.KnowledgeCollectMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeFileMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeLikeMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeReportMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeDownloadMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeForwardMapper;
+import com.aiknowledge.knowledge.mapper.KnowledgeCategoryMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
@@ -31,6 +33,7 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     private final KnowledgeReportMapper reportMapper;
     private final KnowledgeDownloadMapper downloadMapper;
     private final KnowledgeForwardMapper forwardMapper;
+    private final KnowledgeCategoryMapper categoryMapper;
 
     public MySqlKnowledgeStore(
             KnowledgeFileMapper fileMapper,
@@ -38,7 +41,8 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
             KnowledgeLikeMapper likeMapper,
             KnowledgeReportMapper reportMapper,
             KnowledgeDownloadMapper downloadMapper,
-            KnowledgeForwardMapper forwardMapper
+            KnowledgeForwardMapper forwardMapper,
+            KnowledgeCategoryMapper categoryMapper
     ) {
         this.fileMapper = fileMapper;
         this.collectMapper = collectMapper;
@@ -46,6 +50,7 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         this.reportMapper = reportMapper;
         this.downloadMapper = downloadMapper;
         this.forwardMapper = forwardMapper;
+        this.categoryMapper = categoryMapper;
     }
 
     @Override
@@ -221,6 +226,23 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         file.setAuditStatus(auditStatus);
         fileMapper.updateById(file);
         return Optional.of(file);
+    }
+
+    @Override
+    public List<KnowledgeCategoryEntity> listCategories() {
+        return categoryMapper.selectList(Wrappers.<KnowledgeCategoryEntity>lambdaQuery()
+                .orderByAsc(KnowledgeCategoryEntity::getSortNo).orderByAsc(KnowledgeCategoryEntity::getId));
+    }
+
+    @Override
+    public KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category) {
+        if (category.getId() == null) categoryMapper.insert(category); else categoryMapper.updateById(category);
+        return category;
+    }
+
+    @Override
+    public boolean deleteCategory(Long categoryId) {
+        return categoryMapper.deleteById(categoryId) > 0;
     }
 
     private Map<String, Object> collectView(KnowledgeCollectEntity collect) {

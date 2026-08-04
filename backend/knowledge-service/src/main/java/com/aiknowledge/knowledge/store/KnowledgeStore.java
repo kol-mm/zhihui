@@ -1,6 +1,7 @@
 package com.aiknowledge.knowledge.store;
 
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 
 import java.util.List;
 import java.util.Map;
@@ -23,4 +24,7 @@ public interface KnowledgeStore {
     List<Map<String, Object>> listReports(Long userId);
     Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result);
     Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason);
+    List<KnowledgeCategoryEntity> listCategories();
+    KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category);
+    boolean deleteCategory(Long categoryId);
 }

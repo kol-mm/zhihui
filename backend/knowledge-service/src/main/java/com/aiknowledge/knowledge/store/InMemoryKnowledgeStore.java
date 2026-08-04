@@ -2,6 +2,7 @@ package com.aiknowledge.knowledge.store;
 
 import com.aiknowledge.common.LocalJsonStore;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
@@ -27,6 +28,8 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     private final List<ReportRecord> reports = new CopyOnWriteArrayList<>();
     private final List<ActivityRecord> downloads = new CopyOnWriteArrayList<>();
     private final List<ActivityRecord> forwards = new CopyOnWriteArrayList<>();
+    private final List<KnowledgeCategoryEntity> categories = new CopyOnWriteArrayList<>();
+    private final AtomicLong categoryIds = new AtomicLong(0);
 
     public InMemoryKnowledgeStore() {
         State state = LocalJsonStore.read(storePath, State.class, new State());
@@ -43,6 +46,14 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
             }
             if (state.downloads != null) downloads.addAll(state.downloads);
             if (state.forwards != null) forwards.addAll(state.forwards);
+            if (state.categories != null) categories.addAll(state.categories);
+            categoryIds.set(categories.stream().map(KnowledgeCategoryEntity::getId).filter(java.util.Objects::nonNull).mapToLong(Long::longValue).max().orElse(0L));
+            if (categories.isEmpty()) {
+                addDefaultCategory("技术文档", 1);
+                addDefaultCategory("产品资料", 2);
+                addDefaultCategory("社区知识", 3);
+                persist();
+            }
             reportIds.set(reports.stream().map(ReportRecord::id).filter(java.util.Objects::nonNull)
                     .mapToLong(Long::longValue).max().orElse(500L));
             for (int index = 0; index < reports.size(); index++) {
@@ -73,6 +84,9 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         sample.setDownloads(0);
         sample.setCreatedAt(LocalDateTime.now());
         files.add(sample);
+        addDefaultCategory("技术文档", 1);
+        addDefaultCategory("产品资料", 2);
+        addDefaultCategory("社区知识", 3);
         persist();
     }
 
@@ -227,6 +241,29 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         return found;
     }
 
+    @Override
+    public List<KnowledgeCategoryEntity> listCategories() {
+        return categories.stream().sorted(java.util.Comparator.comparing(KnowledgeCategoryEntity::getSortNo, java.util.Comparator.nullsLast(Integer::compareTo)).thenComparing(KnowledgeCategoryEntity::getId)).toList();
+    }
+
+    @Override
+    public KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category) {
+        if (category.getId() == null) { category.setId(categoryIds.incrementAndGet()); categories.add(category); }
+        else { categories.removeIf(item -> category.getId().equals(item.getId())); categories.add(category); }
+        persist(); return category;
+    }
+
+    @Override
+    public boolean deleteCategory(Long categoryId) {
+        boolean removed = categories.removeIf(item -> categoryId.equals(item.getId()));
+        if (removed) { files.stream().filter(file -> categoryId.equals(file.getCategoryId())).forEach(file -> file.setCategoryId(null)); persist(); }
+        return removed;
+    }
+
+    private void addDefaultCategory(String name, int sortNo) {
+        KnowledgeCategoryEntity category = new KnowledgeCategoryEntity(); category.setId(categoryIds.incrementAndGet()); category.setName(name); category.setParentId(0L); category.setSortNo(sortNo); categories.add(category);
+    }
+
     private void persist() {
         State state = new State();
         state.files = new ArrayList<>(files);
@@ -235,6 +272,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         state.reports = new ArrayList<>(reports);
         state.downloads = new ArrayList<>(downloads);
         state.forwards = new ArrayList<>(forwards);
+        state.categories = new ArrayList<>(categories);
         LocalJsonStore.write(storePath, state);
     }
 
@@ -266,6 +304,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         public List<ReportRecord> reports = new ArrayList<>();
         public List<ActivityRecord> downloads = new ArrayList<>();
         public List<ActivityRecord> forwards = new ArrayList<>();
+        public List<KnowledgeCategoryEntity> categories = new ArrayList<>();
     }
 
     public record CollectRecord(Long userId, Long fileId, LocalDateTime createdAt) {

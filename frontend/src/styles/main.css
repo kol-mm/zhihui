@@ -128,3 +128,6 @@ button { letter-spacing: 0; }
   .activity-list article { grid-template-columns:38px minmax(0,1fr); }
   .activity-list article>.el-button { grid-column:2; justify-self:start; }
 }
+.category-admin-list { display:grid; gap:8px; margin-top:16px; }
+.category-admin-list article { display:grid; grid-template-columns:minmax(0,1fr) 70px auto; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid #edf0ef; }
+.category-admin-list small { color:#84908a; }

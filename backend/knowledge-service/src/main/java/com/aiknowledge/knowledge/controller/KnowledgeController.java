@@ -3,11 +3,13 @@ package com.aiknowledge.knowledge.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
 import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.storage.DocumentTextExtractor;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -52,7 +54,8 @@ public class KnowledgeController {
     public ApiResponse<Map<String, Object>> uploadFile(
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam("file") MultipartFile multipartFile,
-            @RequestParam(name = "title", defaultValue = "") String title
+            @RequestParam(name = "title", defaultValue = "") String title,
+            @RequestParam(name = "categoryId", required = false) Long categoryId
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
@@ -66,6 +69,7 @@ public class KnowledgeController {
             Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
             KnowledgeFileEntity file = new KnowledgeFileEntity();
             file.setUserId(userId);
+            file.setCategoryId(categoryId);
             file.setTitle(title == null || title.isBlank() ? filename : title.trim());
             file.setFileUrl(String.valueOf(stored.get("fileUrl")));
             file.setFileType(fileType);
@@ -165,6 +169,36 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeStore.listFiles().stream()
                 .filter(file -> canViewAll || "APPROVED".equals(file.getAuditStatus()))
                 .map(this::toView).toList());
+    }
+
+    @GetMapping("/categories")
+    public ApiResponse<List<Map<String, Object>>> categories() {
+        return ApiResponse.ok(knowledgeStore.listCategories().stream().map(this::toCategoryView).toList());
+    }
+
+    @PostMapping("/admin/category")
+    public ApiResponse<Map<String, Object>> saveCategory(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        KnowledgeCategoryEntity category = new KnowledgeCategoryEntity();
+        category.setId(number(request.get("id"), null));
+        category.setName(String.valueOf(request.getOrDefault("name", "")).trim());
+        category.setParentId(number(request.get("parentId"), 0L));
+        category.setSortNo(number(request.get("sortNo"), 0L).intValue());
+        if (category.getName().isBlank()) return ApiResponse.fail("category name is required");
+        return ApiResponse.ok(toCategoryView(knowledgeStore.saveCategory(category)));
+    }
+
+    @DeleteMapping("/admin/category")
+    public ApiResponse<Map<String, Object>> deleteCategory(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long categoryId = number(request.get("categoryId"), 0L);
+        return ApiResponse.ok(Map.of("categoryId", categoryId, "removed", knowledgeStore.deleteCategory(categoryId)));
     }
 
     @GetMapping("/search")
@@ -420,6 +454,13 @@ public class KnowledgeController {
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));
         view.put("createdAt", file.getCreatedAt());
+        return view;
+    }
+
+    private Map<String, Object> toCategoryView(KnowledgeCategoryEntity category) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", category.getId()); view.put("name", category.getName());
+        view.put("parentId", category.getParentId()); view.put("sortNo", category.getSortNo());
         return view;
     }
 
