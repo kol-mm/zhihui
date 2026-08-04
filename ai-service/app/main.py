@@ -43,6 +43,10 @@ class AiConfigRequest(BaseModel):
     data_source_scope: str = "all-approved"
     match_limit: int = Field(default=5, ge=1, le=20)
     compliance_rule: str = "answer-with-references"
+    provider: str = Field(default="local", pattern="^(local|openai-compatible)$")
+    model: str = "local-rag"
+    base_url: str = ""
+    temperature: float = Field(default=0.2, ge=0, le=2)
 
 
 def now_iso() -> str:
@@ -171,12 +175,21 @@ def read_ai_config() -> dict[str, Any]:
         "data_source_scope": "all-approved",
         "match_limit": 5,
         "compliance_rule": "answer-with-references",
+        "provider": "local",
+        "model": "local-rag",
+        "base_url": "",
+        "temperature": 0.2,
     }
     with connect() as conn:
         rows = conn.execute("SELECT config_key, config_value FROM ai_config").fetchall()
     for row in rows:
         value = row["config_value"]
-        defaults[row["config_key"]] = int(value) if row["config_key"] == "match_limit" else value
+        if row["config_key"] == "match_limit":
+            defaults[row["config_key"]] = int(value)
+        elif row["config_key"] == "temperature":
+            defaults[row["config_key"]] = float(value)
+        else:
+            defaults[row["config_key"]] = value
     return defaults
 
 
