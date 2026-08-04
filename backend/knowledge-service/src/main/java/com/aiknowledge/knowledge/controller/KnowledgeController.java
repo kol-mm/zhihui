@@ -273,6 +273,23 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeStore.listCollects(userId));
     }
 
+    @GetMapping("/mine")
+    public ApiResponse<List<Map<String, Object>>> mine(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "type", defaultValue = "UPLOADED") String type,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        Long target = requestedUserId == null ? userId : requestedUserId;
+        try {
+            return ApiResponse.ok(knowledgeStore.listUserFiles(target, type).stream().map(this::toView).toList());
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        }
+    }
+
     @PostMapping("/report")
     public ApiResponse<Map<String, Object>> report(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -299,8 +316,15 @@ public class KnowledgeController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestBody Map<String, Object> request
     ) {
-        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
-        return ApiResponse.ok(Map.of("fileId", request.getOrDefault("fileId", 0), "forwarded", true));
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long fileId = number(request.get("fileId"), 0L);
+        try {
+            knowledgeStore.forward(userId, fileId);
+            return ApiResponse.ok(Map.of("fileId", fileId, "forwarded", true));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        }
     }
 
     @GetMapping("/admin/overview")

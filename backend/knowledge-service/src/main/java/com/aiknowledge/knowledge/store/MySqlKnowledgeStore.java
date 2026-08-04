@@ -4,10 +4,14 @@ import com.aiknowledge.knowledge.entity.KnowledgeCollectEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeLikeEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeReportEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeDownloadEntity;
+import com.aiknowledge.knowledge.entity.KnowledgeForwardEntity;
 import com.aiknowledge.knowledge.mapper.KnowledgeCollectMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeFileMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeLikeMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeReportMapper;
+import com.aiknowledge.knowledge.mapper.KnowledgeDownloadMapper;
+import com.aiknowledge.knowledge.mapper.KnowledgeForwardMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
@@ -25,17 +29,23 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     private final KnowledgeCollectMapper collectMapper;
     private final KnowledgeLikeMapper likeMapper;
     private final KnowledgeReportMapper reportMapper;
+    private final KnowledgeDownloadMapper downloadMapper;
+    private final KnowledgeForwardMapper forwardMapper;
 
     public MySqlKnowledgeStore(
             KnowledgeFileMapper fileMapper,
             KnowledgeCollectMapper collectMapper,
             KnowledgeLikeMapper likeMapper,
-            KnowledgeReportMapper reportMapper
+            KnowledgeReportMapper reportMapper,
+            KnowledgeDownloadMapper downloadMapper,
+            KnowledgeForwardMapper forwardMapper
     ) {
         this.fileMapper = fileMapper;
         this.collectMapper = collectMapper;
         this.likeMapper = likeMapper;
         this.reportMapper = reportMapper;
+        this.downloadMapper = downloadMapper;
+        this.forwardMapper = forwardMapper;
     }
 
     @Override
@@ -81,7 +91,46 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         }
         file.setDownloads((file.getDownloads() == null ? 0 : file.getDownloads()) + 1);
         fileMapper.updateById(file);
+        KnowledgeDownloadEntity download = new KnowledgeDownloadEntity();
+        download.setUserId(userId); download.setFileId(fileId); download.setCreatedAt(LocalDateTime.now());
+        downloadMapper.insert(download);
         return Optional.of(file);
+    }
+
+    @Override
+    public void forward(Long userId, Long fileId) {
+        if (fileMapper.selectById(fileId) == null) throw new IllegalArgumentException("knowledge file not found");
+        KnowledgeForwardEntity forward = new KnowledgeForwardEntity();
+        forward.setUserId(userId); forward.setFileId(fileId); forward.setCreatedAt(LocalDateTime.now());
+        forwardMapper.insert(forward);
+    }
+
+    @Override
+    public List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType) {
+        String type = activityType == null ? "UPLOADED" : activityType.toUpperCase(java.util.Locale.ROOT);
+        if ("UPLOADED".equals(type)) {
+            return fileMapper.selectList(Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                    .eq(KnowledgeFileEntity::getUserId, userId).orderByDesc(KnowledgeFileEntity::getCreatedAt));
+        }
+        List<Long> ids = switch (type) {
+            case "COLLECTED" -> collectMapper.selectList(Wrappers.<KnowledgeCollectEntity>lambdaQuery()
+                    .eq(KnowledgeCollectEntity::getUserId, userId).orderByDesc(KnowledgeCollectEntity::getCreatedAt))
+                    .stream().map(KnowledgeCollectEntity::getFileId).distinct().toList();
+            case "LIKED" -> likeMapper.selectList(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                    .eq(KnowledgeLikeEntity::getUserId, userId).orderByDesc(KnowledgeLikeEntity::getCreatedAt))
+                    .stream().map(KnowledgeLikeEntity::getFileId).distinct().toList();
+            case "DOWNLOADED" -> downloadMapper.selectList(Wrappers.<KnowledgeDownloadEntity>lambdaQuery()
+                    .eq(KnowledgeDownloadEntity::getUserId, userId).orderByDesc(KnowledgeDownloadEntity::getCreatedAt))
+                    .stream().map(KnowledgeDownloadEntity::getFileId).distinct().toList();
+            case "FORWARDED" -> forwardMapper.selectList(Wrappers.<KnowledgeForwardEntity>lambdaQuery()
+                    .eq(KnowledgeForwardEntity::getUserId, userId).orderByDesc(KnowledgeForwardEntity::getCreatedAt))
+                    .stream().map(KnowledgeForwardEntity::getFileId).distinct().toList();
+            default -> throw new IllegalArgumentException("unsupported activity type");
+        };
+        if (ids.isEmpty()) return List.of();
+        Map<Long, KnowledgeFileEntity> filesById = fileMapper.selectBatchIds(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(KnowledgeFileEntity::getId, file -> file));
+        return ids.stream().map(filesById::get).filter(java.util.Objects::nonNull).toList();
     }
 
     @Override

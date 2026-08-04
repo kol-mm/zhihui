@@ -109,6 +109,16 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void personalKnowledgeHistoryTracksForwardedResource() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Personal history guide", "fileType", "txt", "content", "history body"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        assertEquals(0, controller.forward(userAuth, Map.of("fileId", fileId)).code());
+        assertTrue(controller.mine(userAuth, "UPLOADED", null).data().stream().anyMatch(item -> fileId.equals(item.get("id"))));
+        assertTrue(controller.mine(userAuth, "FORWARDED", null).data().stream().anyMatch(item -> fileId.equals(item.get("id"))));
+    }
+
+    @Test
     void publicListHidesPendingKnowledgeButAdminCanIncludeIt() {
         var uploaded = controller.upload(userAuth, Map.of(
                 "userId", 1L,

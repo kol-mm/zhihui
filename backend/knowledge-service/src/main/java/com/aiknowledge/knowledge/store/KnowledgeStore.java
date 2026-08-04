@@ -13,6 +13,8 @@ public interface KnowledgeStore {
     Optional<KnowledgeFileEntity> find(Long fileId);
     Optional<KnowledgeFileEntity> view(Long fileId);
     Optional<KnowledgeFileEntity> download(Long userId, Long fileId);
+    void forward(Long userId, Long fileId);
+    List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType);
     int like(Long userId, Long fileId);
     int likeCount(Long fileId);
     void collect(Long userId, Long fileId);

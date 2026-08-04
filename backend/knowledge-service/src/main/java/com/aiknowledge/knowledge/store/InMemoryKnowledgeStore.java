@@ -25,6 +25,8 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     private final List<CollectRecord> collects = new CopyOnWriteArrayList<>();
     private final List<LikeRecord> likes = new CopyOnWriteArrayList<>();
     private final List<ReportRecord> reports = new CopyOnWriteArrayList<>();
+    private final List<ActivityRecord> downloads = new CopyOnWriteArrayList<>();
+    private final List<ActivityRecord> forwards = new CopyOnWriteArrayList<>();
 
     public InMemoryKnowledgeStore() {
         State state = LocalJsonStore.read(storePath, State.class, new State());
@@ -39,6 +41,8 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
             if (state.reports != null) {
                 reports.addAll(state.reports);
             }
+            if (state.downloads != null) downloads.addAll(state.downloads);
+            if (state.forwards != null) forwards.addAll(state.forwards);
             reportIds.set(reports.stream().map(ReportRecord::id).filter(java.util.Objects::nonNull)
                     .mapToLong(Long::longValue).max().orElse(500L));
             for (int index = 0; index < reports.size(); index++) {
@@ -117,9 +121,31 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
                 .findFirst();
         found.ifPresent(file -> {
             file.setDownloads((file.getDownloads() == null ? 0 : file.getDownloads()) + 1);
+            downloads.add(new ActivityRecord(userId, fileId, LocalDateTime.now()));
             persist();
         });
         return found;
+    }
+
+    @Override
+    public void forward(Long userId, Long fileId) {
+        if (find(fileId).isEmpty()) throw new IllegalArgumentException("knowledge file not found");
+        forwards.add(new ActivityRecord(userId, fileId, LocalDateTime.now()));
+        persist();
+    }
+
+    @Override
+    public List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType) {
+        String type = activityType == null ? "UPLOADED" : activityType.toUpperCase(java.util.Locale.ROOT);
+        if ("UPLOADED".equals(type)) return files.stream().filter(file -> userId.equals(file.getUserId())).toList();
+        java.util.Set<Long> ids = switch (type) {
+            case "COLLECTED" -> collects.stream().filter(item -> userId.equals(item.userId())).map(CollectRecord::fileId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            case "LIKED" -> likes.stream().filter(item -> userId.equals(item.userId())).map(LikeRecord::fileId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            case "DOWNLOADED" -> downloads.stream().filter(item -> userId.equals(item.userId())).map(ActivityRecord::fileId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            case "FORWARDED" -> forwards.stream().filter(item -> userId.equals(item.userId())).map(ActivityRecord::fileId).collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            default -> throw new IllegalArgumentException("unsupported activity type");
+        };
+        return files.stream().filter(file -> ids.contains(file.getId())).toList();
     }
 
     @Override
@@ -207,6 +233,8 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         state.collects = new ArrayList<>(collects);
         state.likes = new ArrayList<>(likes);
         state.reports = new ArrayList<>(reports);
+        state.downloads = new ArrayList<>(downloads);
+        state.forwards = new ArrayList<>(forwards);
         LocalJsonStore.write(storePath, state);
     }
 
@@ -236,12 +264,17 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         public List<CollectRecord> collects = new ArrayList<>();
         public List<LikeRecord> likes = new ArrayList<>();
         public List<ReportRecord> reports = new ArrayList<>();
+        public List<ActivityRecord> downloads = new ArrayList<>();
+        public List<ActivityRecord> forwards = new ArrayList<>();
     }
 
     public record CollectRecord(Long userId, Long fileId, LocalDateTime createdAt) {
     }
 
     public record LikeRecord(Long userId, Long fileId, LocalDateTime createdAt) {
+    }
+
+    public record ActivityRecord(Long userId, Long fileId, LocalDateTime createdAt) {
     }
 
     public record ReportRecord(Long id, Long userId, Long fileId, String reason, String status, String result,
