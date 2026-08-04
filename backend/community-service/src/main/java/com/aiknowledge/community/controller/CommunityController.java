@@ -35,9 +35,14 @@ public class CommunityController {
     }
 
     @PostMapping("/post/create")
-    public ApiResponse<Map<String, Object>> createPost(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> createPost(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         PostEntity post = new PostEntity();
-        post.setUserId(number(request.get("userId"), 1L));
+        post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "Untitled post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PUBLISHED");
@@ -47,9 +52,16 @@ public class CommunityController {
     }
 
     @PutMapping("/post/update")
-    public ApiResponse<Map<String, Object>> updatePost(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> updatePost(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long postId = number(request.get("id"), 0L);
+        PostEntity existing = communityStore.findPost(postId).orElse(null);
+        if (existing == null) return ApiResponse.fail("post not found");
+        if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this post is denied");
         PostEntity post = new PostEntity();
-        post.setId(number(request.get("id"), 0L));
+        post.setId(postId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "Updated post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PUBLISHED");
@@ -70,8 +82,13 @@ public class CommunityController {
     }
 
     @PostMapping("/comment/create")
-    public ApiResponse<Map<String, Object>> createComment(@RequestBody Map<String, Object> request) {
-        CommentEntity comment = buildComment(request, "POST");
+    public ApiResponse<Map<String, Object>> createComment(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        CommentEntity comment = buildComment(request, "POST", userId);
         return ApiResponse.ok(toCommentView(communityStore.saveComment(comment)));
     }
 
@@ -81,16 +98,27 @@ public class CommunityController {
     }
 
     @PostMapping("/post/draft")
-    public ApiResponse<Map<String, Object>> saveDraft(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> saveDraft(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         PostDraftEntity draft = new PostDraftEntity();
-        draft.setUserId(number(request.get("userId"), 1L));
+        draft.setUserId(userId);
         draft.setTitle(String.valueOf(request.getOrDefault("title", "Untitled draft")));
         draft.setContent(String.valueOf(request.getOrDefault("content", "")));
         return ApiResponse.ok(toDraftView(communityStore.saveDraft(draft)));
     }
 
     @GetMapping("/post/drafts")
-    public ApiResponse<List<Map<String, Object>>> drafts(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<List<Map<String, Object>>> drafts(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long userId
+    ) {
+        if (!(LocalAuth.isAdmin(authorization) && userId == null) && !LocalAuth.canAccessUser(authorization, userId)) {
+            return ApiResponse.fail("access to this user is denied");
+        }
         return ApiResponse.ok(communityStore.listDrafts(userId).stream().map(this::toDraftView).toList());
     }
 
@@ -110,15 +138,25 @@ public class CommunityController {
     }
 
     @PostMapping("/square/quick-comment")
-    public ApiResponse<Map<String, Object>> quickComment(@RequestBody Map<String, Object> request) {
-        CommentEntity comment = buildComment(request, "SQUARE");
+    public ApiResponse<Map<String, Object>> quickComment(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        CommentEntity comment = buildComment(request, "SQUARE", userId);
         return ApiResponse.ok(toCommentView(communityStore.saveComment(comment)));
     }
 
     @PostMapping("/square/collect")
-    public ApiResponse<Map<String, Object>> squareCollect(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> squareCollect(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         PostCollectEntity collect = new PostCollectEntity();
-        collect.setUserId(number(request.get("userId"), 1L));
+        collect.setUserId(userId);
         collect.setPostId(number(request.get("postId"), 0L));
         collect.setSource("SQUARE");
         PostCollectEntity saved = communityStore.collectPost(collect);
@@ -126,8 +164,12 @@ public class CommunityController {
     }
 
     @PostMapping("/post/like")
-    public ApiResponse<Map<String, Object>> likePost(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> likePost(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long postId = number(request.get("postId"), 0L);
         communityStore.likePost(userId, postId);
         return ApiResponse.ok(Map.of("postId", postId, "liked", true, "likes", communityStore.countPostLikes(postId)));
@@ -194,10 +236,10 @@ public class CommunityController {
         return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
     }
 
-    private CommentEntity buildComment(Map<String, Object> request, String source) {
+    private CommentEntity buildComment(Map<String, Object> request, String source, Long userId) {
         CommentEntity comment = new CommentEntity();
         comment.setPostId(number(request.get("postId"), 0L));
-        comment.setUserId(number(request.get("userId"), 1L));
+        comment.setUserId(userId);
         comment.setParentId(number(request.get("parentId"), 0L));
         comment.setContent(String.valueOf(request.getOrDefault("content", "")));
         comment.setSource(source);

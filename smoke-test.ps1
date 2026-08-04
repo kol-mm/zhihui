@@ -44,18 +44,33 @@ for ($round = 1; $round -le $MaxRetries; $round++) {
   $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   Write-Result "===== Round $round/$MaxRetries - $stamp =====" "Cyan"
 
+  $headers = @{}
+  try {
+    $loginBody = @{ username = "demo"; password = "demo" } | ConvertTo-Json
+    $login = Invoke-RestMethod -Uri "$Gateway/user/login" -Method Post -ContentType "application/json" -Body $loginBody -TimeoutSec 8
+    if ($login.code -ne 0 -or [string]::IsNullOrWhiteSpace($login.data.token)) {
+      throw "Login returned business code $($login.code): $($login.message)"
+    }
+    $headers.Authorization = "Bearer $($login.data.token)"
+    Write-Result "[OK] authenticated smoke-test user" "Green"
+  } catch {
+    $failed++
+    Write-Result "[FAIL] authentication $($_.Exception.Message)" "Red"
+  }
+
   foreach ($check in $checks) {
     try {
-      $response = Invoke-WebRequest -Uri $check.Url -UseBasicParsing -TimeoutSec 8
+      $response = Invoke-WebRequest -Uri $check.Url -Headers $headers -UseBasicParsing -TimeoutSec 8
       $status = [int]$response.StatusCode
-      if ($status -ge 200 -and $status -lt 300) {
+      $payload = $response.Content | ConvertFrom-Json
+      if ($status -ge 200 -and $status -lt 300 -and $payload.code -eq 0) {
         Write-Result "[OK] $($check.Name) HTTP $status $($check.Url)" "Green"
       } else {
         $failed++
         if ($status -eq 503) {
           $has503 = $true
         }
-        Write-Result "[FAIL] $($check.Name) HTTP $status $($check.Url)" "Red"
+        Write-Result "[FAIL] $($check.Name) HTTP $status business-code=$($payload.code) $($check.Url)" "Red"
       }
     } catch {
       $failed++

@@ -38,9 +38,13 @@ public class MessageController {
     }
 
     @PostMapping("/message/send")
-    public ApiResponse<Map<String, Object>> send(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> send(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
         Long sessionId = number(request.get("sessionId"), 0L);
-        Long senderId = number(request.get("senderId"), 0L);
+        Long senderId = LocalAuth.userId(authorization);
+        if (senderId == null) return ApiResponse.fail("valid user authorization is required");
         String content = String.valueOf(request.getOrDefault("content", "")).trim();
         ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
         if (session == null) return ApiResponse.fail("chat session not found");
@@ -61,8 +65,12 @@ public class MessageController {
     }
 
     @PostMapping("/message/session")
-    public ApiResponse<Map<String, Object>> createSession(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 0L);
+    public ApiResponse<Map<String, Object>> createSession(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
         if (userId <= 0 || targetUserId <= 0) return ApiResponse.fail("both users are required");
         if (userId.equals(targetUserId)) return ApiResponse.fail("cannot create a private chat with yourself");
@@ -71,9 +79,13 @@ public class MessageController {
 
     @GetMapping("/message/list")
     public ApiResponse<List<Map<String, Object>>> list(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam(name = "sessionId", defaultValue = "1") Long sessionId,
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+            @RequestParam(name = "userId", required = false) Long requestedUserId
     ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
         if (session == null) return ApiResponse.ok(List.of());
         if (!isParticipant(session, userId)) return ApiResponse.fail("user is not a participant of this session");
@@ -86,7 +98,8 @@ public class MessageController {
             @RequestBody Map<String, Object> request
     ) {
         Long sessionId = request.containsKey("sessionId") ? number(request.get("sessionId"), null) : null;
-        Long userId = number(request.get("userId"), 0L);
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (sessionId == null && !LocalAuth.isAdmin(authorization)) {
             return ApiResponse.fail("admin authorization is required to clear all messages");
         }
@@ -103,9 +116,13 @@ public class MessageController {
     }
 
     @DeleteMapping("/message")
-    public ApiResponse<Map<String, Object>> deleteMessage(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> deleteMessage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
         Long messageId = number(request.get("messageId"), 0L);
-        Long userId = number(request.get("userId"), 0L);
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         ChatMessageEntity message = messageStore.findMessage(messageId).orElse(null);
         if (message == null) return ApiResponse.ok(Map.of("messageId", messageId, "removed", false));
         ChatSessionEntity session = messageStore.findSession(message.getSessionId()).orElse(null);
@@ -119,8 +136,12 @@ public class MessageController {
 
     @GetMapping("/message/sessions")
     public ApiResponse<List<Map<String, Object>>> sessions(
-            @RequestParam(name = "userId", defaultValue = "1") Long userId
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
     ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(messageStore.listSessions(userId).stream()
                 .map(session -> toSessionView(session, userId)).toList());
     }
@@ -136,7 +157,14 @@ public class MessageController {
     }
 
     @GetMapping("/notification/list")
-    public ApiResponse<List<Map<String, Object>>> notifications(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<List<Map<String, Object>>> notifications(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
+    ) {
+        Long authenticatedUserId = LocalAuth.userId(authorization);
+        if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
         return ApiResponse.ok(messageStore.listNotifications(userId).stream().map(this::toNotificationView).toList());
     }
 
@@ -171,9 +199,14 @@ public class MessageController {
     }
 
     @PostMapping("/feedback/ticket")
-    public ApiResponse<Map<String, Object>> createTicket(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> createTicket(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         FeedbackTicketEntity ticket = new FeedbackTicketEntity();
-        ticket.setUserId(number(request.get("userId"), 1L));
+        ticket.setUserId(userId);
         ticket.setType(String.valueOf(request.getOrDefault("type", "BUG")));
         ticket.setContent(String.valueOf(request.getOrDefault("content", "")));
         ticket.setStatus("PENDING");
@@ -188,7 +221,14 @@ public class MessageController {
     }
 
     @GetMapping("/feedback/tickets")
-    public ApiResponse<List<Map<String, Object>>> tickets(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<List<Map<String, Object>>> tickets(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
+    ) {
+        Long authenticatedUserId = LocalAuth.userId(authorization);
+        if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
         return ApiResponse.ok(messageStore.listTickets(userId).stream().map(this::toTicketView).toList());
     }
 

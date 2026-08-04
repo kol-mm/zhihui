@@ -1,6 +1,7 @@
 package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.community.store.InMemoryCommunityStore;
 import org.junit.jupiter.api.Test;
 
@@ -17,10 +18,12 @@ class CommunityControllerTest {
 
     private final CommunityController controller =
             new CommunityController(new InMemoryCommunityStore());
+    private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
+    private final String secondUserAuth = "Bearer " + LocalAuth.issueToken("author", 2L, "USER");
 
     @Test
     void createdPostAppearsInFeed() {
-        ApiResponse<Map<String, Object>> created = controller.createPost(Map.of(
+        ApiResponse<Map<String, Object>> created = controller.createPost(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Community Persistence",
                 "content", "forum post",
@@ -37,23 +40,23 @@ class CommunityControllerTest {
 
     @Test
     void postCanBeLikedAndFollowingFeedCanBeFiltered() {
-        controller.createPost(Map.of("userId", 2L, "title", "followed", "content", "visible"));
+        controller.createPost(secondUserAuth, Map.of("userId", 999L, "title", "followed", "content", "visible"));
         var filtered = controller.followingFeed("2");
         assertEquals(1, filtered.data().size());
         Long postId = ((Number) filtered.data().get(0).get("id")).longValue();
-        assertEquals(1L, controller.likePost(Map.of("userId", 1L, "postId", postId)).data().get("likes"));
+        assertEquals(1L, controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId)).data().get("likes"));
     }
 
     @Test
     void draftCanBeSavedAndListed() {
-        ApiResponse<Map<String, Object>> draft = controller.saveDraft(Map.of(
+        ApiResponse<Map<String, Object>> draft = controller.saveDraft(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Draft title",
                 "content", "draft content"
         ));
         assertEquals(0, draft.code());
 
-        ApiResponse<List<Map<String, Object>>> drafts = controller.drafts(1L);
+        ApiResponse<List<Map<String, Object>>> drafts = controller.drafts(userAuth, 1L);
         assertEquals(0, drafts.code());
         assertFalse(drafts.data().isEmpty());
         assertEquals("Draft title", drafts.data().get(0).get("title"));
@@ -61,7 +64,7 @@ class CommunityControllerTest {
 
     @Test
     void squareQuickCommentUsesSquareSource() {
-        ApiResponse<Map<String, Object>> comment = controller.quickComment(Map.of(
+        ApiResponse<Map<String, Object>> comment = controller.quickComment(userAuth, Map.of(
                 "postId", 1L,
                 "userId", 1L,
                 "content", "quick comment"
@@ -72,7 +75,7 @@ class CommunityControllerTest {
 
     @Test
     void commentsCanBeListedWithPostDetail() {
-        ApiResponse<Map<String, Object>> comment = controller.createComment(Map.of(
+        ApiResponse<Map<String, Object>> comment = controller.createComment(userAuth, Map.of(
                 "postId", 1L,
                 "userId", 1L,
                 "content", "detail comment"

@@ -26,10 +26,11 @@ class KnowledgeControllerTest {
                     new LocalFileStorageService("target/test-uploads", "local", "http://127.0.0.1:9000", "ai-knowledge"),
                     new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge")
             );
+    private final String userAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("demo");
 
     @Test
     void uploadedFileCanBeSearched() {
-        ApiResponse<Map<String, Object>> upload = controller.upload(Map.of(
+        ApiResponse<Map<String, Object>> upload = controller.upload(userAuth, Map.of(
                 "userId", 1L,
                 "title", "RAG Architecture",
                 "fileType", "pdf"
@@ -44,7 +45,7 @@ class KnowledgeControllerTest {
 
     @Test
     void textFileCanBeSavedToLocalStorage() {
-        ApiResponse<Map<String, Object>> stored = controller.storageUpload(Map.of(
+        ApiResponse<Map<String, Object>> stored = controller.storageUpload(userAuth, Map.of(
                 "filename", "rag-note.txt",
                 "content", "RAG local storage content",
                 "fileType", "txt"
@@ -58,7 +59,7 @@ class KnowledgeControllerTest {
 
     @Test
     void uploadedContentCanBeFoundByFullTextSearch() {
-        ApiResponse<Map<String, Object>> upload = controller.upload(Map.of(
+        ApiResponse<Map<String, Object>> upload = controller.upload(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Vector Search Guide",
                 "fileType", "txt",
@@ -78,7 +79,7 @@ class KnowledgeControllerTest {
 
     @Test
     void readingKnowledgeReturnsItsBody() {
-        var uploaded = controller.upload(Map.of(
+        var uploaded = controller.upload(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Readable guide",
                 "fileType", "txt",
@@ -94,7 +95,7 @@ class KnowledgeControllerTest {
 
     @Test
     void publicListHidesPendingKnowledgeButAdminCanIncludeIt() {
-        var uploaded = controller.upload(Map.of(
+        var uploaded = controller.upload(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Pending private draft",
                 "fileType", "txt",
@@ -112,7 +113,7 @@ class KnowledgeControllerTest {
 
     @Test
     void adminCanResolveKnowledgeReport() {
-        controller.report(Map.of("userId", 1L, "fileId", 1L, "reason", "review"));
+        controller.report(userAuth, Map.of("userId", 999L, "fileId", 1L, "reason", "review"));
         String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
         var reports = controller.adminReports(auth);
         Long reportId = ((Number) reports.data().get(0).get("id")).longValue();

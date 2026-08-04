@@ -18,10 +18,24 @@ class AiServicePersistenceTest(unittest.TestCase):
 
         self.main = main
         self.main.init_db()
+        self.user_auth = self.issue_token("demo", 1, "USER")
 
     def tearDown(self) -> None:
         self.tmpdir.cleanup()
         os.environ.pop("AI_DB_PATH", None)
+
+    @staticmethod
+    def issue_token(username: str, user_id: int, role: str) -> str:
+        def segment(value: dict) -> str:
+            return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+
+        header = segment({"alg": "HS256", "typ": "JWT"})
+        payload = segment({"sub": username, "uid": user_id, "role": role, "iat": int(time.time()), "exp": int(time.time()) + 600})
+        signing_input = f"{header}.{payload}"
+        signature = base64.urlsafe_b64encode(hmac.new(
+            b"local-dev-secret-change-before-production", signing_input.encode(), hashlib.sha256
+        ).digest()).decode().rstrip("=")
+        return f"Bearer {signing_input}.{signature}"
 
     def test_parse_retrieve_and_chat_are_persisted(self) -> None:
         parse_response = self.main.parse_document(
@@ -29,19 +43,22 @@ class AiServicePersistenceTest(unittest.TestCase):
                 file_id=101,
                 title="平台功能清单",
                 text="知识库支持上传和检索\n广场展示关注用户动态",
-            )
+            ),
+            authorization=self.user_auth,
         )
         self.assertEqual(parse_response.code, 0)
         self.assertEqual(parse_response.data["count"], 2)
 
         retrieve_response = self.main.retrieve(
-            self.main.ChatRequest(question="知识库检索", user_id=1)
+            self.main.ChatRequest(question="知识库检索", user_id=999),
+            authorization=self.user_auth,
         )
         self.assertEqual(retrieve_response.code, 0)
         self.assertGreaterEqual(len(retrieve_response.data["matches"]), 1)
 
         embedding_response = self.main.embedding(
-            self.main.TextRequest(text="知识库向量检索")
+            self.main.TextRequest(text="知识库向量检索"),
+            authorization=self.user_auth,
         )
         self.assertEqual(embedding_response.data["dimension"], 128)
         vector = embedding_response.data["vector"]
@@ -53,7 +70,8 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertFalse(vector_status.data["external_ready"])
 
         chat_response = self.main.chat(
-            self.main.ChatRequest(question="知识库检索怎么做", user_id=1)
+            self.main.ChatRequest(question="知识库检索怎么做", user_id=999),
+            authorization=self.user_auth,
         )
         self.assertEqual(chat_response.code, 0)
         self.assertIn("session_id", chat_response.data)
@@ -65,21 +83,12 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(health_response.data["session_count"], 1)
         self.assertEqual(health_response.data["vector_dimension"], 128)
 
-        history = self.main.chat_history(user_id=1)
+        history = self.main.chat_history(user_id=1, authorization=self.user_auth)
         self.assertEqual(len(history.data["sessions"]), 1)
         self.assertEqual(len(history.data["messages"]), 2)
 
     def test_admin_can_manage_ai_configuration(self) -> None:
-        def segment(value: dict) -> str:
-            return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
-
-        header = segment({"alg": "HS256", "typ": "JWT"})
-        payload = segment({"sub": "admin", "role": "ADMIN", "iat": int(time.time()), "exp": int(time.time()) + 600})
-        signing_input = f"{header}.{payload}"
-        signature = base64.urlsafe_b64encode(hmac.new(
-            b"local-dev-secret-change-before-production", signing_input.encode(), hashlib.sha256
-        ).digest()).decode().rstrip("=")
-        auth = f"Bearer {signing_input}.{signature}"
+        auth = self.issue_token("admin", 2, "ADMIN")
 
         saved = self.main.save_ai_config(self.main.AiConfigRequest(match_limit=3), authorization=auth)
         self.assertEqual(saved.data["configuration"]["match_limit"], 3)

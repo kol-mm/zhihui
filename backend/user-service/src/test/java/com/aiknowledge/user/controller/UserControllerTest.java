@@ -40,6 +40,7 @@ class UserControllerTest {
         assertEquals(0, session.code());
         assertEquals("demo", session.data().get("username"));
         assertEquals("USER", session.data().get("role"));
+        assertEquals(1L, session.data().get("userId"));
     }
 
     @Test
@@ -73,7 +74,8 @@ class UserControllerTest {
                 "nickname", "Directory User"
         ));
 
-        var response = controller.directory("directory");
+        String auth = "Bearer " + LocalAuth.issueToken("demo");
+        var response = controller.directory(auth, "directory");
 
         assertEquals(0, response.code());
         assertFalse(response.data().isEmpty());
@@ -88,26 +90,31 @@ class UserControllerTest {
 
     @Test
     void followStateCanBeSavedAndListed() {
-        ApiResponse<Map<String, Object>> followed = controller.follow(Map.of("userId", 1L, "targetUserId", 2L));
+        String auth = "Bearer " + LocalAuth.issueToken("demo");
+        ApiResponse<Map<String, Object>> followed = controller.follow(auth, Map.of("userId", 999L, "targetUserId", 2L));
         assertEquals(0, followed.code());
 
-        ApiResponse<Map<String, Object>> follows = controller.follows(1L);
+        ApiResponse<Map<String, Object>> follows = controller.follows(auth, 1L);
         assertEquals(0, follows.code());
         assertEquals(java.util.List.of(2L), follows.data().get("followedUserIds"));
-        assertEquals(java.util.List.of(1L), controller.follows(2L).data().get("followerUserIds"));
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin");
+        assertEquals(java.util.List.of(1L), controller.follows(adminAuth, 2L).data().get("followerUserIds"));
+        assertEquals(500, controller.follows(auth, 2L).code());
     }
 
     @Test
     void blockReportAndBehaviorArePersisted() {
-        assertEquals(0, controller.block(Map.of("userId", 1L, "targetUserId", 2L)).code());
-        assertEquals(java.util.List.of(2L), controller.blocks(1L).data().get("blockedUserIds"));
+        String auth = "Bearer " + LocalAuth.issueToken("demo");
+        assertEquals(0, controller.block(auth, Map.of("userId", 999L, "targetUserId", 2L)).code());
+        assertEquals(java.util.List.of(2L), controller.blocks(auth, 1L).data().get("blockedUserIds"));
 
-        var report = controller.reportUser(Map.of("reporterId", 1L, "targetUserId", 2L, "reason", "spam"));
+        var report = controller.reportUser(auth, Map.of("reporterId", 999L, "targetUserId", 2L, "reason", "spam"));
         assertEquals("PENDING", report.data().status());
+        assertEquals(1L, report.data().reporterId());
 
-        var behavior = controller.recordBehavior(Map.of(
-                "userId", 1L, "action", "VIEW", "targetType", "KNOWLEDGE", "targetId", 9L));
+        var behavior = controller.recordBehavior(auth, Map.of(
+                "userId", 999L, "action", "VIEW", "targetType", "KNOWLEDGE", "targetId", 9L));
         assertEquals("VIEW", behavior.data().action());
-        assertEquals(1, controller.behaviors(1L).data().size());
+        assertEquals(1, controller.behaviors(auth, 1L).data().size());
     }
 }

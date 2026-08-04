@@ -47,7 +47,11 @@ public class KnowledgeController {
     }
 
     @PostMapping("/storage/upload")
-    public ApiResponse<Map<String, Object>> storageUpload(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> storageUpload(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String filename = String.valueOf(request.getOrDefault("filename", request.getOrDefault("title", "knowledge.txt")));
         String content = String.valueOf(request.getOrDefault("content", ""));
         String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
@@ -55,9 +59,14 @@ public class KnowledgeController {
     }
 
     @PostMapping("/upload")
-    public ApiResponse<Map<String, Object>> upload(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> upload(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         KnowledgeFileEntity file = new KnowledgeFileEntity();
-        file.setUserId(number(request.get("userId"), 1L));
+        file.setUserId(userId);
         file.setCategoryId(number(request.get("categoryId"), null));
         file.setTitle(String.valueOf(request.getOrDefault("title", "Untitled knowledge file")));
         file.setFileUrl(String.valueOf(request.getOrDefault("fileUrl", "")));
@@ -118,8 +127,12 @@ public class KnowledgeController {
     }
 
     @PostMapping("/download")
-    public ApiResponse<Map<String, Object>> download(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> download(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
         return knowledgeStore.download(userId, fileId)
                 .map(file -> ApiResponse.ok(Map.of(
@@ -131,8 +144,12 @@ public class KnowledgeController {
     }
 
     @PostMapping("/like")
-    public ApiResponse<Map<String, Object>> like(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> like(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
         int likes = knowledgeStore.like(userId, fileId);
         return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "liked", true, "likes", likes));
@@ -148,33 +165,53 @@ public class KnowledgeController {
     }
 
     @PostMapping("/collect")
-    public ApiResponse<Map<String, Object>> collect(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> collect(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
         knowledgeStore.collect(userId, fileId);
         return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "collected", true));
     }
 
     @GetMapping("/collects")
-    public ApiResponse<List<Map<String, Object>>> collects(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<List<Map<String, Object>>> collects(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long userId
+    ) {
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(knowledgeStore.listCollects(userId));
     }
 
     @PostMapping("/report")
-    public ApiResponse<Map<String, Object>> report(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> report(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
         knowledgeStore.report(userId, fileId, String.valueOf(request.getOrDefault("reason", "")));
         return ApiResponse.ok(Map.of("fileId", fileId, "status", "REPORTED"));
     }
 
     @GetMapping("/reports")
-    public ApiResponse<List<Map<String, Object>>> reports(@RequestParam(name = "userId", required = false) Long userId) {
+    public ApiResponse<List<Map<String, Object>>> reports(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long userId
+    ) {
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(knowledgeStore.listReports(userId));
     }
 
     @PostMapping("/forward")
-    public ApiResponse<Map<String, Object>> forward(@RequestBody Map<String, Object> request) {
+    public ApiResponse<Map<String, Object>> forward(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         return ApiResponse.ok(Map.of("fileId", request.getOrDefault("fileId", 0), "forwarded", true));
     }
 

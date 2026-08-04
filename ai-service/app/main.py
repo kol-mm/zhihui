@@ -130,21 +130,35 @@ def decode_segment(value: str) -> dict[str, Any]:
     return json.loads(base64.urlsafe_b64decode(value + padding))
 
 
-def is_admin_token(authorization: str | None) -> bool:
+def token_claims(authorization: str | None) -> dict[str, Any] | None:
     token = (authorization or "").removeprefix("Bearer ").strip()
     parts = token.split(".")
     if len(parts) != 3:
-        return False
+        return None
     secret = os.getenv("AI_KNOWLEDGE_JWT_SECRET", "local-dev-secret-change-before-production")
     signature = hmac.new(secret.encode(), f"{parts[0]}.{parts[1]}".encode(), hashlib.sha256).digest()
     expected = base64.urlsafe_b64encode(signature).decode().rstrip("=")
     try:
         header = decode_segment(parts[0])
         payload = decode_segment(parts[1])
-        return (hmac.compare_digest(expected, parts[2]) and header.get("alg") == "HS256"
-                and payload.get("role") == "ADMIN" and int(payload.get("exp", 0)) > int(datetime.now().timestamp()))
+        valid = (hmac.compare_digest(expected, parts[2]) and header.get("alg") == "HS256"
+                 and int(payload.get("uid", 0)) > 0
+                 and int(payload.get("exp", 0)) > int(datetime.now().timestamp()))
+        return payload if valid else None
     except (ValueError, TypeError, json.JSONDecodeError):
-        return False
+        return None
+
+
+def is_admin_token(authorization: str | None) -> bool:
+    claims = token_claims(authorization)
+    return claims is not None and claims.get("role") == "ADMIN"
+
+
+def require_user(authorization: str | None) -> dict[str, Any]:
+    claims = token_claims(authorization)
+    if claims is None:
+        raise HTTPException(status_code=401, detail="valid user authorization is required")
+    return claims
 
 
 def require_admin(authorization: str | None) -> None:
@@ -250,12 +264,12 @@ def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
     ]
 
 
-def ensure_session(request: ChatRequest) -> int:
+def ensure_session(request: ChatRequest, user_id: int) -> int:
     if request.session_id:
         with connect() as conn:
             existing = conn.execute(
-                "SELECT id FROM ai_chat_session WHERE id = ?",
-                (request.session_id,),
+                "SELECT id FROM ai_chat_session WHERE id = ? AND user_id = ?",
+                (request.session_id, user_id),
             ).fetchone()
             if existing:
                 return int(existing["id"])
@@ -267,7 +281,7 @@ def ensure_session(request: ChatRequest) -> int:
             INSERT INTO ai_chat_session(user_id, title, created_at)
             VALUES (?, ?, ?)
             """,
-            (request.user_id, title, now_iso()),
+            (user_id, title, now_iso()),
         )
         return int(cursor.lastrowid)
 
@@ -317,7 +331,8 @@ def health() -> ApiResponse:
 
 
 @app.post("/ai/parse", response_model=ApiResponse)
-def parse_document(request: TextRequest) -> ApiResponse:
+def parse_document(request: TextRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_user(authorization)
     init_db()
     chunks = split_text(request.text)
     title = request.title or "本地解析文档"
@@ -347,7 +362,8 @@ def parse_document(request: TextRequest) -> ApiResponse:
 
 
 @app.post("/ai/embedding", response_model=ApiResponse)
-def embedding(request: TextRequest) -> ApiResponse:
+def embedding(request: TextRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_user(authorization)
     vector = build_embedding(request.text)
     return ApiResponse(data={"dimension": len(vector), "vector": vector})
 
@@ -371,22 +387,34 @@ def vector_status() -> ApiResponse:
 
 
 @app.post("/ai/retrieve", response_model=ApiResponse)
-def retrieve(request: ChatRequest) -> ApiResponse:
+def retrieve(request: ChatRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_user(authorization)
     init_db()
     return ApiResponse(data={"matches": retrieve_chunks(request.question)})
 
 
 @app.get("/ai/history", response_model=ApiResponse)
-def chat_history(user_id: int | None = None, session_id: int | None = None) -> ApiResponse:
+def chat_history(
+    user_id: int | None = None,
+    session_id: int | None = None,
+    authorization: str | None = Header(default=None),
+) -> ApiResponse:
+    claims = require_user(authorization)
+    authenticated_user_id = int(claims["uid"])
+    if claims.get("role") != "ADMIN" and user_id is not None and user_id != authenticated_user_id:
+        raise HTTPException(status_code=403, detail="access to this user is denied")
+    effective_user_id = user_id if claims.get("role") == "ADMIN" else authenticated_user_id
     init_db()
     with connect() as conn:
         sessions = conn.execute(
             "SELECT id, user_id, title, created_at FROM ai_chat_session WHERE (? IS NULL OR user_id = ?) ORDER BY id DESC",
-            (user_id, user_id),
+            (effective_user_id, effective_user_id),
         ).fetchall()
         messages = conn.execute(
-            "SELECT id, session_id, role, content, created_at FROM ai_chat_message WHERE (? IS NULL OR session_id = ?) ORDER BY id",
-            (session_id, session_id),
+            "SELECT m.id, m.session_id, m.role, m.content, m.created_at FROM ai_chat_message m "
+            "JOIN ai_chat_session s ON s.id = m.session_id "
+            "WHERE (? IS NULL OR s.user_id = ?) AND (? IS NULL OR m.session_id = ?) ORDER BY m.id",
+            (effective_user_id, effective_user_id, session_id, session_id),
         ).fetchall()
     return ApiResponse(data={"sessions": [row_to_dict(row) for row in sessions],
                              "messages": [row_to_dict(row) for row in messages]})
@@ -423,9 +451,11 @@ def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(
 
 
 @app.post("/ai/chat", response_model=ApiResponse)
-def chat(request: ChatRequest) -> ApiResponse:
+def chat(request: ChatRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    claims = require_user(authorization)
+    user_id = int(claims["uid"])
     init_db()
-    session_id = ensure_session(request)
+    session_id = ensure_session(request, user_id)
     user_message = save_message(session_id, "user", request.question)
     matched = retrieve_chunks(request.question, limit=int(read_ai_config()["match_limit"]))
 

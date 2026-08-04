@@ -28,10 +28,15 @@ public final class LocalAuth {
     }
 
     public static String issueToken(String username) {
+        return issueToken(username, "admin".equalsIgnoreCase(username) ? 2L : 1L, roleForUsername(username));
+    }
+
+    public static String issueToken(String username, Long userId, String role) {
         long issuedAt = Instant.now().getEpochSecond();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", username);
-        payload.put("role", roleForUsername(username));
+        payload.put("uid", userId);
+        payload.put("role", role);
         payload.put("iat", issuedAt);
         payload.put("exp", issuedAt + expirySeconds());
         payload.put("jti", UUID.randomUUID().toString());
@@ -52,6 +57,21 @@ public final class LocalAuth {
     public static String username(String authorization) {
         Claims claims = claims(authorization);
         return claims == null ? "" : claims.username();
+    }
+
+    public static Long userId(String authorization) {
+        Claims claims = claims(authorization);
+        return claims == null ? null : claims.userId();
+    }
+
+    public static String role(String authorization) {
+        Claims claims = claims(authorization);
+        return claims == null ? "" : claims.role();
+    }
+
+    public static boolean canAccessUser(String authorization, Long requestedUserId) {
+        Long authenticatedUserId = userId(authorization);
+        return authenticatedUserId != null && (authenticatedUserId.equals(requestedUserId) || isAdmin(authorization));
     }
 
     public static ApiResponse<Map<String, Object>> requireUser(String authorization) {
@@ -75,6 +95,7 @@ public final class LocalAuth {
         }
         return Map.of(
                 "authenticated", true,
+                "userId", claims.userId(),
                 "username", claims.username(),
                 "role", claims.role(),
                 "issuedAt", claims.issuedAt(),
@@ -95,13 +116,14 @@ public final class LocalAuth {
         try {
             Map<String, Object> payload = JSON.readValue(DECODER.decode(parts[1]), new TypeReference<>() {});
             String username = String.valueOf(payload.getOrDefault("sub", ""));
+            long userId = number(payload.get("uid"));
             String role = String.valueOf(payload.getOrDefault("role", ""));
             long issuedAt = number(payload.get("iat"));
             long expiresAt = number(payload.get("exp"));
-            if (username.isBlank() || role.isBlank() || expiresAt <= Instant.now().getEpochSecond()) {
+            if (username.isBlank() || userId <= 0 || role.isBlank() || expiresAt <= Instant.now().getEpochSecond()) {
                 return null;
             }
-            return new Claims(username, role, issuedAt, expiresAt);
+            return new Claims(username, userId, role, issuedAt, expiresAt);
         } catch (Exception ignored) {
             return null;
         }
@@ -155,6 +177,6 @@ public final class LocalAuth {
         return value instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(value));
     }
 
-    private record Claims(String username, String role, long issuedAt, long expiresAt) {
+    private record Claims(String username, long userId, String role, long issuedAt, long expiresAt) {
     }
 }

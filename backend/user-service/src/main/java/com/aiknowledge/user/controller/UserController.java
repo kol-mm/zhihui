@@ -65,7 +65,7 @@ public class UserController {
             return ApiResponse.fail("invalid username or password");
         }
         return ApiResponse.ok(Map.of(
-                "token", LocalAuth.issueToken(username),
+                "token", LocalAuth.issueToken(username, user.getId(), LocalAuth.roleForUsername(username)),
                 "role", LocalAuth.roleForUsername(username),
                 "user", toView(user)
         ));
@@ -90,8 +90,10 @@ public class UserController {
 
     @GetMapping("/directory")
     public ApiResponse<java.util.List<Map<String, Object>>> directory(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam(name = "keyword", defaultValue = "") String keyword
     ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String query = keyword.trim().toLowerCase();
         return ApiResponse.ok(userStore.listUsers().stream()
                 .filter(user -> "ACTIVE".equals(user.getStatus()))
@@ -108,8 +110,12 @@ public class UserController {
     }
 
     @PostMapping("/profile")
-    public ApiResponse<Map<String, Object>> updateProfile(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> updateProfile(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         String nickname = String.valueOf(request.getOrDefault("nickname", ""));
         String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", ""));
         String signature = String.valueOf(request.getOrDefault("signature", ""));
@@ -119,23 +125,35 @@ public class UserController {
     }
 
     @PostMapping("/follow")
-    public ApiResponse<Map<String, Object>> follow(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> follow(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
         userStore.follow(userId, targetUserId);
         return ApiResponse.ok(Map.of("userId", userId, "followedUserId", targetUserId, "followed", true));
     }
 
     @DeleteMapping("/follow")
-    public ApiResponse<Map<String, Object>> unfollow(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> unfollow(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
         userStore.unfollow(userId, targetUserId);
         return ApiResponse.ok(Map.of("userId", userId, "followedUserId", targetUserId, "followed", false));
     }
 
     @GetMapping("/follows")
-    public ApiResponse<Map<String, Object>> follows(@RequestParam(name = "userId", defaultValue = "1") Long userId) {
+    public ApiResponse<Map<String, Object>> follows(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(Map.of(
                 "userId", userId,
                 "followedUserIds", userStore.listFollowTargets(userId),
@@ -144,39 +162,61 @@ public class UserController {
     }
 
     @PostMapping("/block")
-    public ApiResponse<Map<String, Object>> block(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> block(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
         userStore.block(userId, targetUserId);
         return ApiResponse.ok(Map.of("userId", userId, "blockedUserId", targetUserId, "blocked", true));
     }
 
     @DeleteMapping("/block")
-    public ApiResponse<Map<String, Object>> unblock(@RequestBody Map<String, Object> request) {
-        Long userId = number(request.get("userId"), 1L);
+    public ApiResponse<Map<String, Object>> unblock(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
         userStore.unblock(userId, targetUserId);
         return ApiResponse.ok(Map.of("userId", userId, "blockedUserId", targetUserId, "blocked", false));
     }
 
     @GetMapping("/blocks")
-    public ApiResponse<Map<String, Object>> blocks(@RequestParam(name = "userId", defaultValue = "1") Long userId) {
+    public ApiResponse<Map<String, Object>> blocks(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", defaultValue = "1") Long userId
+    ) {
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(Map.of("userId", userId, "blockedUserIds", userStore.listBlockedIds(userId)));
     }
 
     @PostMapping("/report")
-    public ApiResponse<UserStore.UserReport> reportUser(@RequestBody Map<String, Object> request) {
+    public ApiResponse<UserStore.UserReport> reportUser(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long reporterId = LocalAuth.userId(authorization);
+        if (reporterId == null) return ApiResponse.fail("valid user authorization is required");
         return ApiResponse.ok(userStore.reportUser(
-                number(request.get("reporterId"), 1L),
+                reporterId,
                 number(request.get("targetUserId"), 0L),
                 String.valueOf(request.getOrDefault("reason", "未填写原因"))
         ));
     }
 
     @PostMapping("/behavior")
-    public ApiResponse<UserStore.BehaviorRecord> recordBehavior(@RequestBody Map<String, Object> request) {
+    public ApiResponse<UserStore.BehaviorRecord> recordBehavior(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
         return ApiResponse.ok(userStore.recordBehavior(
-                number(request.get("userId"), 1L),
+                userId,
                 String.valueOf(request.getOrDefault("action", "VIEW")),
                 String.valueOf(request.getOrDefault("targetType", "UNKNOWN")),
                 number(request.get("targetId"), 0L)
@@ -185,8 +225,10 @@ public class UserController {
 
     @GetMapping("/behaviors")
     public ApiResponse<java.util.List<UserStore.BehaviorRecord>> behaviors(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam(name = "userId", defaultValue = "1") Long userId
     ) {
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         return ApiResponse.ok(userStore.listBehaviors(userId));
     }
 

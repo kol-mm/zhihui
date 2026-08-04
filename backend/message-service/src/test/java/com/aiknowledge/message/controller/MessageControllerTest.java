@@ -1,6 +1,7 @@
 package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
@@ -21,54 +22,56 @@ class MessageControllerTest {
                     new InMemoryMessageStore(),
                     new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events")
             );
+    private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
 
     @Test
     void sentMessageCanBeListedAndCleared() {
-        ApiResponse<Map<String, Object>> session = controller.createSession(Map.of(
+        ApiResponse<Map<String, Object>> session = controller.createSession(userAuth, Map.of(
                 "userId", 1L,
                 "targetUserId", 7L
         ));
         Long sessionId = ((Number) session.data().get("id")).longValue();
-        ApiResponse<Map<String, Object>> sent = controller.send(Map.of(
+        ApiResponse<Map<String, Object>> sent = controller.send(userAuth, Map.of(
                 "sessionId", sessionId,
                 "senderId", 1L,
                 "content", "hello"
         ));
         assertEquals(0, sent.code());
 
-        ApiResponse<List<Map<String, Object>>> messages = controller.list(sessionId, 1L);
+        ApiResponse<List<Map<String, Object>>> messages = controller.list(userAuth, sessionId, 1L);
         assertEquals(0, messages.code());
         assertEquals(1, messages.data().size());
         assertEquals("hello", messages.data().get(0).get("content"));
-        assertEquals(7L, controller.sessions(1L).data().get(0).get("otherUserId"));
-        assertEquals("hello", controller.sessions(1L).data().get(0).get("lastMessage"));
+        assertEquals(7L, controller.sessions(userAuth, 1L).data().get(0).get("otherUserId"));
+        assertEquals("hello", controller.sessions(userAuth, 1L).data().get(0).get("lastMessage"));
 
         Long messageId = ((Number) messages.data().get(0).get("id")).longValue();
-        assertEquals(true, controller.deleteMessage(Map.of("messageId", messageId, "userId", 1L)).data().get("removed"));
+        assertEquals(true, controller.deleteMessage(userAuth, Map.of("messageId", messageId, "userId", 999L)).data().get("removed"));
 
-        controller.send(Map.of("sessionId", sessionId, "senderId", 1L, "content", "again"));
+        controller.send(userAuth, Map.of("sessionId", sessionId, "senderId", 999L, "content", "again"));
 
-        ApiResponse<Map<String, Object>> cleared = controller.clear(null, Map.of("sessionId", sessionId, "userId", 1L));
+        ApiResponse<Map<String, Object>> cleared = controller.clear(userAuth, Map.of("sessionId", sessionId, "userId", 999L));
         assertEquals(0, cleared.code());
         assertEquals(1, cleared.data().get("removed"));
     }
 
     @Test
     void nonParticipantCannotReadOrSendPrivateMessages() {
-        var session = controller.createSession(Map.of("userId", 1L, "targetUserId", 2L));
+        var session = controller.createSession(userAuth, Map.of("userId", 999L, "targetUserId", 2L));
         Long sessionId = ((Number) session.data().get("id")).longValue();
+        String outsiderAuth = "Bearer " + LocalAuth.issueToken("outsider", 3L, "USER");
 
-        assertEquals(500, controller.send(Map.of(
+        assertEquals(500, controller.send(outsiderAuth, Map.of(
                 "sessionId", sessionId,
                 "senderId", 3L,
                 "content", "not allowed"
         )).code());
-        assertEquals(500, controller.list(sessionId, 3L).code());
+        assertEquals(500, controller.list(outsiderAuth, sessionId, 3L).code());
     }
 
     @Test
     void eventBusStoresBusinessEventsAndExposesStatus() {
-        controller.createTicket(Map.of(
+        controller.createTicket(userAuth, Map.of(
                 "userId", 1L,
                 "type", "SUPPORT",
                 "content", "need help"
@@ -91,7 +94,7 @@ class MessageControllerTest {
         assertEquals(0, faqs.code());
         assertFalse(faqs.data().isEmpty());
 
-        ApiResponse<List<Map<String, Object>>> notifications = controller.notifications(1L);
+        ApiResponse<List<Map<String, Object>>> notifications = controller.notifications(userAuth, 1L);
         assertEquals(0, notifications.code());
         assertFalse(notifications.data().isEmpty());
     }
@@ -107,7 +110,7 @@ class MessageControllerTest {
 
     @Test
     void feedbackTicketCanBeCreatedAndListed() {
-        ApiResponse<Map<String, Object>> created = controller.createTicket(Map.of(
+        ApiResponse<Map<String, Object>> created = controller.createTicket(userAuth, Map.of(
                 "userId", 1L,
                 "type", "BUG",
                 "content", "button is not clickable"
@@ -115,7 +118,7 @@ class MessageControllerTest {
         assertEquals(0, created.code());
         assertEquals("PENDING", created.data().get("status"));
 
-        ApiResponse<List<Map<String, Object>>> tickets = controller.tickets(1L);
+        ApiResponse<List<Map<String, Object>>> tickets = controller.tickets(userAuth, 1L);
         assertEquals(0, tickets.code());
         assertFalse(tickets.data().isEmpty());
         assertEquals("button is not clickable", tickets.data().get(0).get("content"));
