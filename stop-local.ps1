@@ -22,8 +22,13 @@ if (Test-Path $ProcessFile) {
         $process = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
         if (-not $process) { continue }
 
-        $expected = [DateTime]::Parse([string]$target.startTimeUtc).ToUniversalTime()
-        $actual = $process.StartTime.ToUniversalTime()
+        try {
+            $expected = [DateTime]::Parse([string]$target.startTimeUtc).ToUniversalTime()
+            $actual = $process.StartTime.ToUniversalTime()
+        } catch {
+            # The process can exit between Get-Process and reading StartTime.
+            continue
+        }
         if ([Math]::Abs(($actual - $expected).TotalSeconds) -gt 2) {
             Write-Host "[$($entry.name)] $($target.role) PID $pidValue was reused; refusing to stop it." -ForegroundColor Yellow
             $failed = $true
@@ -33,7 +38,8 @@ if (Test-Path $ProcessFile) {
         Write-Host "Stopping [$($entry.name)] $($target.role) process tree (PID $pidValue)..." -ForegroundColor Cyan
         $killer = Start-Process -FilePath "taskkill.exe" -ArgumentList @("/PID", $pidValue, "/T", "/F") `
             -WindowStyle Hidden -Wait -PassThru
-        if ($killer.ExitCode -ne 0 -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
+        $killerExitCode = if ($killer) { $killer.ExitCode } else { 1 }
+        if ($killerExitCode -ne 0 -and (Get-Process -Id $pidValue -ErrorAction SilentlyContinue)) {
             Write-Host "[$($entry.name)] could not be stopped." -ForegroundColor Red
             $failed = $true
         }
