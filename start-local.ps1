@@ -168,6 +168,17 @@ try {
         } finally {
             Pop-Location
         }
+    } else {
+        Write-Host "[backend] SkipBuild selected; ensuring parent POM and common module are installed..." -ForegroundColor Cyan
+        Push-Location $Backend
+        try {
+            & $MavenExe -s maven-settings.xml -N install -DskipTests
+            Assert-NativeSuccess "Backend parent POM installation"
+            & $MavenExe -s maven-settings.xml -pl common install -DskipTests
+            Assert-NativeSuccess "Backend common module installation"
+        } finally {
+            Pop-Location
+        }
     }
 
     if (-not $SkipFrontend -and -not (Test-Path (Join-Path $Frontend "node_modules"))) {
