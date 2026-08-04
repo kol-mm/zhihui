@@ -1,4 +1,5 @@
 import os
+import math
 import tempfile
 import unittest
 
@@ -34,6 +35,18 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(retrieve_response.code, 0)
         self.assertGreaterEqual(len(retrieve_response.data["matches"]), 1)
 
+        embedding_response = self.main.embedding(
+            self.main.TextRequest(text="知识库向量检索")
+        )
+        self.assertEqual(embedding_response.data["dimension"], 128)
+        vector = embedding_response.data["vector"]
+        self.assertAlmostEqual(math.sqrt(sum(value * value for value in vector)), 1.0, places=4)
+
+        vector_status = self.main.vector_status()
+        self.assertEqual(vector_status.data["mode"], "local")
+        self.assertEqual(vector_status.data["indexed_chunks"], 2)
+        self.assertFalse(vector_status.data["external_ready"])
+
         chat_response = self.main.chat(
             self.main.ChatRequest(question="知识库检索怎么做", user_id=1)
         )
@@ -45,6 +58,7 @@ class AiServicePersistenceTest(unittest.TestCase):
         health_response = self.main.health()
         self.assertEqual(health_response.data["chunk_count"], 2)
         self.assertEqual(health_response.data["session_count"], 1)
+        self.assertEqual(health_response.data["vector_dimension"], 128)
 
 
 if __name__ == "__main__":

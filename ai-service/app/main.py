@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
+import re
 import sqlite3
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
@@ -14,6 +17,7 @@ from pydantic import BaseModel, Field
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = APP_DIR.parent / "data" / "ai_service.db"
+VECTOR_DIMENSION = int(os.getenv("AI_VECTOR_DIMENSION", "128"))
 
 class ApiResponse(BaseModel):
     code: int = 0
@@ -65,6 +69,7 @@ def init_db() -> None:
                 file_id INTEGER NOT NULL DEFAULT 0,
                 title TEXT NOT NULL,
                 content TEXT NOT NULL,
+                embedding TEXT,
                 created_at TEXT NOT NULL
             );
 
@@ -88,6 +93,9 @@ def init_db() -> None:
             );
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(knowledge_chunk)").fetchall()}
+        if "embedding" not in columns:
+            conn.execute("ALTER TABLE knowledge_chunk ADD COLUMN embedding TEXT")
 
 
 @asynccontextmanager
@@ -96,7 +104,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Knowledge Platform AI Service", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="AI Knowledge Platform AI Service", version="0.3.0", lifespan=lifespan)
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -117,6 +125,33 @@ def split_text(text: str) -> list[str]:
     ]
 
 
+def tokenize(text: str) -> list[str]:
+    normalized = text.lower().strip()
+    words = re.findall(r"[a-z0-9_]+", normalized)
+    chinese = re.findall(r"[\u4e00-\u9fff]", normalized)
+    bigrams = ["".join(chinese[index:index + 2]) for index in range(max(0, len(chinese) - 1))]
+    return words + chinese + bigrams
+
+
+def build_embedding(text: str, dimension: int = VECTOR_DIMENSION) -> list[float]:
+    vector = [0.0] * dimension
+    for token in tokenize(text):
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "big") % dimension
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[index] += sign
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0:
+        return vector
+    return [round(value / norm, 6) for value in vector]
+
+
+def cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    return sum(a * b for a, b in zip(left, right))
+
+
 def score_chunk(question: str, chunk: sqlite3.Row) -> int:
     keyword = question.strip().lower()
     haystack = f"{chunk['title']}\n{chunk['content']}".lower()
@@ -134,29 +169,30 @@ def score_chunk(question: str, chunk: sqlite3.Row) -> int:
 
 
 def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
+    question_vector = build_embedding(question)
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, file_id, title, content, created_at
+            SELECT id, file_id, title, content, embedding, created_at
             FROM knowledge_chunk
             ORDER BY id DESC
             LIMIT 200
             """
         ).fetchall()
 
-    scored = [(score_chunk(question, row), row) for row in rows]
-    matched = [
-        row
-        for score, row in sorted(
-            scored,
-            key=lambda item: (item[0], item[1]["id"]),
-            reverse=True,
-        )
-        if score > 0
-    ]
+    scored: list[tuple[float, sqlite3.Row]] = []
+    for row in rows:
+        stored_vector = json.loads(row["embedding"]) if row["embedding"] else build_embedding(row["content"])
+        vector_score = cosine_similarity(question_vector, stored_vector)
+        lexical_score = min(score_chunk(question, row) / 20, 1.0)
+        scored.append((vector_score * 0.75 + lexical_score * 0.25, row))
+    matched = [row for score, row in sorted(scored, key=lambda item: (item[0], item[1]["id"]), reverse=True) if score > 0]
     if not matched:
         matched = rows[:limit]
-    return [row_to_dict(row) for row in matched[:limit]]
+    return [
+        {key: row[key] for key in row.keys() if key != "embedding"}
+        for row in matched[:limit]
+    ]
 
 
 def ensure_session(request: ChatRequest) -> int:
@@ -219,6 +255,8 @@ def health() -> ApiResponse:
             "db_path": str(db_path()),
             "chunk_count": chunk_count,
             "session_count": session_count,
+            "vector_dimension": VECTOR_DIMENSION,
+            "vector_mode": os.getenv("AI_VECTOR_MODE", "local"),
         }
     )
 
@@ -235,10 +273,10 @@ def parse_document(request: TextRequest) -> ApiResponse:
         for chunk in chunks:
             cursor = conn.execute(
                 """
-                INSERT INTO knowledge_chunk(file_id, title, content, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO knowledge_chunk(file_id, title, content, embedding, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (request.file_id or 0, title, chunk, created_at),
+                (request.file_id or 0, title, chunk, json.dumps(build_embedding(chunk)), created_at),
             )
             created.append(
                 {
@@ -255,9 +293,26 @@ def parse_document(request: TextRequest) -> ApiResponse:
 
 @app.post("/ai/embedding", response_model=ApiResponse)
 def embedding(request: TextRequest) -> ApiResponse:
-    digest = hashlib.sha256(request.text.encode("utf-8")).digest()
-    vector = [round(byte / 255, 4) for byte in digest[:32]]
+    vector = build_embedding(request.text)
     return ApiResponse(data={"dimension": len(vector), "vector": vector})
+
+
+@app.get("/ai/vector/status", response_model=ApiResponse)
+def vector_status() -> ApiResponse:
+    init_db()
+    with connect() as conn:
+        indexed = conn.execute(
+            "SELECT COUNT(*) AS count FROM knowledge_chunk WHERE embedding IS NOT NULL"
+        ).fetchone()["count"]
+    mode = os.getenv("AI_VECTOR_MODE", "local")
+    return ApiResponse(data={
+        "mode": mode,
+        "dimension": VECTOR_DIMENSION,
+        "indexed_chunks": indexed,
+        "milvus_endpoint": os.getenv("MILVUS_ENDPOINT", "http://127.0.0.1:19530"),
+        "chroma_path": os.getenv("CHROMA_PATH", str(APP_DIR.parent / "data" / "chroma")),
+        "external_ready": mode.lower() != "local",
+    })
 
 
 @app.post("/ai/retrieve", response_model=ApiResponse)
