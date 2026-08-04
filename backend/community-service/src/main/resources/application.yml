@@ -16,6 +16,10 @@ spring:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
 
 community:
+  notification:
+    enabled: ${COMMUNITY_NOTIFICATION_ENABLED:true}
+    url: ${MESSAGE_INTERNAL_URL:http://127.0.0.1:8104/internal/notification}
+    token: ${INTERNAL_NOTIFICATION_TOKEN:ai-knowledge-local-internal}
   media:
     storage-mode: ${COMMUNITY_STORAGE_MODE:${KNOWLEDGE_STORAGE_MODE:local}}
     local-root: ../data/community-media

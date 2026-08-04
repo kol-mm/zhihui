@@ -8,6 +8,8 @@ import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 import com.aiknowledge.community.store.CommunityStore;
 import com.aiknowledge.community.storage.CommunityMediaStorageService;
+import com.aiknowledge.community.notification.CommunityNotificationClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,10 +32,18 @@ import java.util.Map;
 public class CommunityController {
     private final CommunityStore communityStore;
     private final CommunityMediaStorageService mediaStorage;
+    private final CommunityNotificationClient notificationClient;
 
-    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage) {
+    @Autowired
+    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
+                               CommunityNotificationClient notificationClient) {
         this.communityStore = communityStore;
         this.mediaStorage = mediaStorage;
+        this.notificationClient = notificationClient;
+    }
+
+    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage) {
+        this(communityStore, mediaStorage, new CommunityNotificationClient(false, "", ""));
     }
 
     @PostMapping(value = "/post/media/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -129,7 +139,10 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         CommentEntity comment = buildComment(request, "POST", userId);
-        return ApiResponse.ok(toCommentView(communityStore.saveComment(comment)));
+        CommentEntity saved = communityStore.saveComment(comment);
+        communityStore.findPost(saved.getPostId()).ifPresent(post ->
+                notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent()));
+        return ApiResponse.ok(toCommentView(saved));
     }
 
     @GetMapping("/comment/list")
@@ -185,7 +198,10 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         CommentEntity comment = buildComment(request, "SQUARE", userId);
-        return ApiResponse.ok(toCommentView(communityStore.saveComment(comment)));
+        CommentEntity saved = communityStore.saveComment(comment);
+        communityStore.findPost(saved.getPostId()).ifPresent(post ->
+                notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent()));
+        return ApiResponse.ok(toCommentView(saved));
     }
 
     @PostMapping("/square/collect")
