@@ -3,6 +3,7 @@ package com.aiknowledge.knowledge.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
+import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,14 +22,29 @@ import java.util.Map;
 @RequestMapping("/knowledge")
 public class KnowledgeController {
     private final KnowledgeStore knowledgeStore;
+    private final LocalFileStorageService fileStorage;
 
-    public KnowledgeController(KnowledgeStore knowledgeStore) {
+    public KnowledgeController(KnowledgeStore knowledgeStore, LocalFileStorageService fileStorage) {
         this.knowledgeStore = knowledgeStore;
+        this.fileStorage = fileStorage;
     }
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
         return ApiResponse.ok(Map.of("service", "knowledge-service", "time", Instant.now().toString()));
+    }
+
+    @GetMapping("/storage/status")
+    public ApiResponse<Map<String, Object>> storageStatus() {
+        return ApiResponse.ok(fileStorage.status());
+    }
+
+    @PostMapping("/storage/upload")
+    public ApiResponse<Map<String, Object>> storageUpload(@RequestBody Map<String, Object> request) {
+        String filename = String.valueOf(request.getOrDefault("filename", request.getOrDefault("title", "knowledge.txt")));
+        String content = String.valueOf(request.getOrDefault("content", ""));
+        String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
+        return ApiResponse.ok(fileStorage.saveTextFile(filename, content, fileType));
     }
 
     @PostMapping("/upload")

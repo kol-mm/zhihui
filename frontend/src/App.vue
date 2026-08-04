@@ -60,6 +60,8 @@
           <el-form label-position="top">
             <el-form-item label="标题"><el-input v-model="knowledgeForm.title" /></el-form-item>
             <el-form-item label="文件类型"><el-input v-model="knowledgeForm.fileType" /></el-form-item>
+            <el-form-item label="本地文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item>
+            <el-form-item label="本地文件内容"><el-input v-model="knowledgeForm.content" type="textarea" :rows="3" /></el-form-item>
             <el-form-item label="文件地址"><el-input v-model="knowledgeForm.fileUrl" /></el-form-item>
             <el-form-item label="操作文件 ID"><el-input-number v-model="knowledgeAction.fileId" :min="1" /></el-form-item>
             <el-form-item label="举报原因"><el-input v-model="knowledgeAction.reason" /></el-form-item>
@@ -509,6 +511,13 @@ type KnowledgeReport = {
   createdAt?: string;
 };
 
+type StorageUploadResult = {
+  fileUrl: string;
+  objectName: string;
+  storageMode: string;
+  size: number;
+};
+
 const activePortal = ref<'client' | 'admin'>('client');
 const clientOutput = ref('填写表单后提交，数据会通过本地后端保存。');
 const adminOutput = ref('管理端操作会真实修改状态并落盘。');
@@ -528,7 +537,14 @@ const adminOverview = ref<Record<string, Record<string, unknown>>>({});
 
 const authForm = ref({ username: 'demo', password: 'demo', nickname: 'Demo User' });
 const profileForm = ref({ userId: 1, nickname: 'Demo User', avatarUrl: '', signature: '本地可用版本测试用户' });
-const knowledgeForm = ref({ userId: 1, title: '本地知识文档', fileType: 'txt', fileUrl: 'local://knowledge.txt' });
+const knowledgeForm = ref({
+  userId: 1,
+  title: '本地知识文档',
+  fileType: 'txt',
+  filename: 'knowledge.txt',
+  content: '这是一段会保存到本地文件存储的知识内容。',
+  fileUrl: 'local://knowledge.txt'
+});
 const knowledgeAction = ref({ userId: 1, fileId: 1, reason: '内容不准确，需要复核' });
 const postForm = ref({ userId: 1, title: '本地可用版本进展', content: '现在支持真实提交和持久化。' });
 const commentForm = ref({ postId: 1, userId: 1, content: '收到，继续完善。' });
@@ -650,7 +666,19 @@ async function loadUserInfo() {
 
 async function uploadKnowledge() {
   await runClient(async () => {
-    const created = await postData('/knowledge/upload', knowledgeForm.value);
+    const payload = { ...knowledgeForm.value };
+    if (payload.content?.trim()) {
+      const stored = await postData<StorageUploadResult>('/knowledge/storage/upload', {
+        title: payload.title,
+        filename: payload.filename,
+        content: payload.content,
+        fileType: payload.fileType
+      });
+      payload.fileUrl = stored.fileUrl;
+      knowledgeForm.value.fileUrl = stored.fileUrl;
+    }
+    const { content, filename, ...knowledgePayload } = payload;
+    const created = await postData('/knowledge/upload', knowledgePayload);
     await loadKnowledge();
     return created;
   });

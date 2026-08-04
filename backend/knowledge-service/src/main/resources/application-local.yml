@@ -2,3 +2,11 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+knowledge:
+  storage:
+    mode: local
+    local-root: ../data/uploads
+    minio:
+      endpoint: http://127.0.0.1:9000
+      bucket: ai-knowledge
