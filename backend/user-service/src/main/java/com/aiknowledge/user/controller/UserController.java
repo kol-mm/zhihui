@@ -81,6 +81,9 @@ public class UserController {
         if (username.isEmpty()) {
             return ApiResponse.fail("username is required");
         }
+        if ("admin".equalsIgnoreCase(username)) {
+            return ApiResponse.fail("this username is reserved");
+        }
         String password = request.getOrDefault("password", "");
         if (password.length() < 6) {
             return ApiResponse.fail("password must contain at least 6 characters");

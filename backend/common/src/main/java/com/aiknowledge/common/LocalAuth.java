@@ -24,11 +24,11 @@ public final class LocalAuth {
     }
 
     public static String roleForUsername(String username) {
-        return "admin".equalsIgnoreCase(username) ? "ADMIN" : "USER";
+        return "admin".equals(username) ? "ADMIN" : "USER";
     }
 
     public static String issueToken(String username) {
-        return issueToken(username, "admin".equalsIgnoreCase(username) ? 2L : 1L, roleForUsername(username));
+        return issueToken(username, "admin".equals(username) ? 2L : 1L, roleForUsername(username));
     }
 
     public static String issueToken(String username, Long userId, String role) {

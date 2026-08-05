@@ -67,6 +67,17 @@ class UserControllerTest {
     }
 
     @Test
+    void reservedAdminNameCannotBeRegisteredWithDifferentCase() {
+        ApiResponse<Map<String, Object>> registration = controller.register(Map.of(
+                "username", "Admin",
+                "password", "secret123",
+                "nickname", "Not Admin"
+        ));
+        assertEquals(500, registration.code());
+        assertEquals("USER", LocalAuth.roleForUsername("Admin"));
+    }
+
+    @Test
     void directoryReturnsActivePublicProfilesWithoutCredentials() {
         controller.register(Map.of(
                 "username", "directory-user",

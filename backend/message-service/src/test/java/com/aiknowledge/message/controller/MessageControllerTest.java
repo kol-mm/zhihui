@@ -98,7 +98,9 @@ class MessageControllerTest {
         assertEquals("local", status.data().get("mode"));
         assertEquals(false, status.data().get("rabbitReady"));
 
-        ApiResponse<List<Map<String, Object>>> events = controller.events(20);
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        assertEquals(500, controller.events(userAuth, 20).code());
+        ApiResponse<List<Map<String, Object>>> events = controller.events(adminAuth, 20);
         assertEquals(0, events.code());
         assertFalse(events.data().isEmpty());
         assertEquals("FEEDBACK_TICKET_CREATED", events.data().get(0).get("type"));

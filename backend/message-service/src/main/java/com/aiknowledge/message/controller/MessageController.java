@@ -170,7 +170,11 @@ public class MessageController {
     }
 
     @GetMapping("/event/list")
-    public ApiResponse<List<Map<String, Object>>> events(@RequestParam(name = "limit", defaultValue = "50") Integer limit) {
+    public ApiResponse<List<Map<String, Object>>> events(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "limit", defaultValue = "50") Integer limit
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         return ApiResponse.ok(eventBus.list(limit).stream().map(this::toEventView).toList());
     }
 
