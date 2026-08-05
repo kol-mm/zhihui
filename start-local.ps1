@@ -315,8 +315,9 @@ try {
         -WorkingDirectory $Backend -Port 8080 -HealthUrl "http://127.0.0.1:8080/user/health" | Out-Null
 
     if (-not $SkipFrontend) {
-        Start-ManagedProcess -Name "frontend" -FilePath $NpmExe `
-            -ArgumentList @("run", "dev") -WorkingDirectory $Frontend -Port 5173 `
+        Start-ManagedProcess -Name "frontend" -FilePath $PowerShellExe `
+            -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"{0}"' -f (Join-Path $Root "start-frontend.ps1"))) `
+            -WorkingDirectory $Root -Port 5173 `
             -HealthUrl "http://127.0.0.1:5173" | Out-Null
     }
 
