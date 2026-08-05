@@ -134,6 +134,17 @@ public class InMemoryUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> updatePassword(Long userId, String passwordHash) {
+        Optional<UserEntity> found = findById(userId);
+        found.ifPresent(user -> {
+            user.setPasswordHash(passwordHash);
+            user.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
+    @Override
     public List<UserEntity> listUsers() {
         return List.copyOf(users.values());
     }

@@ -67,6 +67,14 @@ class UserControllerTest {
     }
 
     @Test
+    void authenticatedUserCanChangePassword() {
+        String auth = "Bearer " + LocalAuth.issueToken("demo");
+        var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass"));
+        assertEquals(0, changed.code());
+        assertEquals(0, controller.login(Map.of("username", "demo", "password", "new-demo-pass")).code());
+    }
+
+    @Test
     void reservedAdminNameCannotBeRegisteredWithDifferentCase() {
         ApiResponse<Map<String, Object>> registration = controller.register(Map.of(
                 "username", "Admin",

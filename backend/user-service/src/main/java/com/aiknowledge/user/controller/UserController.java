@@ -173,6 +173,26 @@ public class UserController {
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
+    @PostMapping("/password")
+    public ApiResponse<Map<String, Object>> changePassword(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, String> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        String current = request.getOrDefault("currentPassword", "");
+        String next = request.getOrDefault("newPassword", "");
+        UserEntity user = userStore.findById(userId).orElse(null);
+        if (user == null || !passwordEncoder.matches(current, user.getPasswordHash())) {
+            return ApiResponse.fail("current password is incorrect");
+        }
+        if (next.length() < 8 || next.length() > 128) {
+            return ApiResponse.fail("new password must contain between 8 and 128 characters");
+        }
+        userStore.updatePassword(userId, passwordEncoder.encode(next));
+        return ApiResponse.ok(Map.of("updated", true));
+    }
+
     @PostMapping("/follow")
     public ApiResponse<Map<String, Object>> follow(
             @RequestHeader(name = "Authorization", required = false) String authorization,

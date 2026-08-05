@@ -70,6 +70,16 @@ public class MySqlUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> updatePassword(Long userId, String passwordHash) {
+        UserEntity user = userMapper.selectById(userId);
+        if (user == null) return Optional.empty();
+        user.setPasswordHash(passwordHash);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return Optional.of(user);
+    }
+
+    @Override
     public List<UserEntity> listUsers() {
         return userMapper.selectList(Wrappers.emptyWrapper());
     }

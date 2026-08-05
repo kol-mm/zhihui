@@ -15,6 +15,8 @@ public interface UserStore {
 
     Optional<UserEntity> updateProfile(Long userId, String nickname, String avatarUrl, String signature);
 
+    Optional<UserEntity> updatePassword(Long userId, String passwordHash);
+
     List<UserEntity> listUsers();
 
     Optional<UserEntity> updateStatus(Long userId, String status);
