@@ -30,7 +30,8 @@ if ([string]::IsNullOrWhiteSpace([string]$env:AI_KNOWLEDGE_JWT_SECRET)) {
     New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
     if (-not (Test-Path $secretFile)) {
         $bytes = New-Object byte[] 48
-        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
         [System.IO.File]::WriteAllText($secretFile, [Convert]::ToBase64String($bytes))
     }
     $env:AI_KNOWLEDGE_JWT_SECRET = [System.IO.File]::ReadAllText($secretFile).Trim()
