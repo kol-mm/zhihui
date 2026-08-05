@@ -48,6 +48,7 @@ class AiConfigRequest(BaseModel):
     provider: str = Field(default="local", pattern="^(local|openai-compatible)$")
     model: str = "local-rag"
     base_url: str = ""
+    request_url: str = ""
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     notifications_enabled: bool = True
@@ -183,6 +184,7 @@ def read_ai_config() -> dict[str, Any]:
         "provider": "local",
         "model": "local-rag",
         "base_url": "",
+        "request_url": "",
         "temperature": 0.2,
         "max_upload_mb": 25,
         "notifications_enabled": True,
@@ -341,7 +343,9 @@ def local_answer(question: str, matched: list[dict[str, Any]]) -> str:
 def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
     api_key = os.getenv("AI_API_KEY", "").strip()
     base_url = str(config.get("base_url", "")).strip().rstrip("/")
-    if not api_key or not base_url:
+    request_url = str(config.get("request_url", "")).strip()
+    endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
+    if not api_key or not endpoint:
         return None
     context = "\n\n".join(
         f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
@@ -355,7 +359,7 @@ def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict
         ],
     }
     request = urllib.request.Request(
-        base_url + "/chat/completions",
+        endpoint,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
@@ -513,6 +517,11 @@ def admin_chunks(authorization: str | None = Header(default=None)) -> ApiRespons
 def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
     values = request.model_dump()
+    for key in ("base_url", "request_url"):
+        value = str(values.get(key, "")).strip()
+        if value and not re.match(r"^https?://", value, re.IGNORECASE):
+            raise HTTPException(status_code=400, detail=f"{key} must use http or https")
+        values[key] = value
     with connect() as conn:
         for key, value in values.items():
             conn.execute(

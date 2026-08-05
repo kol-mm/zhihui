@@ -92,8 +92,11 @@ class AiServicePersistenceTest(unittest.TestCase):
     def test_admin_can_manage_ai_configuration(self) -> None:
         auth = self.issue_token("admin", 2, "ADMIN")
 
-        saved = self.main.save_ai_config(self.main.AiConfigRequest(match_limit=3), authorization=auth)
+        saved = self.main.save_ai_config(self.main.AiConfigRequest(
+            match_limit=3, request_url="https://example.test/v1/chat/completions"
+        ), authorization=auth)
         self.assertEqual(saved.data["configuration"]["match_limit"], 3)
+        self.assertEqual(saved.data["configuration"]["request_url"], "https://example.test/v1/chat/completions")
         overview = self.main.ai_admin_overview(authorization=auth)
         self.assertIn("configuration", overview.data)
 
@@ -123,6 +126,25 @@ class AiServicePersistenceTest(unittest.TestCase):
         request = urlopen.call_args.args[0]
         self.assertEqual(request.full_url, "https://example.test/v1/chat/completions")
         self.assertEqual(request.headers["Authorization"], "Bearer test-key")
+
+    def test_openai_compatible_provider_uses_full_request_url(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            @staticmethod
+            def read() -> bytes:
+                return json.dumps({"choices": [{"message": {"content": "provider answer"}}]}).encode()
+
+        os.environ["AI_API_KEY"] = "test-key"
+        endpoint = "https://example.test/custom/chat"
+        config = {"provider": "openai-compatible", "request_url": endpoint, "base_url": "https://ignored.test/v1"}
+        with mock.patch.object(self.main.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
+            self.main.compatible_answer("question", [], config)
+        self.assertEqual(urlopen.call_args.args[0].full_url, endpoint)
 
     def test_openai_compatible_provider_without_key_falls_back(self) -> None:
         config = {"provider": "openai-compatible", "base_url": "https://example.test/v1"}
