@@ -80,6 +80,23 @@ function Show-ServiceLogs {
     }
 }
 
+function Archive-ServiceLogs {
+    param([string]$Name)
+    $archive = Join-Path $Logs "archive"
+    New-Item -ItemType Directory -Force -Path $archive | Out-Null
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmssfff")
+    foreach ($suffix in @(".log", ".error.log")) {
+        $source = Join-Path $Logs "$Name$suffix"
+        if (Test-Path -LiteralPath $source) {
+            Move-Item -LiteralPath $source -Destination (Join-Path $archive "$Name-$stamp$suffix") -Force
+        }
+    }
+    Get-ChildItem -LiteralPath $archive -Filter "$Name-*" -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 20 |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 function Wait-Service {
     param(
         [string]$Name,
@@ -126,7 +143,7 @@ function Start-ManagedProcess {
 
     $outputLog = Join-Path $Logs "$Name.log"
     $errorLog = Join-Path $Logs "$Name.error.log"
-    Remove-Item -LiteralPath $outputLog, $errorLog -Force -ErrorAction SilentlyContinue
+    Archive-ServiceLogs $Name
     $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
         -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $outputLog -RedirectStandardError $errorLog

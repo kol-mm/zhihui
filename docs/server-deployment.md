@@ -66,3 +66,7 @@ For a different API origin, set `VITE_API_BASE_URL` before running the frontend 
 After all services are running, execute `verify-production.ps1`. It performs read-only checks for required
 secrets, infrastructure ports, gateway routes, AI health, and MinIO health. A non-zero exit code means the
 server is not ready to receive production traffic.
+
+Run `backup-production.ps1` on a schedule after configuring an `mc` alias for MinIO. It creates a timestamped
+MySQL dump and mirrors the three application buckets. Use `-SkipMinio` only when object storage is backed up
+by a separate system.
