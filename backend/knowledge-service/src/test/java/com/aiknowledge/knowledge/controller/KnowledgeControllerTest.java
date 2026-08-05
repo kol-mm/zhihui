@@ -174,6 +174,24 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void adminCanPreviewPendingKnowledgeWithoutIncreasingViews() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Pending review body",
+                "fileType", "txt",
+                "content", "Administrators must read this complete body before approval."
+        ));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+
+        var preview = controller.adminPreview(adminAuth, fileId);
+
+        assertEquals(0, preview.code());
+        assertTrue(String.valueOf(preview.data().get("content")).contains("complete body"));
+        assertEquals(0, ((Number) preview.data().get("views")).intValue());
+        assertEquals(500, controller.adminPreview(userAuth, fileId).code());
+    }
+
+    @Test
     void adminCanResolveKnowledgeReport() {
         controller.report(userAuth, Map.of("userId", 999L, "fileId", 1L, "reason", "review"));
         String auth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");

@@ -419,6 +419,24 @@ public class KnowledgeController {
         return ApiResponse.ok(knowledgeStore.listReports(null));
     }
 
+    @GetMapping("/admin/preview")
+    public ApiResponse<Map<String, Object>> adminPreview(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam("fileId") Long fileId
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        return knowledgeStore.find(fileId)
+                .map(file -> {
+                    Map<String, Object> detail = toView(file);
+                    detail.put("content", fullTextSearch.find(fileId)
+                            .map(LocalFullTextSearchService.SearchDocument::getContent)
+                            .orElse("该资源尚未保存可预览的正文。"));
+                    return ApiResponse.ok(detail);
+                })
+                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+    }
+
     @PostMapping("/admin/report/resolve")
     public ApiResponse<Map<String, Object>> resolveReport(
             @RequestHeader(name = "Authorization", required = false) String authorization,
