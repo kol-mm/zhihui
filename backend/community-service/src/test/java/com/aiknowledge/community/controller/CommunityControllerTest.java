@@ -143,16 +143,33 @@ class CommunityControllerTest {
 
     @Test
     void commentsCanBeListedWithPostDetail() {
+        int initialCommentCount = controller.comments(1L).data().size();
         ApiResponse<Map<String, Object>> comment = controller.createComment(userAuth, Map.of(
                 "postId", 1L,
                 "userId", 1L,
                 "content", "detail comment"
         ));
         assertEquals(0, comment.code());
+        Long parentId = ((Number) comment.data().get("id")).longValue();
+
+        ApiResponse<Map<String, Object>> reply = controller.createComment(secondUserAuth, Map.of(
+                "postId", 1L,
+                "parentId", parentId,
+                "content", "reply to comment"
+        ));
+        assertEquals(0, reply.code());
+        assertEquals(parentId, reply.data().get("parentId"));
+
+        ApiResponse<Map<String, Object>> invalidReply = controller.createComment(secondUserAuth, Map.of(
+                "postId", 1L,
+                "parentId", 999999L,
+                "content", "invalid reply"
+        ));
+        assertEquals(500, invalidReply.code());
 
         ApiResponse<List<Map<String, Object>>> comments = controller.comments(1L);
         assertEquals(0, comments.code());
-        assertFalse(comments.data().isEmpty());
+        assertEquals(initialCommentCount + 2, comments.data().size());
 
         ApiResponse<Map<String, Object>> detail = controller.detail(userAuth, 1L);
         assertEquals(0, detail.code());

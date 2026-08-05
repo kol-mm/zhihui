@@ -281,7 +281,7 @@ type Report = { id:number; fileId?:number; targetUserId?:number; reason:string; 
 type Faq = { id:number; question:string; answer:string; sortNo:number };
 type EventRecord = { id:number; type:string; aggregateId:string; status:string; createdAt:string };
 type AiSession = { id:number; user_id?:number; title:string; created_at:string };
-type Comment = { id:number; postId?:number; userId:number; content:string };
+type Comment = { id:number; postId?:number; userId:number; parentId?:number; content:string };
 type BehaviorRecord = { id:number; action:string; targetType:string; targetId:number; createdAt:string };
 type AiChunk = { id:number; file_id:number; title:string; content:string; created_at:string };
 type AiReference = { id:number; file_id:number; title:string; content:string; score?:number };
@@ -481,7 +481,7 @@ async function likePost(post:Post){const result=await postData<PostLikeResult>('
 async function likeDetailPost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:result.likes,liked:result.liked};if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
 function openComments(post:Post){navigateToDetail('community',post.id);}
-async function createDetailComment(content:string){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,userId:currentUserId.value,content});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已发布');}
+async function createDetailComment(payload:{content:string;parentId:number}){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,content:payload.content,parentId:payload.parentId});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success(payload.parentId?'回复已发布':'评论已发布');}
 
 async function loadMessageData(){const [chatSessions,notices,directory]=await Promise.all([getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`),getData<UserRecord[]>('/user/directory')]);sessions.value=chatSessions;notifications.value=notices;directoryUsers.value=directory.filter(user=>user.id!==currentUserId.value);if(sessions.value.length&&!sessions.value.some(session=>session.id===messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0].id;if(!sessions.value.length)messageForm.value.sessionId=0;await loadMessages();}
 async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}

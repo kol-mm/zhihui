@@ -156,9 +156,20 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         CommentEntity comment = buildComment(request, "POST", userId);
+        if (comment.getPostId() <= 0 || comment.getContent().isBlank()) return ApiResponse.fail("post and comment content are required");
+        var post = communityStore.findPost(comment.getPostId());
+        if (post.isEmpty()) return ApiResponse.fail("post not found");
+        CommentEntity parent = null;
+        if (comment.getParentId() != null && comment.getParentId() > 0) {
+            parent = communityStore.listComments(comment.getPostId()).stream()
+                    .filter(item -> comment.getParentId().equals(item.getId()))
+                    .findFirst().orElse(null);
+            if (parent == null) return ApiResponse.fail("parent comment does not belong to this post");
+        }
+        comment.setContent(comment.getContent().trim());
         CommentEntity saved = communityStore.saveComment(comment);
-        communityStore.findPost(saved.getPostId()).ifPresent(post ->
-                notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent()));
+        Long notificationTarget = parent == null ? post.get().getUserId() : parent.getUserId();
+        notificationClient.commentCreated(notificationTarget, userId, post.get().getId(), saved.getContent());
         return ApiResponse.ok(toCommentView(saved));
     }
 
