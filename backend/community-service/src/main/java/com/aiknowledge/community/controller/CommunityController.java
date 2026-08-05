@@ -4,7 +4,6 @@ import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.community.entity.CommentEntity;
-import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 import com.aiknowledge.community.store.CommunityStore;
@@ -296,12 +295,10 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
-        PostCollectEntity collect = new PostCollectEntity();
-        collect.setUserId(userId);
-        collect.setPostId(number(request.get("postId"), 0L));
-        collect.setSource("SQUARE");
-        PostCollectEntity saved = communityStore.collectPost(collect);
-        return ApiResponse.ok(Map.of("id", saved.getId(), "postId", saved.getPostId(), "collected", true, "source", saved.getSource()));
+        Long postId = number(request.get("postId"), 0L);
+        if (postId <= 0 || communityStore.findPost(postId).isEmpty()) return ApiResponse.fail("post not found");
+        boolean collected = communityStore.togglePostCollect(userId, postId);
+        return ApiResponse.ok(Map.of("postId", postId, "collected", collected));
     }
 
     @PostMapping("/post/like")
@@ -408,6 +405,7 @@ public class CommunityController {
         view.put("imageUrls", communityStore.listPostImages(post.getId()));
         view.put("likes", communityStore.countPostLikes(post.getId()));
         view.put("liked", communityStore.hasPostLike(viewerUserId, post.getId()));
+        view.put("collected", communityStore.hasPostCollect(viewerUserId, post.getId()));
         view.put("createdAt", post.getCreatedAt());
         view.put("updatedAt", post.getUpdatedAt());
         return view;

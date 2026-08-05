@@ -1,7 +1,6 @@
 package com.aiknowledge.community.store;
 
 import com.aiknowledge.community.entity.CommentEntity;
-import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 
@@ -30,7 +29,9 @@ public interface CommunityStore {
 
     List<PostDraftEntity> listDrafts(Long userId);
 
-    PostCollectEntity collectPost(PostCollectEntity collect);
+    boolean togglePostCollect(Long userId, Long postId);
+
+    boolean hasPostCollect(Long userId, Long postId);
 
     Optional<PostEntity> auditPost(Long postId, String status, String reason);
 

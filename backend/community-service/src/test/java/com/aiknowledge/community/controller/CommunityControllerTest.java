@@ -89,6 +89,21 @@ class CommunityControllerTest {
     }
 
     @Test
+    void postCollectionCanBeToggledAndAppearsInPostViews() {
+        var collected = controller.squareCollect(userAuth, Map.of("postId", 1L));
+        assertEquals(0, collected.code());
+        assertEquals(true, collected.data().get("collected"));
+        assertEquals(true, controller.detail(userAuth, 1L).data().get("collected"));
+
+        var removed = controller.squareCollect(userAuth, Map.of("postId", 1L));
+        assertEquals(0, removed.code());
+        assertEquals(false, removed.data().get("collected"));
+        assertEquals(false, controller.feed(userAuth, null).data().stream()
+                .filter(post -> Long.valueOf(1L).equals(post.get("id")))
+                .findFirst().orElseThrow().get("collected"));
+    }
+
+    @Test
     void draftCanBeSavedAndListed() {
         ApiResponse<Map<String, Object>> draft = controller.saveDraft(userAuth, Map.of(
                 "userId", 1L,

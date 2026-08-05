@@ -161,7 +161,7 @@
                   <div class="post-author"><div class="user-avatar"><img v-if="communityUser(post.userId).avatarUrl" :src="resolveApiUrl(communityUser(post.userId).avatarUrl || '')" alt="头像" /><span v-else>{{ communityUser(post.userId).nickname.slice(0, 1).toUpperCase() }}</span></div><div><strong>{{ communityUser(post.userId).nickname }}</strong><span>@{{ communityUser(post.userId).username }} · 帖子 #{{ post.id }}</span></div><el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ post.status }}</el-tag></div>
                   <button class="post-title-button" @click="openPostDetail(post)"><h3>{{ post.title }}</h3></button><p>{{ post.content }}</p>
                   <div v-if="post.imageUrls?.length" class="post-images"><img v-for="image in post.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
-                  <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button text :icon="ChatDotRound" @click="openComments(post)">评论</el-button><el-button text :icon="CollectionTag" @click="collectPost(post)">收藏</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button></div>
+                  <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button text :icon="ChatDotRound" @click="openComments(post)">评论</el-button><el-button text :type="post.collected ? 'primary' : 'default'" :icon="CollectionTag" @click="collectPost(post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button></div>
                 </article>
                 <el-empty v-if="!feedPosts.length" description="还没有动态，发布第一条帖子吧" />
               </section>
@@ -269,8 +269,9 @@ import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number };
 type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
-type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; comments?:Comment[] };
+type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean; comments?:Comment[] };
 type PostLikeResult = { postId:number; liked:boolean; created:boolean; likes:number };
+type PostCollectResult = { postId:number; collected:boolean };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string };
 type ChatMessage = { id:number; sessionId:number; senderId:number; content:string; status:string; createdAt:string };
@@ -479,7 +480,7 @@ async function deleteDraft(draft:Draft){await ElMessageBox.confirm(`确认删除
 function openPostDetail(post:Post){navigateToDetail('community',post.id);}
 async function likePost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});post.likes=result.likes;post.liked=result.liked;if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function likeDetailPost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:result.likes,liked:result.liked};if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
-async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
+async function collectPost(post:Post){const result=await postData<PostCollectResult>('/square/collect',{postId:post.id});post.collected=result.collected;if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,collected:result.collected};if(result.collected){await recordBehavior('COLLECT','POST',post.id);ElMessage.success('已收藏帖子');}else ElMessage.success('已取消收藏');}
 function openComments(post:Post){navigateToDetail('community',post.id);}
 async function createDetailComment(payload:{content:string;parentId:number}){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,content:payload.content,parentId:payload.parentId});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success(payload.parentId?'回复已发布':'评论已发布');}
 

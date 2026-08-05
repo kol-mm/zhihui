@@ -112,9 +112,36 @@ public class MySqlCommunityStore implements CommunityStore {
     }
 
     @Override
-    public PostCollectEntity collectPost(PostCollectEntity collect) {
-        collectMapper.insert(collect);
-        return collect;
+    @Transactional
+    public boolean togglePostCollect(Long userId, Long postId) {
+        var match = Wrappers.<PostCollectEntity>lambdaQuery()
+                .eq(PostCollectEntity::getUserId, userId).eq(PostCollectEntity::getPostId, postId);
+        Long existing = collectMapper.selectCount(match);
+        if (existing != null && existing > 0) {
+            collectMapper.delete(match);
+            return false;
+        }
+        PostCollectEntity collect = new PostCollectEntity();
+        collect.setUserId(userId);
+        collect.setPostId(postId);
+        collect.setSource("SQUARE");
+        collect.setCreatedAt(LocalDateTime.now());
+        try {
+            collectMapper.insert(collect);
+            return true;
+        } catch (DuplicateKeyException ignored) {
+            collectMapper.delete(Wrappers.<PostCollectEntity>lambdaQuery()
+                    .eq(PostCollectEntity::getUserId, userId).eq(PostCollectEntity::getPostId, postId));
+            return false;
+        }
+    }
+
+    @Override
+    public boolean hasPostCollect(Long userId, Long postId) {
+        if (userId == null) return false;
+        Long count = collectMapper.selectCount(Wrappers.<PostCollectEntity>lambdaQuery()
+                .eq(PostCollectEntity::getUserId, userId).eq(PostCollectEntity::getPostId, postId));
+        return count != null && count > 0;
     }
 
     @Override

@@ -13,7 +13,7 @@
         <div v-if="post.imageUrls?.length" class="post-images detail-post-images"><img v-for="image in post.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
         <footer class="detail-actions post-detail-actions">
           <el-button :type="post.liked ? 'primary' : 'default'" :plain="post.liked" :icon="Star" @click="emit('like', post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button>
-          <el-button :icon="CollectionTag" @click="emit('collect', post)">收藏</el-button>
+          <el-button :type="post.collected ? 'primary' : 'default'" :plain="post.collected" :icon="CollectionTag" @click="emit('collect', post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button>
           <el-button v-if="post.userId === currentUserId" type="primary" plain :icon="Edit" @click="emit('edit', post)">编辑帖子</el-button>
         </footer>
       </article>
@@ -49,7 +49,7 @@ import { computed, nextTick, ref } from 'vue';
 import { ArrowLeft, ChatDotRound, CollectionTag, Edit, Promotion, Star } from '@element-plus/icons-vue';
 import { resolveApiUrl } from '../api/client';
 
-type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean };
+type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean };
 type Comment = { id:number; userId:number; parentId?:number; content:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string };
 

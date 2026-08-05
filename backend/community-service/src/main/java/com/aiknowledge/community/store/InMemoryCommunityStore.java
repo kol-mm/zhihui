@@ -158,12 +158,27 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
-    public PostCollectEntity collectPost(PostCollectEntity collect) {
+    public synchronized boolean togglePostCollect(Long userId, Long postId) {
+        boolean removed = collects.removeIf(item -> item.getUserId().equals(userId) && item.getPostId().equals(postId));
+        if (removed) {
+            persist();
+            return false;
+        }
+        PostCollectEntity collect = new PostCollectEntity();
         collect.setId(collectIds.incrementAndGet());
+        collect.setUserId(userId);
+        collect.setPostId(postId);
+        collect.setSource("SQUARE");
         collect.setCreatedAt(LocalDateTime.now());
         collects.add(collect);
         persist();
-        return collect;
+        return true;
+    }
+
+    @Override
+    public boolean hasPostCollect(Long userId, Long postId) {
+        return userId != null && collects.stream()
+                .anyMatch(item -> item.getUserId().equals(userId) && item.getPostId().equals(postId));
     }
 
     @Override
