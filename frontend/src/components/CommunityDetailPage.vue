@@ -21,21 +21,21 @@
         <div class="discussion-head"><div><p>公开讨论</p><h2>{{ comments.length }} 条评论</h2></div><ChatDotRound /></div>
         <div class="detail-comment-list">
           <section v-for="comment in rootComments" :key="comment.id" class="detail-comment-thread">
-            <article>
+            <article class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === comment.id }">
               <div class="mini-avatar"><img v-if="userFor(comment.userId).avatarUrl" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
-              <div class="detail-comment-body"><div class="detail-comment-meta"><strong>{{ userFor(comment.userId).nickname }}</strong><el-button text type="primary" size="small" @click="startReply(comment)">回复</el-button></div><p>{{ comment.content }}</p></div>
+              <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(comment.userId).nickname }}</strong></div><el-button text type="primary" size="small" @click="startReply(comment)">回复</el-button></div><p>{{ comment.content }}</p></div>
             </article>
             <div v-if="threadReplies(comment.id).length" class="detail-comment-replies">
-              <article v-for="reply in threadReplies(comment.id)" :key="reply.id">
+              <article v-for="reply in threadReplies(comment.id)" :key="reply.id" class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === reply.id }">
                 <div class="mini-avatar"><img v-if="userFor(reply.userId).avatarUrl" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
-                <div class="detail-comment-body"><div class="detail-comment-meta"><strong>{{ userFor(reply.userId).nickname }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span><el-button text type="primary" size="small" @click="startReply(reply)">回复</el-button></div><p>{{ reply.content }}</p></div>
+                <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(reply.userId).nickname }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><el-button text type="primary" size="small" @click="startReply(reply)">回复</el-button></div><p>{{ reply.content }}</p></div>
               </article>
             </div>
           </section>
           <el-empty v-if="!comments.length" description="暂无评论，发表第一条讨论" />
         </div>
-        <div class="detail-comment-compose">
-          <div v-if="replyTarget" class="detail-reply-context"><span>回复 {{ userFor(replyTarget.userId).nickname }}</span><el-button text size="small" @click="cancelReply">取消回复</el-button></div>
+        <div ref="commentComposer" class="detail-comment-compose">
+          <div v-if="replyTarget" class="detail-reply-context"><span>回复 {{ userFor(replyTarget.userId).nickname }}：{{ replyTarget.content }}</span><el-button text size="small" @click="cancelReply">取消回复</el-button></div>
           <el-input ref="commentInput" v-model="commentText" type="textarea" :rows="3" resize="none" :placeholder="replyTarget ? `回复 ${userFor(replyTarget.userId).nickname}` : '发表公开评论'" />
           <el-button type="primary" :icon="Promotion" :disabled="!commentText.trim()" @click="submitComment">{{ replyTarget ? '发表回复' : '发表评论' }}</el-button>
         </div>
@@ -58,6 +58,7 @@ const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:
 const commentText = ref('');
 const replyTarget = ref<Comment>();
 const commentInput = ref<{ focus:()=>void }>();
+const commentComposer = ref<HTMLElement>();
 const author = computed(() => userFor(props.post.userId));
 const commentById = computed(() => new Map(props.comments.map(comment => [comment.id, comment])));
 const rootComments = computed(() => props.comments.filter(comment => !comment.parentId || !commentById.value.has(comment.parentId)));
@@ -95,7 +96,10 @@ function threadReplies(rootId:number):Comment[] {
 
 function startReply(comment:Comment) {
   replyTarget.value = comment;
-  nextTick(() => commentInput.value?.focus());
+  nextTick(() => {
+    commentComposer.value?.scrollIntoView({ block:'nearest', behavior:'smooth' });
+    commentInput.value?.focus();
+  });
 }
 
 function cancelReply() {
