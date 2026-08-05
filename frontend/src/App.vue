@@ -196,7 +196,8 @@
     </el-dialog>
     <el-dialog v-model="readerDialog" class="reader-dialog" width="min(900px, 96vw)" top="3vh" destroy-on-close>
       <template #header><div class="reader-header"><span class="file-type large">{{ selectedKnowledge?.fileType?.toUpperCase() }}</span><div><h3>{{ selectedKnowledge?.title }}</h3><p>资源 #{{ selectedKnowledge?.id }} · {{ reviewingKnowledge ? auditLabel(selectedKnowledge?.auditStatus || '') : `浏览 ${selectedKnowledge?.views || 0} 次` }}</p></div></div></template>
-      <article class="knowledge-body rich-knowledge-body">
+      <iframe v-if="selectedKnowledge?.fileType === 'pdf' && pdfPreviewUrl" class="knowledge-pdf-preview" :src="pdfPreviewUrl" title="PDF 预览" />
+      <article v-else class="knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in knowledgeContentBlocks" :key="`${block.type}-${index}`">
           <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
           <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
@@ -299,6 +300,7 @@ const directoryUsers = ref<UserRecord[]>([]); const systemHealth = ref<Record<st
 const aiQuestion = ref(''); const aiMessages = ref<AiMessageView[]>([]); const aiSessions = ref<AiSession[]>([]); const aiSessionId = ref<number>();
 const selectedPost = ref<Post>(); const comments = ref<Comment[]>([]); const commentText = ref('');
 const selectedKnowledge = ref<KnowledgeFile>();
+const pdfPreviewUrl = ref('');
 const selectedReviewPost = ref<Post>(); const reviewingKnowledge = ref(false);
 const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
 
@@ -373,8 +375,9 @@ function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformCo
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
 async function uploadKnowledge(){if(!selectedKnowledgeFile.value&&!knowledgeForm.value.content.trim()){ElMessage.warning('请选择文件或填写文本正文');return;}busy.value=true;try{if(selectedKnowledgeFile.value){const form=new FormData();form.append('file',selectedKnowledgeFile.value);form.append('title',knowledgeForm.value.title);if(knowledgeForm.value.categoryId)form.append('categoryId',String(knowledgeForm.value.categoryId));await postFormData('/knowledge/file/upload',form);}else{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title});await postData('/knowledge/upload',{title:knowledgeForm.value.title||knowledgeForm.value.filename,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content,categoryId:knowledgeForm.value.categoryId||null});}knowledgeDialog.value=false;selectedKnowledgeFile.value=undefined;knowledgeForm.value.title='';knowledgeForm.value.content='';knowledgeForm.value.categoryId=0;await loadKnowledge();ElMessage.success('资料已保存并完成正文索引，等待管理员审核');}catch(error){notifyError(error);}finally{busy.value=false;}}
 function openKnowledge(file:KnowledgeFile){ activeView.value='knowledge'; viewKnowledge(file); }
-async function viewKnowledge(file:KnowledgeFile){ reviewingKnowledge.value=false;const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:file.id});selectedKnowledge.value=detail;readerDialog.value=true;await recordBehavior('VIEW','KNOWLEDGE',file.id);await loadKnowledge(); }
-async function reviewKnowledge(file:KnowledgeFile){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);selectedKnowledge.value=detail;reviewingKnowledge.value=true;readerDialog.value=true;}
+async function prepareKnowledgePreview(file:KnowledgeFile){if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}if(file.fileType?.toLowerCase()==='pdf'&&file.fileUrl){const blob=await downloadData(`/knowledge/file/${file.id}`);pdfPreviewUrl.value=URL.createObjectURL(blob);}}
+async function viewKnowledge(file:KnowledgeFile){ reviewingKnowledge.value=false;const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:file.id});selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);readerDialog.value=true;await recordBehavior('VIEW','KNOWLEDGE',file.id);await loadKnowledge(); }
+async function reviewKnowledge(file:KnowledgeFile){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);reviewingKnowledge.value=true;readerDialog.value=true;}
 function reviewPost(post:Post){selectedReviewPost.value=post;postReviewDialog.value=true;}
 async function downloadKnowledge(file:KnowledgeFile){try{const blob=await downloadData(`/knowledge/file/${file.id}`);const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`${file.title}.${file.fileType||'bin'}`;anchor.click();URL.revokeObjectURL(url);await recordBehavior('DOWNLOAD','KNOWLEDGE',file.id);await loadKnowledge();}catch(error){notifyError(error);}}
 async function likeKnowledge(file:KnowledgeFile){ await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id}); await recordBehavior('LIKE','KNOWLEDGE',file.id); ElMessage.success('已点赞'); await loadKnowledge(); }
