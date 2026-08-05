@@ -270,6 +270,7 @@ import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number };
 type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; comments?:Comment[] };
+type PostLikeResult = { postId:number; liked:boolean; created:boolean; likes:number };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string };
 type ChatMessage = { id:number; sessionId:number; senderId:number; content:string; status:string; createdAt:string };
@@ -476,8 +477,8 @@ function editDraft(draft:Draft){editingDraftId.value=draft.id;editingPostId.valu
 async function publishDraft(draft:Draft){await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});await postData('/post/draft/publish',{id:draft.id});await loadDrafts();ElMessage.success('草稿已发布');}
 async function deleteDraft(draft:Draft){await ElMessageBox.confirm(`确认删除草稿“${draft.title}”？`,'删除草稿',{type:'warning'});await deleteData('/post/draft',{draftId:draft.id});await loadDrafts();ElMessage.success('草稿已删除');}
 function openPostDetail(post:Post){navigateToDetail('community',post.id);}
-async function likePost(post:Post){ await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);await loadFeed(); }
-async function likeDetailPost(post:Post){await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:(detailPost.value.likes||0)+1};}
+async function likePost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(result.created){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.info('你已经点赞过该帖子');await loadFeed();}
+async function likeDetailPost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:result.likes};if(result.created){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.info('你已经点赞过该帖子');}
 async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
 function openComments(post:Post){navigateToDetail('community',post.id);}
 async function createDetailComment(content:string){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,userId:currentUserId.value,content});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已发布');}

@@ -81,7 +81,11 @@ class CommunityControllerTest {
         var filtered = controller.followingFeed("2");
         assertEquals(1, filtered.data().size());
         Long postId = ((Number) filtered.data().get(0).get("id")).longValue();
-        assertEquals(1L, controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId)).data().get("likes"));
+        var firstLike = controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId));
+        var duplicateLike = controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId));
+        assertEquals(true, firstLike.data().get("created"));
+        assertEquals(false, duplicateLike.data().get("created"));
+        assertEquals(1L, duplicateLike.data().get("likes"));
     }
 
     @Test

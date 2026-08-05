@@ -292,8 +292,13 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("postId"), 0L);
-        communityStore.likePost(userId, postId);
-        return ApiResponse.ok(Map.of("postId", postId, "liked", true, "likes", communityStore.countPostLikes(postId)));
+        boolean created = communityStore.likePost(userId, postId);
+        return ApiResponse.ok(Map.of(
+                "postId", postId,
+                "liked", true,
+                "created", created,
+                "likes", communityStore.countPostLikes(postId)
+        ));
     }
 
     @GetMapping("/post/admin/overview")
