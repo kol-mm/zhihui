@@ -94,6 +94,8 @@ class CommunityControllerTest {
         assertEquals(0, collected.code());
         assertEquals(true, collected.data().get("collected"));
         assertEquals(true, controller.detail(userAuth, 1L).data().get("collected"));
+        assertEquals(1, controller.squareCollections(userAuth, null).data().size());
+        assertEquals(true, controller.squareCollections(userAuth, null).data().get(0).get("collected"));
 
         var removed = controller.squareCollect(userAuth, Map.of("postId", 1L));
         assertEquals(0, removed.code());
@@ -101,6 +103,8 @@ class CommunityControllerTest {
         assertEquals(false, controller.feed(userAuth, null).data().stream()
                 .filter(post -> Long.valueOf(1L).equals(post.get("id")))
                 .findFirst().orElseThrow().get("collected"));
+        assertEquals(0, controller.squareCollections(userAuth, null).data().size());
+        assertEquals(500, controller.squareCollections(secondUserAuth, 1L).code());
     }
 
     @Test

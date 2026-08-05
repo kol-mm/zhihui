@@ -182,6 +182,16 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
+    public List<PostEntity> listCollectedPosts(Long userId) {
+        return collects.stream()
+                .filter(item -> item.getUserId().equals(userId))
+                .sorted(Comparator.comparing(PostCollectEntity::getCreatedAt).reversed())
+                .map(item -> findPost(item.getPostId()).orElse(null))
+                .filter(post -> post != null && "PUBLISHED".equals(post.getStatus()))
+                .toList();
+    }
+
+    @Override
     public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
         Optional<PostEntity> found = findPost(postId);
         found.ifPresent(post -> {

@@ -33,6 +33,8 @@ public interface CommunityStore {
 
     boolean hasPostCollect(Long userId, Long postId);
 
+    List<PostEntity> listCollectedPosts(Long userId);
+
     Optional<PostEntity> auditPost(Long postId, String status, String reason);
 
     void savePostImages(Long postId, List<String> imageUrls);

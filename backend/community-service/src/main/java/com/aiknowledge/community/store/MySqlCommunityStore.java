@@ -145,6 +145,17 @@ public class MySqlCommunityStore implements CommunityStore {
     }
 
     @Override
+    public List<PostEntity> listCollectedPosts(Long userId) {
+        return collectMapper.selectList(Wrappers.<PostCollectEntity>lambdaQuery()
+                        .eq(PostCollectEntity::getUserId, userId)
+                        .orderByDesc(PostCollectEntity::getCreatedAt))
+                .stream()
+                .map(item -> postMapper.selectById(item.getPostId()))
+                .filter(post -> post != null && "PUBLISHED".equals(post.getStatus()))
+                .toList();
+    }
+
+    @Override
     public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
         PostEntity post = postMapper.selectById(postId);
         if (post == null) {

@@ -301,6 +301,20 @@ public class CommunityController {
         return ApiResponse.ok(Map.of("postId", postId, "collected", collected));
     }
 
+    @GetMapping("/square/collections")
+    public ApiResponse<List<Map<String, Object>>> squareCollections(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
+    ) {
+        Long viewerUserId = LocalAuth.userId(authorization);
+        if (viewerUserId == null) return ApiResponse.fail("valid user authorization is required");
+        Long userId = requestedUserId == null ? viewerUserId : requestedUserId;
+        if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
+        if (!communityEnabled()) return ApiResponse.ok(List.of());
+        return ApiResponse.ok(communityStore.listCollectedPosts(userId).stream()
+                .map(post -> toPostView(post, userId)).toList());
+    }
+
     @PostMapping("/post/like")
     public ApiResponse<Map<String, Object>> likePost(
             @RequestHeader(name = "Authorization", required = false) String authorization,

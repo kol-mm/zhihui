@@ -155,6 +155,8 @@ button { letter-spacing: 0; }
 .ai-references button small { color:#82908a; }
 .draft-row { align-items:center; }
 .draft-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; }
+.collection-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; }
+.collection-actions .el-button { margin-left:0; }
 .faq-help .el-collapse { border-top:0; }
 .faq-help .el-collapse-item__content { color:#53615b; line-height:1.7; }
 .feed-mini-link { padding:4px; border-radius:6px; cursor:pointer; }
@@ -217,6 +219,7 @@ button { letter-spacing: 0; }
   .ai-references button small { display:none; }
   .draft-row { display:grid; }
   .draft-actions { justify-content:flex-start; }
+  .collection-actions { grid-column:2; justify-content:flex-start; }
   .detail-header { padding:18px 16px; }
   .detail-heading h1,.detail-post h1 { font-size:22px; }
   .detail-knowledge-body { padding:22px 17px; }

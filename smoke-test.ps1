@@ -15,6 +15,7 @@ $checks = @(
   @{ Name = "knowledge-storage"; Url = "$Gateway/knowledge/storage/status" },
   @{ Name = "knowledge-search"; Url = "$Gateway/knowledge/search/status" },
   @{ Name = "square-feed"; Url = "$Gateway/square/feed" },
+  @{ Name = "square-collections"; Url = "$Gateway/square/collections" },
   @{ Name = "following-feed"; Url = "$Gateway/square/following-feed?followedUserIds=1" },
   @{ Name = "message-list"; Url = "$Gateway/message/list?sessionId=1&userId=1" },
   @{ Name = "message-sessions"; Url = "$Gateway/message/sessions?userId=1" },
