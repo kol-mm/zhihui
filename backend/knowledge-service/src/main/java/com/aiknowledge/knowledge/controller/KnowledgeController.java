@@ -90,10 +90,13 @@ public class KnowledgeController {
             byte[] bytes = multipartFile.getBytes();
             String fileType = textExtractor.extension(filename);
             String extractedContent = textExtractor.extract(filename, bytes).trim();
-            if (isMarkdown(filename) && MARKDOWN_IMAGE_REFERENCE.matcher(extractedContent).find()) {
-                return ApiResponse.fail("Markdown 文件不能包含图片，请使用图片上传控件添加图片");
+            if (imageUrls != null && !imageUrls.isEmpty()) {
+                return ApiResponse.fail("正文图片必须包含在原始文件中，不能单独上传");
             }
-            String content = appendImages(extractedContent, imageUrls);
+            if (isMarkdown(filename) && MARKDOWN_IMAGE_REFERENCE.matcher(extractedContent).find()) {
+                return ApiResponse.fail("Markdown 文件不能包含图片");
+            }
+            String content = extractedContent;
             Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
             KnowledgeFileEntity file = new KnowledgeFileEntity();
             file.setUserId(userId);
@@ -195,12 +198,15 @@ public class KnowledgeController {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String filename = String.valueOf(request.getOrDefault("filename", request.getOrDefault("title", "knowledge.txt")));
         String content = String.valueOf(request.getOrDefault("content", ""));
-        if ("md".equalsIgnoreCase(String.valueOf(request.getOrDefault("fileType", "txt")))
-                && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
-            return ApiResponse.fail("Markdown 正文不能包含图片，请使用图片上传控件添加图片");
-        }
-        content = appendImages(content, stringList(request.get("imageUrls")));
         String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
+        List<String> imageUrls = stringList(request.get("imageUrls"));
+        if (!imageUrls.isEmpty()) {
+            return ApiResponse.fail("正文图片必须包含在原始文件中，不能单独上传");
+        }
+        if ("md".equalsIgnoreCase(fileType)
+                && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
+            return ApiResponse.fail("Markdown 正文不能包含图片");
+        }
         return ApiResponse.ok(fileStorage.saveTextFile(filename, content, fileType));
     }
 
@@ -211,23 +217,26 @@ public class KnowledgeController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
+        String content = String.valueOf(request.getOrDefault("content", ""));
+        List<String> imageUrls = stringList(request.get("imageUrls"));
+        if (!imageUrls.isEmpty()) {
+            return ApiResponse.fail("正文图片必须包含在原始文件中，不能单独上传");
+        }
+        if ("md".equalsIgnoreCase(fileType) && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
+            return ApiResponse.fail("Markdown 正文不能包含图片");
+        }
         KnowledgeFileEntity file = new KnowledgeFileEntity();
         file.setUserId(userId);
         file.setCategoryId(number(request.get("categoryId"), null));
         file.setTitle(String.valueOf(request.getOrDefault("title", "Untitled knowledge file")));
         file.setFileUrl(String.valueOf(request.getOrDefault("fileUrl", "")));
-        file.setFileType(String.valueOf(request.getOrDefault("fileType", "txt")));
+        file.setFileType(fileType);
         file.setParseStatus("PENDING");
         file.setAuditStatus("PENDING");
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
-        String content = String.valueOf(request.getOrDefault("content", ""));
-        if ("md".equalsIgnoreCase(String.valueOf(request.getOrDefault("fileType", "txt")))
-                && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
-            return ApiResponse.fail("Markdown 正文不能包含图片，请使用图片上传控件添加图片");
-        }
-        content = appendImages(content, stringList(request.get("imageUrls")));
         if (!content.isBlank()) {
             fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
             saved.setParseStatus("INDEXED");
@@ -568,17 +577,6 @@ public class KnowledgeController {
             while (matcher.find() && urls.size() < 12) urls.add(matcher.group(2));
             return List.copyOf(urls);
         }).orElse(List.of());
-    }
-
-    private String appendImages(String content, List<String> imageUrls) {
-        StringBuilder result = new StringBuilder(content == null ? "" : content.trim());
-        int index = 1;
-        for (String imageUrl : imageUrls == null ? List.<String>of() : imageUrls) {
-            if (imageUrl == null || !imageUrl.matches("/knowledge/media/[A-Za-z0-9_-]+")) continue;
-            if (result.length() > 0) result.append("\n\n");
-            result.append("![插图 ").append(index++).append("](").append(imageUrl).append(')');
-        }
-        return result.toString();
     }
 
     private List<String> stringList(Object value) {
