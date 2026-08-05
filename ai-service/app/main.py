@@ -52,7 +52,7 @@ class AiConfigRequest(BaseModel):
     model: str = Field(default="local-rag", max_length=200)
     base_url: str = Field(default="", max_length=2000)
     request_url: str = Field(default="", max_length=2000)
-    temperature: float = Field(default=0.2, ge=0, le=2)
+    temperature: float = Field(default=0.2, ge=0, le=1)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     notifications_enabled: bool = True
     community_enabled: bool = True
@@ -209,7 +209,7 @@ def read_ai_config() -> dict[str, Any]:
         if row["config_key"] == "match_limit":
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] == "temperature":
-            defaults[row["config_key"]] = float(value)
+            defaults[row["config_key"]] = max(0.0, min(1.0, float(value)))
         elif row["config_key"] in {"max_upload_mb"}:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] in {"notifications_enabled", "community_enabled"}:

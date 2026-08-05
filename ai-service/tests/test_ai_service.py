@@ -100,6 +100,10 @@ class AiServicePersistenceTest(unittest.TestCase):
         overview = self.main.ai_admin_overview(authorization=auth)
         self.assertIn("configuration", overview.data)
 
+    def test_temperature_is_limited_to_one(self) -> None:
+        with self.assertRaises(ValueError):
+            self.main.AiConfigRequest(temperature=1.1)
+
     def test_openai_compatible_provider_uses_chat_completions(self) -> None:
         class FakeResponse:
             def __enter__(self):
