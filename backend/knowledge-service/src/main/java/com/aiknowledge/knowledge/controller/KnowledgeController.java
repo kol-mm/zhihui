@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/knowledge")
 public class KnowledgeController {
-    private static final Pattern IMAGE_MARKUP = Pattern.compile("!\\[([^]]*)]\\((/knowledge/media/[A-Za-z0-9_-]+)\\)");
+    private static final Pattern IMAGE_MARKUP = Pattern.compile("!\\[([^]]*)]\\(((?:/knowledge/media/[A-Za-z0-9_-]+)|(?:https?://[^\\s)]+))\\)", Pattern.CASE_INSENSITIVE);
 
     private final KnowledgeStore knowledgeStore;
     private final LocalFileStorageService fileStorage;

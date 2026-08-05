@@ -328,7 +328,7 @@ const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => {
   let paragraph: string[] = [];
   const flush = () => { const text = paragraph.join(' ').trim(); if (text) blocks.push({ type: 'paragraph', text }); paragraph = []; };
   for (const line of content.replace(/\r/g, '').split('\n')) {
-    const image = line.trim().match(/^!\[([^\]]*)\]\((\/knowledge\/media\/[A-Za-z0-9_-]+)\)$/);
+    const image = line.trim().match(/^!\[([^\]]*)\]\(((?:\/knowledge\/media\/[A-Za-z0-9_-]+)|(?:https?:\/\/[^\s)]+))\)$/i);
     if (image) { flush(); blocks.push({ type: 'image', text: image[1], url: image[2] }); continue; }
     if (!line.trim()) { flush(); continue; }
     const heading = line.trim().match(/^#{1,3}\s+(.+)$/);

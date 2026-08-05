@@ -102,6 +102,17 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void markdownExternalImagesAreIncludedInPreviewMetadata() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "External image markdown", "fileType", "md",
+                "content", "![Architecture](https://example.com/architecture.png)"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        var detail = controller.view(userAuth, Map.of("fileId", fileId));
+        assertEquals(List.of("https://example.com/architecture.png"), detail.data().get("imageUrls"));
+        assertEquals("https://example.com/architecture.png", detail.data().get("coverUrl"));
+    }
+
+    @Test
     void multipartTextFileIsStoredIndexedAndDownloadable() {
         var multipart = new org.springframework.mock.web.MockMultipartFile(
                 "file", "production-guide.md", "text/markdown", "# Production\nUse signed identities.".getBytes());
