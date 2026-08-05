@@ -63,14 +63,40 @@
           <el-input v-if="portal === 'client'" v-model="globalSearch" class="global-search" placeholder="搜索知识与内容" :prefix-icon="Search" clearable @keyup.enter="runGlobalSearch" />
           <el-button v-if="portal === 'admin' && activeView === 'moderation'" :icon="Setting" circle title="管理知识分类" @click="openCategoryManager" />
           <el-button v-if="portal === 'admin' && activeView === 'system'" :icon="Refresh" :loading="aiIndexBusy" title="从已审核知识重建 AI 索引" @click="rebuildAiIndex">重建知识索引</el-button>
-          <el-button :icon="Refresh" circle title="刷新当前数据" @click="refreshCurrentView" />
+          <el-button :icon="Refresh" circle title="刷新当前数据" @click="refreshVisiblePage" />
         </div>
       </header>
 
       <main class="content-area">
-        <div v-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
+        <div v-if="detailLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载详情...</span></div>
+        <div v-else-if="detailError" class="view-error"><el-icon><Warning /></el-icon><span>{{ detailError }}</span><el-button size="small" type="primary" @click="loadDetailRoute">重试</el-button></div>
+        <KnowledgeDetailPage
+          v-else-if="detailRoute?.kind === 'knowledge' && detailKnowledge"
+          :file="detailKnowledge"
+          :blocks="detailKnowledgeBlocks"
+          :pdf-preview-url="detailPdfPreviewUrl"
+          @back="leaveDetail"
+          @download="downloadDetailKnowledge"
+          @like="likeDetailKnowledge"
+          @collect="collectKnowledge"
+          @forward="forwardKnowledge"
+          @report="reportKnowledge"
+        />
+        <CommunityDetailPage
+          v-else-if="detailRoute?.kind === 'community' && detailPost"
+          :post="detailPost"
+          :comments="detailComments"
+          :users="communityDirectory"
+          :current-user-id="currentUserId"
+          @back="leaveDetail"
+          @like="likeDetailPost"
+          @collect="collectPost"
+          @edit="editPost"
+          @comment="createDetailComment"
+        />
+        <div v-else-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
         <div v-else-if="viewError" class="view-error"><el-icon><Warning /></el-icon><span>{{ viewError }}</span><el-button size="small" type="primary" @click="refreshCurrentView">重试</el-button></div>
-        <template v-if="!viewLoading && !viewError && portal === 'client'">
+        <template v-else-if="portal === 'client'">
           <section v-if="activeView === 'home'" class="page-stack">
             <div class="welcome-row">
               <div><p class="section-kicker">今日概览</p><h3>{{ greeting }}，{{ displayName }}</h3><p>继续探索知识、社区动态和你的 AI 对话。</p></div>
@@ -96,7 +122,7 @@
               <section class="surface">
                 <div class="surface-head"><div><h3>社区动态</h3><p>关注内容与最新讨论</p></div><el-button text type="primary" @click="selectView('community')">进入广场</el-button></div>
                 <div v-if="feedPosts.length" class="feed-mini">
-                  <article v-for="post in feedPosts.slice(0, 3)" :key="post.id"><div class="mini-avatar">{{ post.userId }}</div><div><strong>{{ post.title }}</strong><p>{{ post.content }}</p><small>用户 {{ post.userId }} · {{ post.likes || 0 }} 赞</small></div></article>
+                  <article v-for="post in feedPosts.slice(0, 3)" :key="post.id" class="feed-mini-link" @click="openPostDetail(post)"><div class="mini-avatar">{{ post.userId }}</div><div><strong>{{ post.title }}</strong><p>{{ post.content }}</p><small>用户 {{ post.userId }} · {{ post.likes || 0 }} 赞</small></div></article>
                 </div><el-empty v-else description="暂无社区动态" />
               </section>
             </div>
@@ -120,7 +146,7 @@
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || 'DOC' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
                   <h4>{{ file.title }}</h4><p>上传者 #{{ file.userId }} · 资源编号 {{ file.id }}</p>
                   <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
-                  <div class="card-actions"><el-button text type="primary" @click="viewKnowledge(file)">阅读</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">点赞</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">收藏</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+                  <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">点赞</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">收藏</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
                 </article>
               </div><el-empty v-else description="没有匹配的知识资源" />
             </section>
@@ -165,7 +191,7 @@
           </section>
         </template>
 
-        <template v-else-if="!viewLoading && !viewError">
+        <template v-else>
           <section v-if="activeView === 'dashboard'" class="page-stack">
             <div class="page-toolbar"><div><h3>平台运营概览</h3><p>内容、用户、互动和待办事项的实时摘要</p></div><el-button :icon="Refresh" @click="loadAdminDashboard">刷新数据</el-button></div>
             <div class="metrics-grid admin-metrics"><div v-for="metric in adminMetrics" :key="metric.label" class="metric-tile"><span :class="['metric-icon', metric.color]"><component :is="metric.icon" /></span><div><strong>{{ metric.value }}</strong><span>{{ metric.label }}</span><small>{{ metric.hint }}</small></div></div></div>
@@ -210,9 +236,7 @@
       <template #footer><el-button @click="readerDialog = false">关闭</el-button><template v-if="reviewingKnowledge && selectedKnowledge"><el-button type="danger" @click="auditKnowledge(selectedKnowledge, 'REJECTED')">驳回</el-button><el-button type="success" @click="auditKnowledge(selectedKnowledge, 'APPROVED')">通过审核</el-button></template><el-button v-else-if="selectedKnowledge?.fileUrl" type="primary" :icon="Download" @click="selectedKnowledge && downloadKnowledge(selectedKnowledge)">下载资料</el-button></template>
     </el-dialog>
     <el-dialog v-model="postReviewDialog" width="min(760px, 94vw)" top="5vh" destroy-on-close><template #header><div class="reader-header"><span class="file-type large">POST</span><div><h3>{{ selectedReviewPost?.title }}</h3><p>帖子 #{{ selectedReviewPost?.id }} · 用户 #{{ selectedReviewPost?.userId }} · {{ selectedReviewPost?.status }}</p></div></div></template><article class="knowledge-body">{{ selectedReviewPost?.content }}</article><div v-if="selectedReviewPost?.imageUrls?.length" class="post-images"><img v-for="image in selectedReviewPost.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="待审核帖子配图" /></div><template #footer><el-button @click="postReviewDialog = false">关闭</el-button><el-button v-if="selectedReviewPost" type="danger" @click="auditPost(selectedReviewPost, 'HIDDEN')">隐藏</el-button><el-button v-if="selectedReviewPost" type="success" @click="auditPost(selectedReviewPost, 'PUBLISHED')">发布</el-button></template></el-dialog>
-    <el-dialog v-model="postDetailDialog" width="min(760px, 94vw)" top="5vh" destroy-on-close><template #header><div class="reader-header"><span class="file-type large">POST</span><div><h3>{{ selectedPostDetail?.title }}</h3><p>{{ communityUser(selectedPostDetail?.userId || 0).nickname }} · 帖子 #{{ selectedPostDetail?.id }}</p></div></div></template><article class="knowledge-body post-detail-body">{{ selectedPostDetail?.content }}</article><div v-if="selectedPostDetail?.imageUrls?.length" class="post-images detail-images"><img v-for="image in selectedPostDetail.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div><section class="post-detail-comments"><h4>讨论 {{ selectedPostDetail?.comments?.length || 0 }}</h4><article v-for="comment in selectedPostDetail?.comments || []" :key="comment.id"><strong>{{ communityUser(comment.userId).nickname }}</strong><p>{{ comment.content }}</p></article><el-empty v-if="!selectedPostDetail?.comments?.length" description="暂无评论" /></section><template #footer><el-button @click="postDetailDialog = false">关闭</el-button><el-button v-if="selectedPostDetail?.userId === currentUserId" :icon="Edit" @click="selectedPostDetail && editPost(selectedPostDetail)">编辑帖子</el-button><el-button v-if="selectedPostDetail" type="primary" :icon="ChatDotRound" @click="selectedPostDetail && openComments(selectedPostDetail)">参与讨论</el-button></template></el-dialog>
     <el-dialog v-model="postDialog" :title="postDialogTitle" width="min(560px, 92vw)" destroy-on-close @closed="resetPostEditor"><el-form label-position="top"><el-form-item label="标题"><el-input v-model="postForm.title" /></el-form-item><el-form-item label="正文"><el-input v-model="postForm.content" type="textarea" :rows="6" /></el-form-item><el-form-item v-if="!editingDraftId" label="帖子配图"><el-upload list-type="picture-card" :auto-upload="false" :limit="9" accept="image/jpeg,image/png,image/gif,image/webp" :on-change="handlePostImages" :on-remove="handlePostImages"><Plus /></el-upload><div class="el-upload__tip">最多 9 张，支持 JPEG、PNG、GIF、WebP，单张不超过 10 MB；编辑时不重新选择将保留原图</div></el-form-item></el-form><template #footer><el-button @click="postDialog = false">取消</el-button><el-button v-if="!editingPostId" @click="saveDraft">{{ editingDraftId ? '保存草稿' : '存为草稿' }}</el-button><el-button type="primary" :loading="busy" @click="createPost">{{ editingPostId ? '保存修改' : editingDraftId ? '发布草稿' : '发布' }}</el-button></template></el-dialog>
-    <el-drawer v-model="commentDrawer" title="帖子讨论" size="min(460px, 92vw)"><div class="comment-post"><strong>{{ selectedPost?.title }}</strong><p>{{ selectedPost?.content }}</p></div><div class="comment-list"><article v-for="comment in comments" :key="comment.id"><div class="mini-avatar"><img v-if="communityUser(comment.userId).avatarUrl" :src="resolveApiUrl(communityUser(comment.userId).avatarUrl || '')" alt="头像" /><span v-else>{{ communityUser(comment.userId).nickname.slice(0, 1) }}</span></div><div><strong>{{ communityUser(comment.userId).nickname }}</strong><p>{{ comment.content }}</p></div></article><el-empty v-if="!comments.length" description="暂无评论" /></div><div class="drawer-compose"><el-input v-model="commentText" placeholder="发表公开评论" /><el-button type="primary" @click="createComment">发送</el-button></div></el-drawer>
     <el-dialog v-model="feedbackDialog" title="提交反馈" width="min(480px, 92vw)"><el-form label-position="top"><el-form-item label="反馈类型"><el-select v-model="feedbackForm.type"><el-option label="系统问题" value="BUG" /><el-option label="产品建议" value="SUGGESTION" /><el-option label="客服咨询" value="SUPPORT" /></el-select></el-form-item><el-form-item label="问题描述"><el-input v-model="feedbackForm.content" type="textarea" :rows="5" /></el-form-item></el-form><template #footer><el-button @click="feedbackDialog = false">取消</el-button><el-button type="primary" @click="createTicket">提交</el-button></template></el-dialog>
     <el-dialog v-model="conversationDialog" title="发起私信" width="min(460px, 92vw)"><el-form label-position="top"><el-form-item label="选择联系人"><el-select v-model="conversationTargetId" filterable placeholder="输入昵称或用户名"><el-option v-for="user in directoryUsers" :key="user.id" :label="`${user.nickname} (@${user.username})`" :value="user.id" /></el-select></el-form-item></el-form><template #footer><el-button @click="conversationDialog = false">取消</el-button><el-button type="primary" :disabled="!conversationTargetId" @click="createConversation">开始聊天</el-button></template></el-dialog>
     <el-dialog v-model="ticketDialog" title="处理反馈工单" width="min(500px, 92vw)"><el-form label-position="top"><el-form-item label="处理状态"><el-select v-model="ticketReply.status"><el-option label="处理中" value="PROCESSING" /><el-option label="已解决" value="RESOLVED" /></el-select></el-form-item><el-form-item label="官方回复"><el-input v-model="ticketReply.reply" type="textarea" :rows="5" /></el-form-item></el-form><template #footer><el-button @click="ticketDialog = false">取消</el-button><el-button type="primary" @click="replyTicket">保存回复</el-button></template></el-dialog>
@@ -234,12 +258,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw, onMounted, ref } from 'vue';
+import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { UploadFile, UploadRawFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
+import CommunityDetailPage from './components/CommunityDetailPage.vue';
+import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number };
 type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
@@ -260,6 +286,7 @@ type AiChunk = { id:number; file_id:number; title:string; content:string; create
 type AiReference = { id:number; file_id:number; title:string; content:string; score?:number };
 type AiMessageView = { role:'user'|'assistant'; content:string; references?:AiReference[] };
 type NavigationItem = { key:string; label:string; icon:ReturnType<typeof markRaw>; badge?:number };
+type DetailRoute = { kind:'knowledge'|'community'; id:number };
 
 const authenticated = ref(Boolean(getAuthToken()));
 const busy = ref(false); const aiBusy = ref(false); const aiIndexBusy = ref(false); const mobileMenuOpen = ref(false); const sidebarCollapsed = ref(false);
@@ -274,7 +301,7 @@ const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeT
 const viewLoading = ref(false); const viewError = ref('');
 const feedMode = ref<'all'|'following'|'mine'>('all'); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
 const profileToolTab = ref('activity');
-const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postDetailDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false);
+const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false);
 
 const loginForm = ref({ username:'demo', password:'demo' });
 const registerForm = ref({ username:'', nickname:'', password:'' });
@@ -304,10 +331,13 @@ const adminOverview = ref<Record<string, Record<string, unknown>>>({}); const ai
 const followData = ref<{ followedUserIds?:number[]; followerUserIds?:number[] }>({});
 const directoryUsers = ref<UserRecord[]>([]); const systemHealth = ref<Record<string,boolean>>({});
 const aiQuestion = ref(''); const aiMessages = ref<AiMessageView[]>([]); const aiSessions = ref<AiSession[]>([]); const aiSessionId = ref<number>();
-const selectedPost = ref<Post>(); const comments = ref<Comment[]>([]); const commentText = ref('');
-const selectedPostDetail = ref<Post>(); const editingPostId = ref(0); const editingDraftId = ref(0);
+const editingPostId = ref(0); const editingDraftId = ref(0);
 const selectedKnowledge = ref<KnowledgeFile>();
 const pdfPreviewUrl = ref('');
+const detailRoute = ref<DetailRoute>();
+const detailLoading = ref(false); const detailError = ref('');
+const detailKnowledge = ref<KnowledgeFile>(); const detailKnowledgeBlocks = ref<KnowledgeContentBlock[]>([]); const detailPdfPreviewUrl = ref('');
+const detailPost = ref<Post>(); const detailComments = ref<Comment[]>([]);
 const selectedReviewPost = ref<Post>(); const reviewingKnowledge = ref(false);
 const governancePreviewDialog = ref(false); const governancePreviewKind = ref('内容预览'); const governancePreviewTitle = ref(''); const governancePreviewContent = ref('');
 const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
@@ -318,7 +348,7 @@ const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigat
   .filter(item => platformConfig.value.community_enabled || item.key !== 'community')
   .filter(item => platformConfig.value.notifications_enabled || item.key !== 'notifications')
   .map(item => item.key === 'notifications' ? {...item,badge:notifications.value.filter(notice=>!notice.read).length || 0} : item));
-const currentTitle = computed(() => currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
+const currentTitle = computed(() => detailKnowledge.value?.title || detailPost.value?.title || currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
 const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
 const filteredAdminUsers = computed(() => adminUsers.value.filter(user => `${user.username}${user.nickname}`.toLowerCase().includes(adminUserKeyword.value.toLowerCase())));
@@ -327,8 +357,10 @@ const healthItems = computed(() => [{label:'网关与用户服务',ok:systemHeal
 const currentMessageSession = computed(() => sessions.value.find(session => session.id === messageForm.value.sessionId));
 const currentMessagePartner = computed(() => currentMessageSession.value ? sessionPartner(currentMessageSession.value) : undefined);
 const postDialogTitle = computed(() => editingPostId.value ? '编辑社区帖子' : editingDraftId.value ? '编辑草稿' : '发布社区帖子');
-const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => {
-  const content = selectedKnowledge.value?.content || '';
+const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUserId.value), ...directoryUsers.value.filter(user => user.id !== currentUserId.value)]);
+
+function parseKnowledgeContent(file?:KnowledgeFile):KnowledgeContentBlock[] {
+  const content = file?.content || '';
   if (!content.trim()) return [];
   const blocks: KnowledgeContentBlock[] = [];
   let paragraph: string[] = [];
@@ -344,7 +376,8 @@ const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => {
   }
   flush();
   return blocks;
-});
+}
+const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => parseKnowledgeContent(selectedKnowledge.value));
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
 function categoryCount(categoryId:number){ return knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length; }
@@ -368,28 +401,62 @@ async function registerAccount(){
   finally{ busy.value=false; }
 }
 
-async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await loadPublicConfig(); await refreshCurrentView(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
+async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await loadPublicConfig(); await refreshCurrentView(); await loadDetailRoute(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
-async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();}catch{logout();}}
+async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value=await getData('/ai/config/public');}catch{platformConfig.value={max_upload_mb:25,notifications_enabled:true,community_enabled:true};}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
-function switchPortal(value:'client'|'admin'){ portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
-function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;openNotifications();return;} activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
+function resetDetailState(){detailRoute.value=undefined;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;detailComments.value=[];if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
+function returnToRoot(){if(window.location.pathname!=='/')window.history.pushState({},'', '/');resetDetailState();}
+function switchPortal(value:'client'|'admin'){ returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
+function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;openNotifications();return;} returnToRoot();activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
 async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=error instanceof Error?error.message:'页面加载失败，请重试'; notifyError(error); } finally { viewLoading.value=false; } }
-async function runGlobalSearch(){ activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
+async function refreshVisiblePage(){if(detailRoute.value)await loadDetailRoute();else await refreshCurrentView();}
+async function runGlobalSearch(){ returnToRoot();portal.value='client';activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
+
+function parseDetailPath(path=window.location.pathname):DetailRoute|undefined {
+  const match=path.match(/^\/(knowledge|community)\/(\d+)\/?$/);
+  if(!match)return undefined;
+  const id=Number(match[2]);
+  return Number.isSafeInteger(id)&&id>0?{kind:match[1] as DetailRoute['kind'],id}:undefined;
+}
+async function loadDetailRoute(){
+  const route=parseDetailPath();
+  if(!route){resetDetailState();return;}
+  detailRoute.value=route;detailLoading.value=true;detailError.value='';portal.value='client';activeView.value=route.kind;
+  try{
+    if(route.kind==='knowledge'){
+      const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:route.id});
+      detailKnowledge.value=detail;detailKnowledgeBlocks.value=parseKnowledgeContent(detail);detailPost.value=undefined;detailComments.value=[];
+      if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}
+      if(detail.fileType?.toLowerCase()==='pdf'&&detail.fileUrl){const blob=await downloadData(`/knowledge/file/${detail.id}`);detailPdfPreviewUrl.value=URL.createObjectURL(blob);}
+      await recordBehavior('VIEW','KNOWLEDGE',detail.id);
+    }else{
+      const [post,commentsResult,directory]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<Comment[]>(`/comment/list?postId=${route.id}`),getData<UserRecord[]>('/user/directory')]);
+      detailPost.value=post;detailComments.value=commentsResult;directoryUsers.value=directory.filter(user=>user.id!==currentUserId.value);detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];
+    }
+    window.scrollTo({top:0,behavior:'auto'});
+  }catch(error){detailError.value=error instanceof Error?error.message:'详情加载失败，请重试';}
+  finally{detailLoading.value=false;}
+}
+function navigateToDetail(kind:DetailRoute['kind'],id:number){const path=`/${kind}/${id}`;if(window.location.pathname!==path)window.history.pushState({kind,id},'',path);void loadDetailRoute();}
+function leaveDetail(){const destination=detailRoute.value?.kind||'home';returnToRoot();portal.value='client';activeView.value=destination;void refreshCurrentView();window.scrollTo({top:0,behavior:'auto'});}
+function handlePopState(){const route=parseDetailPath();if(route)void loadDetailRoute();else{resetDetailState();void refreshCurrentView();}}
 
 async function loadKnowledge(){ const [files,categories]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories')]); knowledgeFiles.value=files; knowledgeCategories.value=categories; }
 async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; }
 function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformConfig.value.max_upload_mb*1024*1024){selectedKnowledgeFile.value=undefined;ElMessage.error(`文件不能超过 ${platformConfig.value.max_upload_mb} MB`);return;}selectedKnowledgeFile.value=file.raw;if(file.raw&&!knowledgeForm.value.title)knowledgeForm.value.title=file.name.replace(/\.[^.]+$/,'');}
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
 async function uploadKnowledge(){if(!selectedKnowledgeFile.value&&!knowledgeForm.value.content.trim()){ElMessage.warning('请选择文件或填写文本正文');return;}busy.value=true;try{if(selectedKnowledgeFile.value){const form=new FormData();form.append('file',selectedKnowledgeFile.value);form.append('title',knowledgeForm.value.title);if(knowledgeForm.value.categoryId)form.append('categoryId',String(knowledgeForm.value.categoryId));await postFormData('/knowledge/file/upload',form);}else{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title});await postData('/knowledge/upload',{title:knowledgeForm.value.title||knowledgeForm.value.filename,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content,categoryId:knowledgeForm.value.categoryId||null});}knowledgeDialog.value=false;selectedKnowledgeFile.value=undefined;knowledgeForm.value.title='';knowledgeForm.value.content='';knowledgeForm.value.categoryId=0;await loadKnowledge();ElMessage.success('资料已保存并完成正文索引，等待管理员审核');}catch(error){notifyError(error);}finally{busy.value=false;}}
-function openKnowledge(file:KnowledgeFile){ activeView.value='knowledge'; viewKnowledge(file); }
+function openKnowledge(file:KnowledgeFile){navigateToDetail('knowledge',file.id);}
 async function prepareKnowledgePreview(file:KnowledgeFile){if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}if(file.fileType?.toLowerCase()==='pdf'&&file.fileUrl){const blob=await downloadData(`/knowledge/file/${file.id}`);pdfPreviewUrl.value=URL.createObjectURL(blob);}}
 async function viewKnowledge(file:KnowledgeFile){ reviewingKnowledge.value=false;const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:file.id});selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);readerDialog.value=true;await recordBehavior('VIEW','KNOWLEDGE',file.id);await loadKnowledge(); }
 async function reviewKnowledge(file:KnowledgeFile){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);reviewingKnowledge.value=true;readerDialog.value=true;}
 function reviewPost(post:Post){selectedReviewPost.value=post;postReviewDialog.value=true;}
 async function downloadKnowledge(file:KnowledgeFile){try{const blob=await downloadData(`/knowledge/file/${file.id}`);const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`${file.title}.${file.fileType||'bin'}`;anchor.click();URL.revokeObjectURL(url);await recordBehavior('DOWNLOAD','KNOWLEDGE',file.id);await loadKnowledge();}catch(error){notifyError(error);}}
+async function downloadDetailKnowledge(file:KnowledgeFile){await downloadKnowledge(file);if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,downloads:(detailKnowledge.value.downloads||0)+1};}
 async function likeKnowledge(file:KnowledgeFile){ await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id}); await recordBehavior('LIKE','KNOWLEDGE',file.id); ElMessage.success('已点赞'); await loadKnowledge(); }
+async function likeDetailKnowledge(file:KnowledgeFile){await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id});await recordBehavior('LIKE','KNOWLEDGE',file.id);if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,likes:(detailKnowledge.value.likes||0)+1};ElMessage.success('已点赞');}
 async function collectKnowledge(file:KnowledgeFile){ await postData('/knowledge/collect',{userId:currentUserId.value,fileId:file.id}); ElMessage.success('已收藏'); }
 async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/forward',{fileId:file.id});ElMessage.success('已记录转发');await loadMyKnowledge();}
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
@@ -397,22 +464,23 @@ async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessag
 async function loadFeed(mode:'all'|'following'|'mine'=feedMode.value){ if(mode==='mine'){await loadMyPosts();return;} feedMode.value=mode; const directoryPromise=getData<UserRecord[]>('/user/directory'); if(mode==='following'){const relations=await getData<{followedUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`); feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);}else feedPosts.value=await getData('/square/feed');directoryUsers.value=(await directoryPromise).filter(user=>user.id!==currentUserId.value); }
 function communityUser(userId:number):UserRecord{return directoryUsers.value.find(user=>user.id===userId)||(userId===currentUserId.value?{id:userId,username:username.value,nickname:displayName.value,avatarUrl:avatarUrl.value,status:'ACTIVE',role:role.value}:{id:userId,username:`user${userId}`,nickname:`用户 ${userId}`,status:'ACTIVE',role:'USER'});}
 function handlePostImages(_file:UploadFile, files:UploadFile[]){selectedPostImages.value=files.map(file=>file.raw).filter((file):file is UploadRawFile=>Boolean(file));}
-async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.content.trim()){ElMessage.warning('请填写标题和正文');return;} busy.value=true;try{let imageUrls:string[]|undefined;if(selectedPostImages.value.length){const form=new FormData();selectedPostImages.value.forEach(file=>form.append('files',file));const uploaded=await postFormData<{imageUrls:string[]}>('/post/media/upload',form);imageUrls=uploaded.imageUrls;}if(editingPostId.value){await putData('/post/update',{id:editingPostId.value,title:postForm.value.title,content:postForm.value.content,...(imageUrls?{imageUrls}:{})});}else if(editingDraftId.value){await postData('/post/draft/publish',{id:editingDraftId.value,title:postForm.value.title,content:postForm.value.content});}else{await postData('/post/create',{...postForm.value,imageUrls:imageUrls||[]});}postDialog.value=false;await loadDrafts();await loadFeed(editingPostId.value||feedMode.value==='mine'?'mine':'all');ElMessage.success(editingPostId.value?'帖子已更新':'帖子已发布');}catch(error){notifyError(error);}finally{busy.value=false;} }
+async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.content.trim()){ElMessage.warning('请填写标题和正文');return;} const wasEditing=Boolean(editingPostId.value);busy.value=true;try{let imageUrls:string[]|undefined;if(selectedPostImages.value.length){const form=new FormData();selectedPostImages.value.forEach(file=>form.append('files',file));const uploaded=await postFormData<{imageUrls:string[]}>('/post/media/upload',form);imageUrls=uploaded.imageUrls;}if(editingPostId.value){await putData('/post/update',{id:editingPostId.value,title:postForm.value.title,content:postForm.value.content,...(imageUrls?{imageUrls}:{})});}else if(editingDraftId.value){await postData('/post/draft/publish',{id:editingDraftId.value,title:postForm.value.title,content:postForm.value.content});}else{await postData('/post/create',{...postForm.value,imageUrls:imageUrls||[]});}postDialog.value=false;await loadDrafts();await loadFeed(wasEditing||feedMode.value==='mine'?'mine':'all');if(detailRoute.value?.kind==='community')await loadDetailRoute();ElMessage.success(wasEditing?'帖子已更新':'帖子已发布');}catch(error){notifyError(error);}finally{busy.value=false;} }
 async function saveDraft(){if(!postForm.value.title.trim()&&!postForm.value.content.trim()){ElMessage.warning('请至少填写标题或正文');return;}if(editingDraftId.value)await putData('/post/draft',{id:editingDraftId.value,title:postForm.value.title||'未命名草稿',content:postForm.value.content});else await postData('/post/draft',{title:postForm.value.title||'未命名草稿',content:postForm.value.content});postDialog.value=false;await loadDrafts();ElMessage.success('草稿已保存'); }
 async function loadDrafts(){ drafts.value=await getData(`/post/drafts?userId=${currentUserId.value}`); }
 async function loadMyKnowledge(){myKnowledge.value=await getData<KnowledgeFile[]>(`/knowledge/mine?type=${knowledgeActivityType.value}`);}
 async function openDrafts(){activeView.value='profile';profileToolTab.value='drafts';await loadProfile();}
 async function loadMyPosts(){feedMode.value='mine';feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`);}
 function resetPostEditor(){editingPostId.value=0;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:'',content:''};selectedPostImages.value=[];}
-function editPost(post:Post){editingPostId.value=post.id;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:post.title,content:post.content};selectedPostImages.value=[];postDetailDialog.value=false;postDialog.value=true;}
+function editPost(post:Post){editingPostId.value=post.id;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:post.title,content:post.content};selectedPostImages.value=[];postDialog.value=true;}
 function editDraft(draft:Draft){editingDraftId.value=draft.id;editingPostId.value=0;postForm.value={userId:currentUserId.value,title:draft.title,content:draft.content};selectedPostImages.value=[];postDialog.value=true;}
 async function publishDraft(draft:Draft){await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});await postData('/post/draft/publish',{id:draft.id});await loadDrafts();ElMessage.success('草稿已发布');}
 async function deleteDraft(draft:Draft){await ElMessageBox.confirm(`确认删除草稿“${draft.title}”？`,'删除草稿',{type:'warning'});await deleteData('/post/draft',{draftId:draft.id});await loadDrafts();ElMessage.success('草稿已删除');}
-async function openPostDetail(post:Post){selectedPostDetail.value=await getData<Post>(`/post/detail?id=${post.id}`);postDetailDialog.value=true;}
+function openPostDetail(post:Post){navigateToDetail('community',post.id);}
 async function likePost(post:Post){ await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);await loadFeed(); }
+async function likeDetailPost(post:Post){await postData('/post/like',{userId:currentUserId.value,postId:post.id});await recordBehavior('LIKE','POST',post.id);if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:(detailPost.value.likes||0)+1};}
 async function collectPost(post:Post){ await postData('/square/collect',{userId:currentUserId.value,postId:post.id});ElMessage.success('已收藏帖子'); }
-async function openComments(post:Post){ selectedPost.value=post;comments.value=await getData(`/comment/list?postId=${post.id}`);postDetailDialog.value=false;commentDrawer.value=true; }
-async function createComment(){ if(!commentText.value.trim()||!selectedPost.value)return;await postData('/comment/create',{postId:selectedPost.value.id,userId:currentUserId.value,content:commentText.value});commentText.value='';await openComments(selectedPost.value);ElMessage.success('评论已发布'); }
+function openComments(post:Post){navigateToDetail('community',post.id);}
+async function createDetailComment(content:string){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,userId:currentUserId.value,content});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已发布');}
 
 async function loadMessageData(){const [chatSessions,notices,directory]=await Promise.all([getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`),getData<UserRecord[]>('/user/directory')]);sessions.value=chatSessions;notifications.value=notices;directoryUsers.value=directory.filter(user=>user.id!==currentUserId.value);if(sessions.value.length&&!sessions.value.some(session=>session.id===messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0].id;if(!sessions.value.length)messageForm.value.sessionId=0;await loadMessages();}
 async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
@@ -428,7 +496,7 @@ async function clearCurrentSession(){await ElMessageBox.confirm('确认清空当
 async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});await loadMessageData();ElMessage.success('消息已删除');}
 
 async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string;references:AiReference[]}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;const references=[...new Map((result.references||[]).map(reference=>[reference.file_id,reference])).values()].slice(0,3);aiMessages.value.push({role:'assistant',content:result.answer,references});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}
-async function openAiReference(reference:AiReference){const files=await getData<KnowledgeFile[]>('/knowledge/list');const file=files.find(item=>item.id===reference.file_id);if(!file){ElMessage.warning('该知识来源当前不可访问');return;}await viewKnowledge(file);}
+async function openAiReference(reference:AiReference){const files=await getData<KnowledgeFile[]>('/knowledge/list');const file=files.find(item=>item.id===reference.file_id);if(!file){ElMessage.warning('该知识来源当前不可访问');return;}openKnowledge(file);}
 async function loadAiHistory(){const history=await getData<{sessions:AiSession[]}> (`/ai/history?user_id=${currentUserId.value}`);aiSessions.value=history.sessions;}
 async function loadAiSession(id:number){aiSessionId.value=id;const history=await getData<{messages:{role:'user'|'assistant';content:string}[]}>(`/ai/history?user_id=${currentUserId.value}&session_id=${id}`);aiMessages.value=history.messages;}
 
@@ -472,5 +540,6 @@ async function loadSystemAdmin(){const [overview,events]=await Promise.all([getD
 async function saveAiConfig(){await postData('/ai/admin/config',aiConfig.value);ElMessage.success('AI 配置已保存');await loadSystemAdmin();}
 async function rebuildAiIndex(){aiIndexBusy.value=true;try{const files=(await getData<KnowledgeFile[]>('/knowledge/list?includeAll=true')).filter(file=>file.auditStatus==='APPROVED');const documents:{file_id:number;title:string;text:string}[]=[];for(const file of files){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);if(detail.content?.trim())documents.push({file_id:file.id,title:detail.title,text:detail.content});}const result=await postData<{documents:number;chunks:number}>('/ai/admin/index/rebuild',{documents});await loadSystemAdmin();ElMessage.success(`已重建 ${result.documents} 个文档、${result.chunks} 个知识切片`);}catch(error){notifyError(error);}finally{aiIndexBusy.value=false;}}
 
-onMounted(async()=>{syncUserForms();if(authenticated.value)await restoreSession();});
+onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);if(authenticated.value)await restoreSession();});
+onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
 </script>
