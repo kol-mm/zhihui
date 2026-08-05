@@ -24,6 +24,10 @@ public interface CommunityStore {
 
     PostDraftEntity saveDraft(PostDraftEntity draft);
 
+    PostDraftEntity updateDraft(PostDraftEntity draft);
+
+    Optional<PostDraftEntity> findDraft(Long id);
+
     List<PostDraftEntity> listDrafts(Long userId);
 
     PostCollectEntity collectPost(PostCollectEntity collect);

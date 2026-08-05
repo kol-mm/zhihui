@@ -100,6 +100,33 @@ class CommunityControllerTest {
     }
 
     @Test
+    void ownerCanEditPublishAndDeleteDrafts() {
+        var editable = controller.saveDraft(userAuth, Map.of("title", "First", "content", "Draft body"));
+        Long editableId = ((Number) editable.data().get("id")).longValue();
+        var updated = controller.updateDraft(userAuth, Map.of("id", editableId, "title", "Updated", "content", "Ready"));
+        assertEquals(0, updated.code());
+        assertEquals("Updated", updated.data().get("title"));
+
+        var published = controller.publishDraft(userAuth, Map.of("id", editableId, "title", "Published"));
+        assertEquals(0, published.code());
+        assertEquals("Published", published.data().get("title"));
+        assertFalse(controller.drafts(userAuth, 1L).data().stream().anyMatch(item -> editableId.equals(item.get("id"))));
+
+        var removable = controller.saveDraft(userAuth, Map.of("title", "Remove", "content", "Later"));
+        Long removableId = ((Number) removable.data().get("id")).longValue();
+        assertEquals(0, controller.removeOwnDraft(userAuth, Map.of("draftId", removableId)).code());
+    }
+
+    @Test
+    void anotherUserCannotManageDraft() {
+        var draft = controller.saveDraft(userAuth, Map.of("title", "Private", "content", "Owner only"));
+        Long draftId = ((Number) draft.data().get("id")).longValue();
+        assertEquals(500, controller.updateDraft(secondUserAuth, Map.of("id", draftId, "title", "Denied")).code());
+        assertEquals(500, controller.publishDraft(secondUserAuth, Map.of("id", draftId)).code());
+        assertEquals(500, controller.removeOwnDraft(secondUserAuth, Map.of("draftId", draftId)).code());
+    }
+
+    @Test
     void squareQuickCommentUsesSquareSource() {
         ApiResponse<Map<String, Object>> comment = controller.quickComment(userAuth, Map.of(
                 "postId", 1L,

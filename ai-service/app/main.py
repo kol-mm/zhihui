@@ -38,6 +38,10 @@ class TextRequest(BaseModel):
     title: str | None = None
 
 
+class RebuildIndexRequest(BaseModel):
+    documents: list[TextRequest] = Field(default_factory=list, max_length=1000)
+
+
 class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
     user_id: int | None = None
@@ -459,31 +463,37 @@ def public_config() -> ApiResponse:
 def parse_document(request: TextRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_user(authorization)
     init_db()
+    with connect() as conn:
+        created = index_document(conn, request)
+    return ApiResponse(data={"chunks": created, "count": len(created)})
+
+
+def index_document(conn: sqlite3.Connection, request: TextRequest) -> list[dict[str, Any]]:
     chunks = split_text(request.text)
     title = request.title or "本地解析文档"
     created_at = now_iso()
     created: list[dict[str, Any]] = []
-
-    with connect() as conn:
-        for chunk in chunks:
-            cursor = conn.execute(
-                """
-                INSERT INTO knowledge_chunk(file_id, title, content, embedding, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (request.file_id or 0, title, chunk, json.dumps(build_embedding(chunk)), created_at),
-            )
-            created.append(
-                {
-                    "id": int(cursor.lastrowid),
-                    "file_id": request.file_id or 0,
-                    "title": title,
-                    "content": chunk,
-                    "created_at": created_at,
-                }
-            )
-
-    return ApiResponse(data={"chunks": created, "count": len(created)})
+    file_id = request.file_id or 0
+    if request.file_id is not None:
+        conn.execute("DELETE FROM knowledge_chunk WHERE file_id = ?", (file_id,))
+    for chunk in chunks:
+        cursor = conn.execute(
+            """
+            INSERT INTO knowledge_chunk(file_id, title, content, embedding, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (file_id, title, chunk, json.dumps(build_embedding(chunk)), created_at),
+        )
+        created.append(
+            {
+                "id": int(cursor.lastrowid),
+                "file_id": file_id,
+                "title": title,
+                "content": chunk,
+                "created_at": created_at,
+            }
+        )
+    return created
 
 
 @app.post("/ai/embedding", response_model=ApiResponse)
@@ -559,6 +569,27 @@ def admin_chunks(authorization: str | None = Header(default=None)) -> ApiRespons
     with connect() as conn:
         rows = conn.execute("SELECT id, file_id, title, content, created_at FROM knowledge_chunk ORDER BY id DESC LIMIT 200").fetchall()
     return ApiResponse(data={"chunks": [row_to_dict(row) for row in rows]})
+
+
+@app.post("/ai/admin/index/rebuild", response_model=ApiResponse)
+def rebuild_index(request: RebuildIndexRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_admin(authorization)
+    init_db()
+    created: list[dict[str, Any]] = []
+    with connect() as conn:
+        conn.execute("DELETE FROM knowledge_chunk")
+        for document in request.documents:
+            created.extend(index_document(conn, document))
+    return ApiResponse(data={"documents": len(request.documents), "chunks": len(created)})
+
+
+@app.delete("/ai/admin/index/file/{file_id}", response_model=ApiResponse)
+def remove_indexed_file(file_id: int, authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_admin(authorization)
+    init_db()
+    with connect() as conn:
+        cursor = conn.execute("DELETE FROM knowledge_chunk WHERE file_id = ?", (file_id,))
+    return ApiResponse(data={"file_id": file_id, "removed_chunks": cursor.rowcount})
 
 
 @app.post("/ai/admin/config", response_model=ApiResponse)

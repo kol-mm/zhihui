@@ -104,6 +104,30 @@ class AiServicePersistenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.main.AiConfigRequest(temperature=1.1)
 
+    def test_reindex_replaces_old_file_chunks(self) -> None:
+        first = self.main.parse_document(
+            self.main.TextRequest(file_id=8, title="Old", text="first line\nsecond line"),
+            authorization=self.user_auth,
+        )
+        self.assertEqual(first.data["count"], 2)
+        second = self.main.parse_document(
+            self.main.TextRequest(file_id=8, title="New", text="replacement"),
+            authorization=self.user_auth,
+        )
+        self.assertEqual(second.data["count"], 1)
+        self.assertEqual(self.main.vector_status().data["indexed_chunks"], 1)
+
+    def test_admin_can_rebuild_and_remove_index(self) -> None:
+        auth = self.issue_token("admin", 2, "ADMIN")
+        rebuilt = self.main.rebuild_index(self.main.RebuildIndexRequest(documents=[
+            self.main.TextRequest(file_id=10, title="One", text="knowledge one"),
+            self.main.TextRequest(file_id=11, title="Two", text="knowledge two"),
+        ]), authorization=auth)
+        self.assertEqual(rebuilt.data["documents"], 2)
+        self.assertEqual(rebuilt.data["chunks"], 2)
+        removed = self.main.remove_indexed_file(10, authorization=auth)
+        self.assertEqual(removed.data["removed_chunks"], 1)
+
     def test_openai_compatible_provider_uses_chat_completions(self) -> None:
         class FakeResponse:
             def __enter__(self):

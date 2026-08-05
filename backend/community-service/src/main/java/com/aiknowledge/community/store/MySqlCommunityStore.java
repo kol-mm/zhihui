@@ -93,6 +93,18 @@ public class MySqlCommunityStore implements CommunityStore {
     }
 
     @Override
+    public PostDraftEntity updateDraft(PostDraftEntity draft) {
+        draft.setUpdatedAt(LocalDateTime.now());
+        draftMapper.updateById(draft);
+        return draft;
+    }
+
+    @Override
+    public Optional<PostDraftEntity> findDraft(Long id) {
+        return Optional.ofNullable(draftMapper.selectById(id));
+    }
+
+    @Override
     public List<PostDraftEntity> listDrafts(Long userId) {
         return draftMapper.selectList(Wrappers.<PostDraftEntity>lambdaQuery()
                 .eq(userId != null, PostDraftEntity::getUserId, userId)

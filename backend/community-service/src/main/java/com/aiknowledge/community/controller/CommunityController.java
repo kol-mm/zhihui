@@ -179,6 +179,51 @@ public class CommunityController {
         return ApiResponse.ok(toDraftView(communityStore.saveDraft(draft)));
     }
 
+    @PutMapping("/post/draft")
+    public ApiResponse<Map<String, Object>> updateDraft(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long draftId = number(request.get("id"), 0L);
+        PostDraftEntity existing = communityStore.findDraft(draftId).orElse(null);
+        if (existing == null) return ApiResponse.fail("draft not found");
+        if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this draft is denied");
+        existing.setTitle(String.valueOf(request.getOrDefault("title", existing.getTitle())));
+        existing.setContent(String.valueOf(request.getOrDefault("content", existing.getContent())));
+        return ApiResponse.ok(toDraftView(communityStore.updateDraft(existing)));
+    }
+
+    @PostMapping("/post/draft/publish")
+    public ApiResponse<Map<String, Object>> publishDraft(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long draftId = number(request.get("id"), 0L);
+        PostDraftEntity draft = communityStore.findDraft(draftId).orElse(null);
+        if (draft == null) return ApiResponse.fail("draft not found");
+        if (!LocalAuth.canAccessUser(authorization, draft.getUserId())) return ApiResponse.fail("access to this draft is denied");
+        PostEntity post = new PostEntity();
+        post.setUserId(draft.getUserId());
+        post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
+        post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
+        post.setStatus("PUBLISHED");
+        PostEntity saved = communityStore.savePost(post);
+        communityStore.removeDraft(draftId);
+        return ApiResponse.ok(toPostView(saved));
+    }
+
+    @DeleteMapping("/post/draft")
+    public ApiResponse<Map<String, Object>> removeOwnDraft(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long draftId = number(request.get("draftId"), 0L);
+        PostDraftEntity draft = communityStore.findDraft(draftId).orElse(null);
+        if (draft == null) return ApiResponse.fail("draft not found");
+        if (!LocalAuth.canAccessUser(authorization, draft.getUserId())) return ApiResponse.fail("access to this draft is denied");
+        return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
+    }
+
     @GetMapping("/post/drafts")
     public ApiResponse<List<Map<String, Object>>> drafts(
             @RequestHeader(name = "Authorization", required = false) String authorization,

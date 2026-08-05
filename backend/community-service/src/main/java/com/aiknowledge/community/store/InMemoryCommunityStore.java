@@ -133,6 +133,21 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
+    public PostDraftEntity updateDraft(PostDraftEntity draft) {
+        PostDraftEntity existing = findDraft(draft.getId()).orElseThrow();
+        existing.setTitle(draft.getTitle());
+        existing.setContent(draft.getContent());
+        existing.setUpdatedAt(LocalDateTime.now());
+        persist();
+        return existing;
+    }
+
+    @Override
+    public Optional<PostDraftEntity> findDraft(Long id) {
+        return drafts.stream().filter(draft -> draft.getId().equals(id)).findFirst();
+    }
+
+    @Override
     public List<PostDraftEntity> listDrafts(Long userId) {
         return drafts.stream()
                 .filter(draft -> userId == null || draft.getUserId().equals(userId))

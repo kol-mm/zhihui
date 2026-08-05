@@ -5,6 +5,13 @@ $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $Requirements = Join-Path $PSScriptRoot "requirements.txt"
 $RequirementsMarker = Join-Path $Venv ".requirements.sha256"
 
+if ([string]::IsNullOrWhiteSpace([string]$env:AI_KNOWLEDGE_JWT_SECRET)) {
+    $sharedSecret = Join-Path (Split-Path $PSScriptRoot -Parent) ".local-secrets\jwt-secret.txt"
+    if (Test-Path -LiteralPath $sharedSecret) {
+        $env:AI_KNOWLEDGE_JWT_SECRET = [System.IO.File]::ReadAllText($sharedSecret).Trim()
+    }
+}
+
 function Assert-NativeSuccess {
     param([string]$Step)
     if ($LASTEXITCODE -ne 0) { throw "$Step failed with exit code $LASTEXITCODE." }
