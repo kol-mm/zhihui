@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 @RequestMapping("/knowledge")
 public class KnowledgeController {
     private static final Pattern IMAGE_MARKUP = Pattern.compile("!\\[([^]]*)]\\(((?:/knowledge/media/[A-Za-z0-9_-]+)|(?:https?://[^\\s)]+))\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MARKDOWN_IMAGE_REFERENCE = Pattern.compile("!\\[[^]]*]\\([^)]*\\)");
 
     private final KnowledgeStore knowledgeStore;
     private final LocalFileStorageService fileStorage;
@@ -88,7 +89,11 @@ public class KnowledgeController {
         try {
             byte[] bytes = multipartFile.getBytes();
             String fileType = textExtractor.extension(filename);
-            String content = appendImages(textExtractor.extract(filename, bytes).trim(), imageUrls);
+            String extractedContent = textExtractor.extract(filename, bytes).trim();
+            if (isMarkdown(filename) && MARKDOWN_IMAGE_REFERENCE.matcher(extractedContent).find()) {
+                return ApiResponse.fail("Markdown 文件不能包含图片，请使用图片上传控件添加图片");
+            }
+            String content = appendImages(extractedContent, imageUrls);
             Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
             KnowledgeFileEntity file = new KnowledgeFileEntity();
             file.setUserId(userId);
@@ -189,7 +194,12 @@ public class KnowledgeController {
     ) {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String filename = String.valueOf(request.getOrDefault("filename", request.getOrDefault("title", "knowledge.txt")));
-        String content = appendImages(String.valueOf(request.getOrDefault("content", "")), stringList(request.get("imageUrls")));
+        String content = String.valueOf(request.getOrDefault("content", ""));
+        if ("md".equalsIgnoreCase(String.valueOf(request.getOrDefault("fileType", "txt")))
+                && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
+            return ApiResponse.fail("Markdown 正文不能包含图片，请使用图片上传控件添加图片");
+        }
+        content = appendImages(content, stringList(request.get("imageUrls")));
         String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
         return ApiResponse.ok(fileStorage.saveTextFile(filename, content, fileType));
     }
@@ -212,7 +222,12 @@ public class KnowledgeController {
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
-        String content = appendImages(String.valueOf(request.getOrDefault("content", "")), stringList(request.get("imageUrls")));
+        String content = String.valueOf(request.getOrDefault("content", ""));
+        if ("md".equalsIgnoreCase(String.valueOf(request.getOrDefault("fileType", "txt")))
+                && MARKDOWN_IMAGE_REFERENCE.matcher(content).find()) {
+            return ApiResponse.fail("Markdown 正文不能包含图片，请使用图片上传控件添加图片");
+        }
+        content = appendImages(content, stringList(request.get("imageUrls")));
         if (!content.isBlank()) {
             fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
             saved.setParseStatus("INDEXED");
@@ -569,6 +584,10 @@ public class KnowledgeController {
     private List<String> stringList(Object value) {
         if (!(value instanceof List<?> items)) return List.of();
         return items.stream().map(String::valueOf).filter(item -> !item.isBlank()).limit(12).toList();
+    }
+
+    private boolean isMarkdown(String filename) {
+        return filename != null && filename.toLowerCase(java.util.Locale.ROOT).endsWith(".md");
     }
 
     private Map<String, Object> toCategoryView(KnowledgeCategoryEntity category) {

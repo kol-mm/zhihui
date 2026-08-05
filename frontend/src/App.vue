@@ -194,7 +194,7 @@
         </el-form-item>
         <el-divider>或直接录入文本</el-divider>
         <div class="form-pair"><el-form-item label="文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item><el-form-item label="格式"><el-select v-model="knowledgeForm.fileType"><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select></el-form-item></div>
-        <el-form-item label="文本正文"><el-input v-model="knowledgeForm.content" type="textarea" :rows="6" placeholder="没有文件时可直接粘贴正文，也可以只上传图片创建图集资源" /></el-form-item>
+        <el-form-item label="文本正文"><el-input v-model="knowledgeForm.content" type="textarea" :rows="6" placeholder="Markdown 正文请勿写图片语法，图片请在上方单独上传；也可以只上传图片创建图集资源" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="knowledgeDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="uploadKnowledge">上传并索引</el-button></template>
     </el-dialog>

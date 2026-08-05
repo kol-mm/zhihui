@@ -102,14 +102,11 @@ class KnowledgeControllerTest {
     }
 
     @Test
-    void markdownExternalImagesAreIncludedInPreviewMetadata() {
+    void markdownImagesAreRejectedWhenImagesAreEmbedded() {
         var uploaded = controller.upload(userAuth, Map.of(
                 "title", "External image markdown", "fileType", "md",
                 "content", "![Architecture](https://example.com/architecture.png)"));
-        Long fileId = ((Number) uploaded.data().get("id")).longValue();
-        var detail = controller.view(userAuth, Map.of("fileId", fileId));
-        assertEquals(List.of("https://example.com/architecture.png"), detail.data().get("imageUrls"));
-        assertEquals("https://example.com/architecture.png", detail.data().get("coverUrl"));
+        assertTrue(uploaded.code() != 0);
     }
 
     @Test
