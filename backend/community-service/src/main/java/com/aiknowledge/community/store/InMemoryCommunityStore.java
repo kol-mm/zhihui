@@ -191,13 +191,20 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
-    public synchronized boolean likePost(Long userId, Long postId) {
-        if (likes.stream().anyMatch(item -> item.userId().equals(userId) && item.postId().equals(postId))) {
+    public synchronized boolean togglePostLike(Long userId, Long postId) {
+        boolean removed = likes.removeIf(item -> item.userId().equals(userId) && item.postId().equals(postId));
+        if (removed) {
+            persist();
             return false;
         }
         likes.add(new PostLikeRecord(likeIds.incrementAndGet(), userId, postId, LocalDateTime.now()));
         persist();
         return true;
+    }
+
+    @Override
+    public boolean hasPostLike(Long userId, Long postId) {
+        return userId != null && likes.stream().anyMatch(item -> item.userId().equals(userId) && item.postId().equals(postId));
     }
 
     @Override

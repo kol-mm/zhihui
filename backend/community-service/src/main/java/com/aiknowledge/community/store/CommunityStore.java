@@ -38,7 +38,9 @@ public interface CommunityStore {
 
     List<String> listPostImages(Long postId);
 
-    boolean likePost(Long userId, Long postId);
+    boolean togglePostLike(Long userId, Long postId);
+
+    boolean hasPostLike(Long userId, Long postId);
 
     long countPostLikes(Long postId);
 

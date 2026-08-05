@@ -42,7 +42,7 @@ class CommunityControllerTest {
                 config
         );
         assertEquals(500, disabled.createPost(userAuth, Map.of("title", "blocked", "content", "blocked")).code());
-        assertEquals(0, disabled.feed(null).data().size());
+        assertEquals(0, disabled.feed(userAuth, null).data().size());
     }
 
     @Test
@@ -56,7 +56,7 @@ class CommunityControllerTest {
         assertEquals(0, created.code());
         assertEquals(2, ((List<?>) created.data().get("imageUrls")).size());
 
-        ApiResponse<List<Map<String, Object>>> feed = controller.feed(null);
+        ApiResponse<List<Map<String, Object>>> feed = controller.feed(userAuth, null);
         assertEquals(0, feed.code());
         assertFalse(feed.data().isEmpty());
         assertEquals("Community Persistence", feed.data().get(0).get("title"));
@@ -78,14 +78,14 @@ class CommunityControllerTest {
     @Test
     void postCanBeLikedAndFollowingFeedCanBeFiltered() {
         controller.createPost(secondUserAuth, Map.of("userId", 999L, "title", "followed", "content", "visible"));
-        var filtered = controller.followingFeed("2");
+        var filtered = controller.followingFeed(userAuth, "2");
         assertEquals(1, filtered.data().size());
         Long postId = ((Number) filtered.data().get(0).get("id")).longValue();
         var firstLike = controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId));
-        var duplicateLike = controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId));
+        var unlike = controller.likePost(userAuth, Map.of("userId", 999L, "postId", postId));
         assertEquals(true, firstLike.data().get("created"));
-        assertEquals(false, duplicateLike.data().get("created"));
-        assertEquals(1L, duplicateLike.data().get("likes"));
+        assertEquals(false, unlike.data().get("liked"));
+        assertEquals(0L, unlike.data().get("likes"));
     }
 
     @Test
@@ -154,7 +154,7 @@ class CommunityControllerTest {
         assertEquals(0, comments.code());
         assertFalse(comments.data().isEmpty());
 
-        ApiResponse<Map<String, Object>> detail = controller.detail(1L);
+        ApiResponse<Map<String, Object>> detail = controller.detail(userAuth, 1L);
         assertEquals(0, detail.code());
         assertFalse(((List<?>) detail.data().get("comments")).isEmpty());
     }

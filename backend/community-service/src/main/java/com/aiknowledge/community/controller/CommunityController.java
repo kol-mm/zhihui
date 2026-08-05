@@ -132,11 +132,15 @@ public class CommunityController {
     }
 
     @GetMapping("/post/detail")
-    public ApiResponse<Map<String, Object>> detail(@RequestParam(name = "id", defaultValue = "1") Long id) {
+    public ApiResponse<Map<String, Object>> detail(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "id", defaultValue = "1") Long id
+    ) {
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
+        Long userId = LocalAuth.userId(authorization);
         return communityStore.findPost(id)
                 .map(post -> {
-                    Map<String, Object> detail = toPostView(post);
+                    Map<String, Object> detail = toPostView(post, userId);
                     detail.put("comments", communityStore.listComments(id).stream().map(this::toCommentView).toList());
                     return ApiResponse.ok(detail);
                 })
@@ -236,20 +240,26 @@ public class CommunityController {
     }
 
     @GetMapping("/square/feed")
-    public ApiResponse<List<Map<String, Object>>> feed(@RequestParam(name = "authorUserId", required = false) Long authorUserId) {
+    public ApiResponse<List<Map<String, Object>>> feed(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "authorUserId", required = false) Long authorUserId
+    ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
-        return ApiResponse.ok(communityStore.feed(authorUserId).stream().map(this::toPostView).toList());
+        Long userId = LocalAuth.userId(authorization);
+        return ApiResponse.ok(communityStore.feed(authorUserId).stream().map(post -> toPostView(post, userId)).toList());
     }
 
     @GetMapping("/square/following-feed")
     public ApiResponse<List<Map<String, Object>>> followingFeed(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam(name = "followedUserIds", defaultValue = "") String followedUserIds
     ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
+        Long userId = LocalAuth.userId(authorization);
         List<Long> ids = java.util.Arrays.stream(followedUserIds.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).map(Long::valueOf).toList();
         return ApiResponse.ok(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
-                .map(this::toPostView).toList());
+                .map(post -> toPostView(post, userId)).toList());
     }
 
     @PostMapping("/square/quick-comment")
@@ -292,11 +302,11 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("postId"), 0L);
-        boolean created = communityStore.likePost(userId, postId);
+        boolean liked = communityStore.togglePostLike(userId, postId);
         return ApiResponse.ok(Map.of(
                 "postId", postId,
-                "liked", true,
-                "created", created,
+                "liked", liked,
+                "created", liked,
                 "likes", communityStore.countPostLikes(postId)
         ));
     }
@@ -374,6 +384,10 @@ public class CommunityController {
     }
 
     private Map<String, Object> toPostView(PostEntity post) {
+        return toPostView(post, null);
+    }
+
+    private Map<String, Object> toPostView(PostEntity post, Long viewerUserId) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", post.getId());
         view.put("userId", post.getUserId());
@@ -382,6 +396,7 @@ public class CommunityController {
         view.put("status", post.getStatus());
         view.put("imageUrls", communityStore.listPostImages(post.getId()));
         view.put("likes", communityStore.countPostLikes(post.getId()));
+        view.put("liked", communityStore.hasPostLike(viewerUserId, post.getId()));
         view.put("createdAt", post.getCreatedAt());
         view.put("updatedAt", post.getUpdatedAt());
         return view;

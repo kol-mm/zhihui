@@ -149,10 +149,15 @@ public class MySqlCommunityStore implements CommunityStore {
     }
 
     @Override
-    public boolean likePost(Long userId, Long postId) {
-        Long existing = likeMapper.selectCount(Wrappers.<PostLikeEntity>lambdaQuery()
-                .eq(PostLikeEntity::getUserId, userId).eq(PostLikeEntity::getPostId, postId));
-        if (existing != null && existing > 0) return false;
+    @Transactional
+    public boolean togglePostLike(Long userId, Long postId) {
+        var match = Wrappers.<PostLikeEntity>lambdaQuery()
+                .eq(PostLikeEntity::getUserId, userId).eq(PostLikeEntity::getPostId, postId);
+        Long existing = likeMapper.selectCount(match);
+        if (existing != null && existing > 0) {
+            likeMapper.delete(match);
+            return false;
+        }
         PostLikeEntity like = new PostLikeEntity();
         like.setUserId(userId);
         like.setPostId(postId);
@@ -162,8 +167,18 @@ public class MySqlCommunityStore implements CommunityStore {
             likeMapper.insert(like);
             return true;
         } catch (DuplicateKeyException ignored) {
+            likeMapper.delete(Wrappers.<PostLikeEntity>lambdaQuery()
+                    .eq(PostLikeEntity::getUserId, userId).eq(PostLikeEntity::getPostId, postId));
             return false;
         }
+    }
+
+    @Override
+    public boolean hasPostLike(Long userId, Long postId) {
+        if (userId == null) return false;
+        Long count = likeMapper.selectCount(Wrappers.<PostLikeEntity>lambdaQuery()
+                .eq(PostLikeEntity::getUserId, userId).eq(PostLikeEntity::getPostId, postId));
+        return count != null && count > 0;
     }
 
     @Override
