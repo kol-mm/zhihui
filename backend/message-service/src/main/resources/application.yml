@@ -1,5 +1,7 @@
 server:
   port: 8104
+  address: ${SERVICE_BIND_ADDRESS:127.0.0.1}
+  max-http-request-header-size: 16KB
 
 spring:
   application:

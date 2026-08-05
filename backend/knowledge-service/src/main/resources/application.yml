@@ -1,7 +1,13 @@
 server:
   port: 8102
+  address: ${SERVICE_BIND_ADDRESS:127.0.0.1}
+  max-http-request-header-size: 16KB
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
   application:
     name: knowledge-service
   profiles:

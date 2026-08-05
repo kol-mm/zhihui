@@ -8,8 +8,11 @@ import math
 import os
 import re
 import sqlite3
+import ipaddress
+import socket
 import urllib.error
 import urllib.request
+import urllib.parse
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,13 +33,13 @@ class ApiResponse(BaseModel):
 
 
 class TextRequest(BaseModel):
-    text: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1, max_length=2_000_000)
     file_id: int | None = None
     title: str | None = None
 
 
 class ChatRequest(BaseModel):
-    question: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1, max_length=4000)
     user_id: int | None = None
     session_id: int | None = None
 
@@ -46,9 +49,9 @@ class AiConfigRequest(BaseModel):
     match_limit: int = Field(default=5, ge=1, le=20)
     compliance_rule: str = "answer-with-references"
     provider: str = Field(default="local", pattern="^(local|openai-compatible)$")
-    model: str = "local-rag"
-    base_url: str = ""
-    request_url: str = ""
+    model: str = Field(default="local-rag", max_length=200)
+    base_url: str = Field(default="", max_length=2000)
+    request_url: str = Field(default="", max_length=2000)
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     notifications_enabled: bool = True
@@ -141,7 +144,10 @@ def decode_segment(value: str) -> dict[str, Any]:
 
 
 def token_claims(authorization: str | None) -> dict[str, Any] | None:
-    token = (authorization or "").removeprefix("Bearer ").strip()
+    value = (authorization or "").strip()
+    if len(value) > 8200 or not value.lower().startswith("bearer "):
+        return None
+    token = value[7:].strip()
     parts = token.split(".")
     if len(parts) != 3:
         return None
@@ -151,9 +157,15 @@ def token_claims(authorization: str | None) -> dict[str, Any] | None:
     try:
         header = decode_segment(parts[0])
         payload = decode_segment(parts[1])
+        now = int(datetime.now().timestamp())
+        issued_at = int(payload.get("iat", 0))
+        expires_at = int(payload.get("exp", 0))
+        role = payload.get("role")
         valid = (hmac.compare_digest(expected, parts[2]) and header.get("alg") == "HS256"
                  and int(payload.get("uid", 0)) > 0
-                 and int(payload.get("exp", 0)) > int(datetime.now().timestamp()))
+                 and role in {"USER", "ADMIN"}
+                 and issued_at <= now + 60 and expires_at > now and expires_at > issued_at
+                 and expires_at - issued_at <= int(os.getenv("AI_KNOWLEDGE_JWT_EXPIRES_SECONDS", "28800")) + 60)
         return payload if valid else None
     except (ValueError, TypeError, json.JSONDecodeError):
         return None
@@ -340,12 +352,48 @@ def local_answer(question: str, matched: list[dict[str, Any]]) -> str:
     return f"The local knowledge base has no matching references yet. Your question was recorded: '{question}'"
 
 
+def validate_upstream_url(value: str, resolve_dns: bool) -> None:
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("AI request URL must be an absolute http or https URL")
+    if parsed.username or parsed.password:
+        raise ValueError("AI request URL must not contain embedded credentials")
+    try:
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    except ValueError as error:
+        raise ValueError("AI request URL contains an invalid port") from error
+    if os.getenv("AI_ALLOW_PRIVATE_UPSTREAM", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return
+
+    hostname = parsed.hostname.rstrip(".").lower()
+    if hostname == "localhost" or hostname.endswith(".localhost") or hostname.endswith(".local"):
+        raise ValueError("private AI upstream addresses are disabled")
+
+    addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    try:
+        addresses.append(ipaddress.ip_address(hostname))
+    except ValueError:
+        if resolve_dns:
+            try:
+                for result in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM):
+                    addresses.append(ipaddress.ip_address(result[4][0]))
+            except (socket.gaierror, ValueError) as error:
+                raise ValueError("AI upstream hostname could not be resolved") from error
+
+    if any(not address.is_global for address in addresses):
+        raise ValueError("private AI upstream addresses are disabled")
+
+
 def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
     api_key = os.getenv("AI_API_KEY", "").strip()
     base_url = str(config.get("base_url", "")).strip().rstrip("/")
     request_url = str(config.get("request_url", "")).strip()
     endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
     if not api_key or not endpoint:
+        return None
+    try:
+        validate_upstream_url(endpoint, resolve_dns=True)
+    except ValueError:
         return None
     context = "\n\n".join(
         f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
@@ -519,8 +567,11 @@ def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(
     values = request.model_dump()
     for key in ("base_url", "request_url"):
         value = str(values.get(key, "")).strip()
-        if value and not re.match(r"^https?://", value, re.IGNORECASE):
-            raise HTTPException(status_code=400, detail=f"{key} must use http or https")
+        if value:
+            try:
+                validate_upstream_url(value, resolve_dns=False)
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail=str(error)) from error
         values[key] = value
     with connect() as conn:
         for key, value in values.items():

@@ -120,7 +120,8 @@ class AiServicePersistenceTest(unittest.TestCase):
             "temperature": 0.3,
         }
         with mock.patch.object(self.main.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
-            answer = self.main.compatible_answer("question", [], config)
+            with mock.patch.object(self.main, "validate_upstream_url"):
+                answer = self.main.compatible_answer("question", [], config)
 
         self.assertEqual(answer, "provider answer")
         request = urlopen.call_args.args[0]
@@ -143,8 +144,17 @@ class AiServicePersistenceTest(unittest.TestCase):
         endpoint = "https://example.test/custom/chat"
         config = {"provider": "openai-compatible", "request_url": endpoint, "base_url": "https://ignored.test/v1"}
         with mock.patch.object(self.main.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen:
-            self.main.compatible_answer("question", [], config)
+            with mock.patch.object(self.main, "validate_upstream_url"):
+                self.main.compatible_answer("question", [], config)
         self.assertEqual(urlopen.call_args.args[0].full_url, endpoint)
+
+    def test_admin_cannot_configure_private_ai_upstream(self) -> None:
+        auth = self.issue_token("admin", 2, "ADMIN")
+        with self.assertRaises(self.main.HTTPException) as raised:
+            self.main.save_ai_config(self.main.AiConfigRequest(
+                provider="openai-compatible", request_url="http://127.0.0.1:11434/v1/chat/completions"
+            ), authorization=auth)
+        self.assertEqual(raised.exception.status_code, 400)
 
     def test_openai_compatible_provider_without_key_falls_back(self) -> None:
         config = {"provider": "openai-compatible", "base_url": "https://example.test/v1"}

@@ -24,6 +24,18 @@ $script:ManagedProcesses = [System.Collections.ArrayList]::new()
 
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
+if ([string]::IsNullOrWhiteSpace([string]$env:AI_KNOWLEDGE_JWT_SECRET)) {
+    $secretDirectory = Join-Path $Root ".local-secrets"
+    $secretFile = Join-Path $secretDirectory "jwt-secret.txt"
+    New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
+    if (-not (Test-Path $secretFile)) {
+        $bytes = New-Object byte[] 48
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        [System.IO.File]::WriteAllText($secretFile, [Convert]::ToBase64String($bytes))
+    }
+    $env:AI_KNOWLEDGE_JWT_SECRET = [System.IO.File]::ReadAllText($secretFile).Trim()
+}
+
 function Normalize-ProcessPathEnvironment {
     $variables = [Environment]::GetEnvironmentVariables()
     $pathKeys = @($variables.Keys | Where-Object { $_ -ieq "Path" })

@@ -1,5 +1,7 @@
 server:
   port: 8080
+  address: ${GATEWAY_BIND_ADDRESS:127.0.0.1}
+  max-http-request-header-size: 16KB
 
 spring:
   application:
@@ -9,6 +11,10 @@ spring:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
     gateway:
+      default-filters:
+        - name: RequestSize
+          args:
+            maxSize: 100MB
       globalcors:
         cors-configurations:
           '[/**]':

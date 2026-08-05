@@ -78,15 +78,15 @@ public class UserController {
     @PostMapping("/register")
     public ApiResponse<Map<String, Object>> register(@RequestBody Map<String, String> request) {
         String username = request.getOrDefault("username", "").trim();
-        if (username.isEmpty()) {
-            return ApiResponse.fail("username is required");
+        if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
+            return ApiResponse.fail("username must contain 3-32 letters, numbers, underscores or hyphens");
         }
         if ("admin".equalsIgnoreCase(username)) {
             return ApiResponse.fail("this username is reserved");
         }
         String password = request.getOrDefault("password", "");
-        if (password.length() < 6) {
-            return ApiResponse.fail("password must contain at least 6 characters");
+        if (password.length() < 8 || password.length() > 128) {
+            return ApiResponse.fail("password must contain between 8 and 128 characters");
         }
         if (userStore.findByUsername(username).isPresent()) {
             return ApiResponse.fail("username already exists");
@@ -95,7 +95,8 @@ public class UserController {
         UserEntity user = new UserEntity();
         user.setUsername(username);
         user.setPasswordHash(passwordEncoder.encode(password));
-        user.setNickname(request.getOrDefault("nickname", username));
+        String nickname = request.getOrDefault("nickname", username).trim();
+        user.setNickname(nickname.isBlank() ? username : nickname.substring(0, Math.min(nickname.length(), 64)));
         user.setStatus("ACTIVE");
         return ApiResponse.ok(toView(userStore.save(user)));
     }
@@ -104,6 +105,7 @@ public class UserController {
     public ApiResponse<Map<String, Object>> login(@RequestBody Map<String, String> request) {
         String username = request.getOrDefault("username", "").trim();
         String password = request.getOrDefault("password", "");
+        if (username.length() > 32 || password.length() > 128) return ApiResponse.fail("invalid username or password");
         UserEntity user = userStore.findByUsername(username).orElse(null);
         if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
             return ApiResponse.fail("invalid username or password");
@@ -160,9 +162,12 @@ public class UserController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
-        String nickname = String.valueOf(request.getOrDefault("nickname", ""));
+        String nickname = String.valueOf(request.getOrDefault("nickname", "")).trim();
         String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", ""));
-        String signature = String.valueOf(request.getOrDefault("signature", ""));
+        String signature = String.valueOf(request.getOrDefault("signature", "")).trim();
+        if (nickname.length() > 64 || signature.length() > 500 || avatarUrl.length() > 2000) {
+            return ApiResponse.fail("profile fields exceed the allowed length");
+        }
         return userStore.updateProfile(userId, nickname, avatarUrl, signature)
                 .map(user -> ApiResponse.ok(toView(user)))
                 .orElseGet(() -> ApiResponse.fail("user not found"));

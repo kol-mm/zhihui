@@ -8,6 +8,9 @@ spring:
   cloud:
     gateway:
       default-filters:
+        - name: RequestSize
+          args:
+            maxSize: 100MB
         - name: RequestRateLimiter
           args:
             key-resolver: "#{@clientKeyResolver}"

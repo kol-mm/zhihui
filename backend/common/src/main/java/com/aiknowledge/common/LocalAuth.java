@@ -120,7 +120,10 @@ public final class LocalAuth {
             String role = String.valueOf(payload.getOrDefault("role", ""));
             long issuedAt = number(payload.get("iat"));
             long expiresAt = number(payload.get("exp"));
-            if (username.isBlank() || userId <= 0 || role.isBlank() || expiresAt <= Instant.now().getEpochSecond()) {
+            long now = Instant.now().getEpochSecond();
+            if (username.isBlank() || userId <= 0 || !("USER".equals(role) || "ADMIN".equals(role))
+                    || issuedAt > now + 60 || expiresAt <= now || expiresAt <= issuedAt
+                    || expiresAt - issuedAt > expirySeconds() + 60) {
                 return null;
             }
             return new Claims(username, userId, role, issuedAt, expiresAt);
@@ -140,8 +143,10 @@ public final class LocalAuth {
 
     private static String bearerToken(String authorization) {
         if (authorization == null || authorization.isBlank()) { return ""; }
-        String token = authorization.trim();
-        return token.regionMatches(true, 0, "Bearer ", 0, 7) ? token.substring(7).trim() : token;
+        String value = authorization.trim();
+        if (!value.regionMatches(true, 0, "Bearer ", 0, 7)) { return ""; }
+        String token = value.substring(7).trim();
+        return token.length() <= 8192 ? token : "";
     }
 
     private static String encodeJson(Map<String, Object> value) {
