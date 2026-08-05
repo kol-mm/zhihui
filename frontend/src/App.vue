@@ -68,7 +68,9 @@
       </header>
 
       <main class="content-area">
-        <template v-if="portal === 'client'">
+        <div v-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
+        <div v-else-if="viewError" class="view-error"><el-icon><Warning /></el-icon><span>{{ viewError }}</span><el-button size="small" type="primary" @click="refreshCurrentView">重试</el-button></div>
+        <template v-if="!viewLoading && !viewError && portal === 'client'">
           <section v-if="activeView === 'home'" class="page-stack">
             <div class="welcome-row">
               <div><p class="section-kicker">今日概览</p><h3>{{ greeting }}，{{ displayName }}</h3><p>继续探索知识、社区动态和你的 AI 对话。</p></div>
@@ -160,7 +162,7 @@
           </section>
         </template>
 
-        <template v-else>
+        <template v-else-if="!viewLoading && !viewError">
           <section v-if="activeView === 'dashboard'" class="page-stack">
             <div class="page-toolbar"><div><h3>平台运营概览</h3><p>内容、用户、互动和待办事项的实时摘要</p></div><el-button :icon="Refresh" @click="loadAdminDashboard">刷新数据</el-button></div>
             <div class="metrics-grid admin-metrics"><div v-for="metric in adminMetrics" :key="metric.label" class="metric-tile"><span :class="['metric-icon', metric.color]"><component :is="metric.icon" /></span><div><strong>{{ metric.value }}</strong><span>{{ metric.label }}</span><small>{{ metric.hint }}</small></div></div></div>
@@ -204,7 +206,7 @@
 <script setup lang="ts">
 import { computed, markRaw, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox, type UploadFile, type UploadRawFile } from 'element-plus';
-import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View } from '@element-plus/icons-vue';
+import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
 
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; views?:number; downloads?:number; likes?:number };
@@ -236,6 +238,7 @@ const currentUserId = ref(Number(localStorage.getItem('ai-knowledge-user-id') ||
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
 const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const knowledgeCategoryId = ref(0); const adminUserKeyword = ref('');
+const viewLoading = ref(false); const viewError = ref('');
 const feedMode = ref<'all'|'following'>('all'); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const commentDrawer = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false);
 
@@ -314,7 +317,7 @@ async function loadPublicConfig(){try{platformConfig.value=await getData('/ai/co
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
 function switchPortal(value:'client'|'admin'){ portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
 function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;openNotifications();return;} activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
-async function refreshCurrentView(){ try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ notifyError(error); } }
+async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=error instanceof Error?error.message:'页面加载失败，请重试'; notifyError(error); } finally { viewLoading.value=false; } }
 async function runGlobalSearch(){ activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
 async function loadKnowledge(){ const [files,categories]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories')]); knowledgeFiles.value=files; knowledgeCategories.value=categories; }
