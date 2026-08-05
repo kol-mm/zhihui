@@ -115,6 +115,7 @@
               </div>
               <div v-if="filteredKnowledge.length" class="knowledge-grid">
                 <article v-for="file in filteredKnowledge" :key="file.id" class="knowledge-card">
+                  <img v-if="file.coverUrl" class="knowledge-cover" :src="resolveApiUrl(file.coverUrl)" :alt="`${file.title}封面`" />
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || 'DOC' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
                   <h4>{{ file.title }}</h4><p>上传者 #{{ file.userId }} · 资源编号 {{ file.id }}</p>
                   <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
@@ -180,8 +181,35 @@
       </main>
     </section>
 
-    <el-dialog v-model="knowledgeDialog" title="上传知识资料" width="min(560px, 92vw)"><el-form label-position="top"><el-form-item label="标题"><el-input v-model="knowledgeForm.title" placeholder="留空时使用文件名" /></el-form-item><el-form-item label="知识分类"><el-select v-model="knowledgeForm.categoryId" clearable placeholder="选择分类"><el-option v-for="category in knowledgeCategories" :key="category.id" :label="category.name" :value="category.id" /></el-select></el-form-item><el-form-item label="选择文件"><el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="handleKnowledgeFile" :on-remove="clearKnowledgeFile"><UploadFilled /><div class="el-upload__text">拖放文件到这里，或<em>点击选择</em></div><template #tip><div class="el-upload__tip">支持 TXT、Markdown、PDF、DOCX，单个文件不超过 25 MB</div></template></el-upload></el-form-item><el-divider>或直接录入文本</el-divider><div class="form-pair"><el-form-item label="文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item><el-form-item label="格式"><el-select v-model="knowledgeForm.fileType"><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select></el-form-item></div><el-form-item label="文本正文"><el-input v-model="knowledgeForm.content" type="textarea" :rows="5" placeholder="没有文件时可直接粘贴正文" /></el-form-item></el-form><template #footer><el-button @click="knowledgeDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="uploadKnowledge">上传并索引</el-button></template></el-dialog>
-    <el-dialog v-model="readerDialog" class="reader-dialog" width="min(820px, 94vw)" top="4vh" destroy-on-close><template #header><div class="reader-header"><span class="file-type large">{{ selectedKnowledge?.fileType?.toUpperCase() }}</span><div><h3>{{ selectedKnowledge?.title }}</h3><p>资源 #{{ selectedKnowledge?.id }} · {{ reviewingKnowledge ? auditLabel(selectedKnowledge?.auditStatus || '') : `浏览 ${selectedKnowledge?.views || 0} 次` }}</p></div></div></template><article class="knowledge-body">{{ selectedKnowledge?.content }}</article><template #footer><el-button @click="readerDialog = false">关闭</el-button><template v-if="reviewingKnowledge && selectedKnowledge"><el-button type="danger" @click="auditKnowledge(selectedKnowledge, 'REJECTED')">驳回</el-button><el-button type="success" @click="auditKnowledge(selectedKnowledge, 'APPROVED')">通过审核</el-button></template><el-button v-else-if="selectedKnowledge?.fileUrl" type="primary" :icon="Download" @click="selectedKnowledge && downloadKnowledge(selectedKnowledge)">下载资料</el-button></template></el-dialog>
+    <el-dialog v-model="knowledgeDialog" title="上传知识资料" width="min(640px, 94vw)" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="标题"><el-input v-model="knowledgeForm.title" placeholder="留空时使用文件名或首张图片名" /></el-form-item>
+        <el-form-item label="知识分类"><el-select v-model="knowledgeForm.categoryId" clearable placeholder="选择分类"><el-option v-for="category in knowledgeCategories" :key="category.id" :label="category.name" :value="category.id" /></el-select></el-form-item>
+        <el-form-item label="资料文件">
+          <el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="handleKnowledgeFile" :on-remove="clearKnowledgeFile"><UploadFilled /><div class="el-upload__text">拖放文件到这里，或<em>点击选择</em></div><template #tip><div class="el-upload__tip">支持 TXT、Markdown、PDF、DOCX，单个文件不超过 25 MB</div></template></el-upload>
+        </el-form-item>
+        <el-form-item label="封面与正文插图">
+          <el-upload list-type="picture-card" :auto-upload="false" :limit="12" accept="image/jpeg,image/png,image/gif,image/webp" :on-change="handleKnowledgeImages" :on-remove="handleKnowledgeImages"><Plus /></el-upload>
+          <div class="el-upload__tip">第一张作为封面，最多 12 张；支持 JPEG、PNG、GIF、WebP，单张不超过 10 MB</div>
+        </el-form-item>
+        <el-divider>或直接录入文本</el-divider>
+        <div class="form-pair"><el-form-item label="文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item><el-form-item label="格式"><el-select v-model="knowledgeForm.fileType"><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select></el-form-item></div>
+        <el-form-item label="文本正文"><el-input v-model="knowledgeForm.content" type="textarea" :rows="6" placeholder="没有文件时可直接粘贴正文，也可以只上传图片创建图集资源" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="knowledgeDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="uploadKnowledge">上传并索引</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="readerDialog" class="reader-dialog" width="min(900px, 96vw)" top="3vh" destroy-on-close>
+      <template #header><div class="reader-header"><span class="file-type large">{{ selectedKnowledge?.fileType?.toUpperCase() }}</span><div><h3>{{ selectedKnowledge?.title }}</h3><p>资源 #{{ selectedKnowledge?.id }} · {{ reviewingKnowledge ? auditLabel(selectedKnowledge?.auditStatus || '') : `浏览 ${selectedKnowledge?.views || 0} 次` }}</p></div></div></template>
+      <article class="knowledge-body rich-knowledge-body">
+        <template v-for="(block, index) in knowledgeContentBlocks" :key="`${block.type}-${index}`">
+          <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
+          <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
+          <p v-else :class="{ 'knowledge-list-item': block.type === 'list' }">{{ block.text }}</p>
+        </template>
+        <el-empty v-if="!knowledgeContentBlocks.length" description="暂无可预览正文" />
+      </article>
+      <template #footer><el-button @click="readerDialog = false">关闭</el-button><template v-if="reviewingKnowledge && selectedKnowledge"><el-button type="danger" @click="auditKnowledge(selectedKnowledge, 'REJECTED')">驳回</el-button><el-button type="success" @click="auditKnowledge(selectedKnowledge, 'APPROVED')">通过审核</el-button></template><el-button v-else-if="selectedKnowledge?.fileUrl" type="primary" :icon="Download" @click="selectedKnowledge && downloadKnowledge(selectedKnowledge)">下载资料</el-button></template>
+    </el-dialog>
     <el-dialog v-model="postReviewDialog" width="min(760px, 94vw)" top="5vh" destroy-on-close><template #header><div class="reader-header"><span class="file-type large">POST</span><div><h3>{{ selectedReviewPost?.title }}</h3><p>帖子 #{{ selectedReviewPost?.id }} · 用户 #{{ selectedReviewPost?.userId }} · {{ selectedReviewPost?.status }}</p></div></div></template><article class="knowledge-body">{{ selectedReviewPost?.content }}</article><div v-if="selectedReviewPost?.imageUrls?.length" class="post-images"><img v-for="image in selectedReviewPost.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="待审核帖子配图" /></div><template #footer><el-button @click="postReviewDialog = false">关闭</el-button><el-button v-if="selectedReviewPost" type="danger" @click="auditPost(selectedReviewPost, 'HIDDEN')">隐藏</el-button><el-button v-if="selectedReviewPost" type="success" @click="auditPost(selectedReviewPost, 'PUBLISHED')">发布</el-button></template></el-dialog>
     <el-dialog v-model="postDialog" title="发布社区帖子" width="min(560px, 92vw)" destroy-on-close><el-form label-position="top"><el-form-item label="标题"><el-input v-model="postForm.title" /></el-form-item><el-form-item label="正文"><el-input v-model="postForm.content" type="textarea" :rows="6" /></el-form-item><el-form-item label="帖子配图"><el-upload list-type="picture-card" :auto-upload="false" :limit="9" accept="image/jpeg,image/png,image/gif,image/webp" :on-change="handlePostImages" :on-remove="handlePostImages"><Plus /></el-upload><div class="el-upload__tip">最多 9 张，支持 JPEG、PNG、GIF、WebP，单张不超过 10 MB</div></el-form-item></el-form><template #footer><el-button @click="saveDraft">存为草稿</el-button><el-button type="primary" :loading="busy" @click="createPost">发布</el-button></template></el-dialog>
     <el-drawer v-model="commentDrawer" title="帖子讨论" size="min(460px, 92vw)"><div class="comment-post"><strong>{{ selectedPost?.title }}</strong><p>{{ selectedPost?.content }}</p></div><div class="comment-list"><article v-for="comment in comments" :key="comment.id"><div class="mini-avatar"><img v-if="communityUser(comment.userId).avatarUrl" :src="resolveApiUrl(communityUser(comment.userId).avatarUrl || '')" alt="头像" /><span v-else>{{ communityUser(comment.userId).nickname.slice(0, 1) }}</span></div><div><strong>{{ communityUser(comment.userId).nickname }}</strong><p>{{ comment.content }}</p></div></article><el-empty v-if="!comments.length" description="暂无评论" /></div><div class="drawer-compose"><el-input v-model="commentText" placeholder="发表公开评论" /><el-button type="primary" @click="createComment">发送</el-button></div></el-drawer>
@@ -212,7 +240,8 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
 
-type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; views?:number; downloads?:number; likes?:number };
+type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number };
+type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string };
@@ -251,6 +280,7 @@ const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value
 const knowledgeForm = ref({ userId:currentUserId.value, title:'', filename:'knowledge.txt', fileType:'txt', content:'', fileUrl:'', categoryId:0 });
 type KnowledgeCategory = { id:number; name:string; parentId?:number; sortNo?:number };
 const selectedKnowledgeFile = ref<File>();
+const selectedKnowledgeImages = ref<UploadRawFile[]>([]);
 const postForm = ref({ userId:currentUserId.value, title:'', content:'' });
 const selectedPostImages = ref<UploadRawFile[]>([]);
 const messageForm = ref({ sessionId:0, senderId:currentUserId.value, content:'' });
@@ -291,6 +321,24 @@ const adminMetrics = computed(() => [{label:'注册用户',value:metricValue('us
 const healthItems = computed(() => [{label:'网关与用户服务',ok:systemHealth.value.user},{label:'知识与全文检索',ok:systemHealth.value.knowledge},{label:'社区与消息服务',ok:systemHealth.value.community&&systemHealth.value.message},{label:'AI 向量检索',ok:systemHealth.value.ai}]);
 const currentMessageSession = computed(() => sessions.value.find(session => session.id === messageForm.value.sessionId));
 const currentMessagePartner = computed(() => currentMessageSession.value ? sessionPartner(currentMessageSession.value) : undefined);
+const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => {
+  const content = selectedKnowledge.value?.content || '';
+  if (!content.trim()) return [];
+  const blocks: KnowledgeContentBlock[] = [];
+  let paragraph: string[] = [];
+  const flush = () => { const text = paragraph.join(' ').trim(); if (text) blocks.push({ type: 'paragraph', text }); paragraph = []; };
+  for (const line of content.replace(/\r/g, '').split('\n')) {
+    const image = line.trim().match(/^!\[([^\]]*)\]\((\/knowledge\/media\/[A-Za-z0-9_-]+)\)$/);
+    if (image) { flush(); blocks.push({ type: 'image', text: image[1], url: image[2] }); continue; }
+    if (!line.trim()) { flush(); continue; }
+    const heading = line.trim().match(/^#{1,3}\s+(.+)$/);
+    if (heading) { flush(); blocks.push({ type: 'heading', text: heading[1] }); continue; }
+    if (/^\s*[-*]\s+/.test(line)) { flush(); blocks.push({ type: 'list', text: line.trim().replace(/^[-*]\s+/, '') }); continue; }
+    paragraph.push(line.trim());
+  }
+  flush();
+  return blocks;
+});
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
 function categoryCount(categoryId:number){ return knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length; }
@@ -328,7 +376,8 @@ async function loadKnowledge(){ const [files,categories]=await Promise.all([getD
 async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; }
 function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformConfig.value.max_upload_mb*1024*1024){selectedKnowledgeFile.value=undefined;ElMessage.error(`文件不能超过 ${platformConfig.value.max_upload_mb} MB`);return;}selectedKnowledgeFile.value=file.raw;if(file.raw&&!knowledgeForm.value.title)knowledgeForm.value.title=file.name.replace(/\.[^.]+$/,'');}
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
-async function uploadKnowledge(){if(!selectedKnowledgeFile.value&&!knowledgeForm.value.content.trim()){ElMessage.warning('请选择文件或填写文本正文');return;}busy.value=true;try{if(selectedKnowledgeFile.value){const form=new FormData();form.append('file',selectedKnowledgeFile.value);form.append('title',knowledgeForm.value.title);if(knowledgeForm.value.categoryId)form.append('categoryId',String(knowledgeForm.value.categoryId));await postFormData('/knowledge/file/upload',form);}else{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title});await postData('/knowledge/upload',{title:knowledgeForm.value.title||knowledgeForm.value.filename,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content,categoryId:knowledgeForm.value.categoryId||null});}knowledgeDialog.value=false;selectedKnowledgeFile.value=undefined;knowledgeForm.value.title='';knowledgeForm.value.content='';knowledgeForm.value.categoryId=0;await loadKnowledge();ElMessage.success('文件已保存并完成正文索引，等待管理员审核');}catch(error){notifyError(error);}finally{busy.value=false;}}
+function handleKnowledgeImages(_file:UploadFile, files:UploadFile[]){selectedKnowledgeImages.value=files.map(file=>file.raw).filter((file):file is UploadRawFile=>Boolean(file));if(!knowledgeForm.value.title&&selectedKnowledgeImages.value[0])knowledgeForm.value.title=files[0].name.replace(/\.[^.]+$/,'');}
+async function uploadKnowledge(){if(!selectedKnowledgeFile.value&&!knowledgeForm.value.content.trim()&&!selectedKnowledgeImages.value.length){ElMessage.warning('请选择文件、图片或填写文本正文');return;}busy.value=true;try{let imageUrls:string[]=[];if(selectedKnowledgeImages.value.length){const mediaForm=new FormData();selectedKnowledgeImages.value.forEach(file=>mediaForm.append('files',file));const uploaded=await postFormData<{imageUrls:string[]}>('/knowledge/media/upload',mediaForm);imageUrls=uploaded.imageUrls;}if(selectedKnowledgeFile.value){const form=new FormData();form.append('file',selectedKnowledgeFile.value);form.append('title',knowledgeForm.value.title);if(knowledgeForm.value.categoryId)form.append('categoryId',String(knowledgeForm.value.categoryId));imageUrls.forEach(url=>form.append('imageUrls',url));await postFormData('/knowledge/file/upload',form);}else{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title,imageUrls});await postData('/knowledge/upload',{title:knowledgeForm.value.title||knowledgeForm.value.filename,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content,imageUrls,categoryId:knowledgeForm.value.categoryId||null});}knowledgeDialog.value=false;selectedKnowledgeFile.value=undefined;selectedKnowledgeImages.value=[];knowledgeForm.value.title='';knowledgeForm.value.content='';knowledgeForm.value.categoryId=0;await loadKnowledge();ElMessage.success('资料和图片已保存，等待管理员审核');}catch(error){notifyError(error);}finally{busy.value=false;}}
 function openKnowledge(file:KnowledgeFile){ activeView.value='knowledge'; viewKnowledge(file); }
 async function viewKnowledge(file:KnowledgeFile){ reviewingKnowledge.value=false;const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:file.id});selectedKnowledge.value=detail;readerDialog.value=true;await recordBehavior('VIEW','KNOWLEDGE',file.id);await loadKnowledge(); }
 async function reviewKnowledge(file:KnowledgeFile){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);selectedKnowledge.value=detail;reviewingKnowledge.value=true;readerDialog.value=true;}

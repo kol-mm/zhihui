@@ -8,6 +8,7 @@ import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
 import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.storage.DocumentTextExtractor;
+import com.aiknowledge.knowledge.storage.KnowledgeMediaStorageService;
 import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -31,15 +32,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/knowledge")
 public class KnowledgeController {
+    private static final Pattern IMAGE_MARKUP = Pattern.compile("!\\[([^]]*)]\\((/knowledge/media/[A-Za-z0-9_-]+)\\)");
+
     private final KnowledgeStore knowledgeStore;
     private final LocalFileStorageService fileStorage;
     private final LocalFullTextSearchService fullTextSearch;
     private final DocumentTextExtractor textExtractor;
     private final PlatformConfigClient platformConfig;
+    private final KnowledgeMediaStorageService mediaStorage;
 
     @Autowired
     public KnowledgeController(
@@ -47,18 +53,22 @@ public class KnowledgeController {
             LocalFileStorageService fileStorage,
             LocalFullTextSearchService fullTextSearch,
             DocumentTextExtractor textExtractor,
-            PlatformConfigClient platformConfig
+            PlatformConfigClient platformConfig,
+            KnowledgeMediaStorageService mediaStorage
     ) {
         this.knowledgeStore = knowledgeStore;
         this.fileStorage = fileStorage;
         this.fullTextSearch = fullTextSearch;
         this.textExtractor = textExtractor;
         this.platformConfig = platformConfig;
+        this.mediaStorage = mediaStorage;
     }
 
     public KnowledgeController(KnowledgeStore knowledgeStore, LocalFileStorageService fileStorage,
                                LocalFullTextSearchService fullTextSearch, DocumentTextExtractor textExtractor) {
-        this(knowledgeStore, fileStorage, fullTextSearch, textExtractor, null);
+        this(knowledgeStore, fileStorage, fullTextSearch, textExtractor, null,
+                new KnowledgeMediaStorageService("local", "target/test-knowledge-media",
+                        "http://127.0.0.1:9000", "ai-knowledge", "aiknowledge", "test-secret"));
     }
 
     @PostMapping(value = "/file/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -66,7 +76,8 @@ public class KnowledgeController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @RequestParam("file") MultipartFile multipartFile,
             @RequestParam(name = "title", defaultValue = "") String title,
-            @RequestParam(name = "categoryId", required = false) Long categoryId
+            @RequestParam(name = "categoryId", required = false) Long categoryId,
+            @RequestParam(name = "imageUrls", required = false) List<String> imageUrls
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
@@ -77,7 +88,7 @@ public class KnowledgeController {
         try {
             byte[] bytes = multipartFile.getBytes();
             String fileType = textExtractor.extension(filename);
-            String content = textExtractor.extract(filename, bytes).trim();
+            String content = appendImages(textExtractor.extract(filename, bytes).trim(), imageUrls);
             Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
             KnowledgeFileEntity file = new KnowledgeFileEntity();
             file.setUserId(userId);
@@ -100,6 +111,43 @@ public class KnowledgeController {
         } catch (Exception error) {
             return ApiResponse.fail("file upload failed: " + error.getMessage());
         }
+    }
+
+    public ApiResponse<Map<String, Object>> uploadFile(
+            String authorization, MultipartFile multipartFile, String title, Long categoryId
+    ) {
+        return uploadFile(authorization, multipartFile, title, categoryId, List.of());
+    }
+
+    @PostMapping(value = "/media/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<Map<String, Object>> uploadImages(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam("files") List<MultipartFile> files
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
+        if (files.isEmpty() || files.size() > 12) return ApiResponse.fail("select between 1 and 12 images");
+        try {
+            List<byte[]> contents = new java.util.ArrayList<>();
+            for (MultipartFile file : files) {
+                byte[] bytes = file.getBytes();
+                mediaStorage.validate(bytes);
+                contents.add(bytes);
+            }
+            List<String> imageUrls = new java.util.ArrayList<>();
+            for (byte[] bytes : contents) imageUrls.add(mediaStorage.save(bytes));
+            return ApiResponse.ok(Map.of("imageUrls", imageUrls, "coverUrl", imageUrls.get(0), "count", imageUrls.size()));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        } catch (Exception error) {
+            return ApiResponse.fail("image upload failed: " + error.getMessage());
+        }
+    }
+
+    @GetMapping("/media/{token}")
+    public ResponseEntity<byte[]> media(@PathVariable String token) {
+        KnowledgeMediaStorageService.StoredMedia media = mediaStorage.read(token);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(media.contentType()))
+                .contentLength(media.bytes().length).body(media.bytes());
     }
 
     @GetMapping("/file/{fileId}")
@@ -141,7 +189,7 @@ public class KnowledgeController {
     ) {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String filename = String.valueOf(request.getOrDefault("filename", request.getOrDefault("title", "knowledge.txt")));
-        String content = String.valueOf(request.getOrDefault("content", ""));
+        String content = appendImages(String.valueOf(request.getOrDefault("content", "")), stringList(request.get("imageUrls")));
         String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
         return ApiResponse.ok(fileStorage.saveTextFile(filename, content, fileType));
     }
@@ -164,7 +212,7 @@ public class KnowledgeController {
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
-        String content = String.valueOf(request.getOrDefault("content", ""));
+        String content = appendImages(String.valueOf(request.getOrDefault("content", "")), stringList(request.get("imageUrls")));
         if (!content.isBlank()) {
             fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
             saved.setParseStatus("INDEXED");
@@ -229,11 +277,19 @@ public class KnowledgeController {
             @RequestParam(name = "keyword", defaultValue = "") String keyword
     ) {
         return ApiResponse.ok(fullTextSearch.search(keyword).stream()
-                .filter(result -> {
+                .map(result -> {
                     Object value = result.get("fileId");
                     Long fileId = value instanceof Number number ? number.longValue() : number(value == null ? null : value.toString(), null);
-                    return fileId != null && knowledgeStore.find(fileId).map(file -> canView(file, authorization)).orElse(false);
+                    return fileId == null ? null : knowledgeStore.find(fileId)
+                            .filter(file -> canView(file, authorization))
+                            .map(file -> {
+                                Map<String, Object> view = toView(file);
+                                view.put("snippet", result.getOrDefault("snippet", ""));
+                                view.put("score", result.getOrDefault("score", 0));
+                                return view;
+                            }).orElse(null);
                 })
+                .filter(java.util.Objects::nonNull)
                 .toList());
     }
 
@@ -483,8 +539,36 @@ public class KnowledgeController {
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));
+        List<String> imageUrls = imageUrls(file.getId());
+        view.put("imageUrls", imageUrls);
+        view.put("coverUrl", imageUrls.isEmpty() ? "" : imageUrls.get(0));
         view.put("createdAt", file.getCreatedAt());
         return view;
+    }
+
+    private List<String> imageUrls(Long fileId) {
+        return fullTextSearch.find(fileId).map(document -> {
+            List<String> urls = new java.util.ArrayList<>();
+            Matcher matcher = IMAGE_MARKUP.matcher(document.getContent());
+            while (matcher.find() && urls.size() < 12) urls.add(matcher.group(2));
+            return List.copyOf(urls);
+        }).orElse(List.of());
+    }
+
+    private String appendImages(String content, List<String> imageUrls) {
+        StringBuilder result = new StringBuilder(content == null ? "" : content.trim());
+        int index = 1;
+        for (String imageUrl : imageUrls == null ? List.<String>of() : imageUrls) {
+            if (imageUrl == null || !imageUrl.matches("/knowledge/media/[A-Za-z0-9_-]+")) continue;
+            if (result.length() > 0) result.append("\n\n");
+            result.append("![插图 ").append(index++).append("](").append(imageUrl).append(')');
+        }
+        return result.toString();
+    }
+
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> items)) return List.of();
+        return items.stream().map(String::valueOf).filter(item -> !item.isBlank()).limit(12).toList();
     }
 
     private Map<String, Object> toCategoryView(KnowledgeCategoryEntity category) {

@@ -79,6 +79,29 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void knowledgeImagesCanBeUploadedAndRenderedInPreview() {
+        byte[] png = new byte[]{(byte) 0x89, 'P', 'N', 'G', 0, 0, 0, 0};
+        var image = new org.springframework.mock.web.MockMultipartFile("files", "cover.png", "image/png", png);
+        var uploadedImage = controller.uploadImages(userAuth, List.of(image));
+        assertEquals(0, uploadedImage.code());
+        String imageUrl = String.valueOf(uploadedImage.data().get("imageUrls") instanceof List<?> urls ? urls.get(0) : "");
+
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Illustrated knowledge", "fileType", "md", "content", "# Illustrated body",
+                "imageUrls", List.of(imageUrl)));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        var detail = controller.view(userAuth, Map.of("fileId", fileId));
+
+        assertEquals(0, detail.code());
+        assertEquals(List.of(imageUrl), detail.data().get("imageUrls"));
+        assertEquals(imageUrl, detail.data().get("coverUrl"));
+        assertTrue(String.valueOf(detail.data().get("content")).contains(imageUrl));
+        var media = controller.media(imageUrl.substring(imageUrl.lastIndexOf('/') + 1));
+        assertEquals(200, media.getStatusCode().value());
+        assertEquals("image/png", media.getHeaders().getContentType().toString());
+    }
+
+    @Test
     void multipartTextFileIsStoredIndexedAndDownloadable() {
         var multipart = new org.springframework.mock.web.MockMultipartFile(
                 "file", "production-guide.md", "text/markdown", "# Production\nUse signed identities.".getBytes());
