@@ -24,6 +24,22 @@ $script:ManagedProcesses = [System.Collections.ArrayList]::new()
 
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
+function Normalize-ProcessPathEnvironment {
+    $variables = [Environment]::GetEnvironmentVariables()
+    $pathKeys = @($variables.Keys | Where-Object { $_ -ieq "Path" })
+    if ($pathKeys.Count -le 1) { return }
+
+    $pathValue = if ($variables.Contains("Path")) {
+        [string]$variables["Path"]
+    } else {
+        [string]$variables[$pathKeys[0]]
+    }
+    [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    [Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+}
+
+Normalize-ProcessPathEnvironment
+
 function Assert-Command {
     param([string]$Name, [string]$InstallHint)
     $command = Get-Command $Name -ErrorAction SilentlyContinue
