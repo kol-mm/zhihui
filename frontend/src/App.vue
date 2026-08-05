@@ -205,7 +205,9 @@
 
 <script setup lang="ts">
 import { computed, markRaw, onMounted, ref } from 'vue';
-import { ElMessage, ElMessageBox, type UploadFile, type UploadRawFile } from 'element-plus';
+import type { UploadFile, UploadRawFile } from 'element-plus';
+import { ElMessage } from 'element-plus/es/components/message/index.mjs';
+import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
 
