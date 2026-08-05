@@ -12,6 +12,7 @@ spring:
     nacos:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        ip: ${SERVICE_REGISTER_IP:127.0.0.1}
 
 internal:
   notification-token: ${INTERNAL_NOTIFICATION_TOKEN:ai-knowledge-local-internal}
