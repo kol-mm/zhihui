@@ -69,7 +69,6 @@ public class MySqlCommunityStore implements CommunityStore {
     public List<PostEntity> feed(Long authorUserId) {
         return postMapper.selectList(Wrappers.<PostEntity>lambdaQuery()
                 .eq(authorUserId != null, PostEntity::getUserId, authorUserId)
-                .eq(PostEntity::getStatus, "PUBLISHED")
                 .orderByDesc(PostEntity::getCreatedAt));
     }
 

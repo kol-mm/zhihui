@@ -104,7 +104,7 @@ public class CommunityController {
         post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "Untitled post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus("PUBLISHED");
+        post.setStatus("PENDING");
         PostEntity saved = communityStore.savePost(post);
         communityStore.savePostImages(saved.getId(), stringList(request.get("imageUrls")));
         return ApiResponse.ok(toPostView(saved));
@@ -124,7 +124,7 @@ public class CommunityController {
         post.setId(postId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "Updated post")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus("PUBLISHED");
+        post.setStatus("PENDING");
         PostEntity updated = communityStore.updatePost(post);
         if (request.containsKey("imageUrls")) communityStore.savePostImages(updated.getId(), stringList(request.get("imageUrls")));
         return ApiResponse.ok(toPostView(updated));
@@ -136,14 +136,12 @@ public class CommunityController {
             @RequestParam(name = "id", defaultValue = "1") Long id
     ) {
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
+        PostEntity post = communityStore.findPost(id).orElse(null);
+        if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         Long userId = LocalAuth.userId(authorization);
-        return communityStore.findPost(id)
-                .map(post -> {
-                    Map<String, Object> detail = toPostView(post, userId);
-                    detail.put("comments", communityStore.listComments(id).stream().map(this::toCommentView).toList());
-                    return ApiResponse.ok(detail);
-                })
-                .orElseGet(() -> ApiResponse.fail("post not found"));
+        Map<String, Object> detail = toPostView(post, userId);
+        detail.put("comments", communityStore.listComments(id).stream().map(this::toCommentView).toList());
+        return ApiResponse.ok(detail);
     }
 
     @PostMapping("/comment/create")
@@ -157,7 +155,7 @@ public class CommunityController {
         CommentEntity comment = buildComment(request, "POST", userId);
         if (comment.getPostId() <= 0 || comment.getContent().isBlank()) return ApiResponse.fail("post and comment content are required");
         var post = communityStore.findPost(comment.getPostId());
-        if (post.isEmpty()) return ApiResponse.fail("post not found");
+        if (post.isEmpty() || !canViewPost(post.get(), authorization)) return ApiResponse.fail("post not found");
         CommentEntity parent = null;
         if (comment.getParentId() != null && comment.getParentId() > 0) {
             parent = communityStore.listComments(comment.getPostId()).stream()
@@ -173,8 +171,16 @@ public class CommunityController {
     }
 
     @GetMapping("/comment/list")
-    public ApiResponse<List<Map<String, Object>>> comments(@RequestParam(name = "postId", required = false) Long postId) {
+    public ApiResponse<List<Map<String, Object>>> comments(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "postId", required = false) Long postId
+    ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
+        if (postId == null && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        if (postId != null) {
+            PostEntity post = communityStore.findPost(postId).orElse(null);
+            if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        }
         return ApiResponse.ok(communityStore.listComments(postId).stream().map(this::toCommentView).toList());
     }
 
@@ -220,7 +226,7 @@ public class CommunityController {
         post.setUserId(draft.getUserId());
         post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
         post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
-        post.setStatus("PUBLISHED");
+        post.setStatus("PENDING");
         PostEntity saved = communityStore.savePost(post);
         communityStore.removeDraft(draftId);
         return ApiResponse.ok(toPostView(saved));
@@ -256,7 +262,9 @@ public class CommunityController {
     ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
         Long userId = LocalAuth.userId(authorization);
-        return ApiResponse.ok(communityStore.feed(authorUserId).stream().map(post -> toPostView(post, userId)).toList());
+        return ApiResponse.ok(communityStore.feed(authorUserId).stream()
+                .filter(post -> canViewPost(post, authorization))
+                .map(post -> toPostView(post, userId)).toList());
     }
 
     @GetMapping("/square/following-feed")
@@ -269,6 +277,7 @@ public class CommunityController {
         List<Long> ids = java.util.Arrays.stream(followedUserIds.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).map(Long::valueOf).toList();
         return ApiResponse.ok(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
+                .filter(post -> canViewPost(post, authorization))
                 .map(post -> toPostView(post, userId)).toList());
     }
 
@@ -281,9 +290,11 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         CommentEntity comment = buildComment(request, "SQUARE", userId);
+        PostEntity post = communityStore.findPost(comment.getPostId()).orElse(null);
+        if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        if (comment.getContent().isBlank()) return ApiResponse.fail("comment content is required");
         CommentEntity saved = communityStore.saveComment(comment);
-        communityStore.findPost(saved.getPostId()).ifPresent(post ->
-                notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent()));
+        notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
         return ApiResponse.ok(toCommentView(saved));
     }
 
@@ -296,7 +307,8 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("postId"), 0L);
-        if (postId <= 0 || communityStore.findPost(postId).isEmpty()) return ApiResponse.fail("post not found");
+        PostEntity post = communityStore.findPost(postId).orElse(null);
+        if (postId <= 0 || post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         boolean collected = communityStore.togglePostCollect(userId, postId);
         return ApiResponse.ok(Map.of("postId", postId, "collected", collected));
     }
@@ -324,6 +336,8 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         Long postId = number(request.get("postId"), 0L);
+        PostEntity post = communityStore.findPost(postId).orElse(null);
+        if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         boolean liked = communityStore.togglePostLike(userId, postId);
         return ApiResponse.ok(Map.of(
                 "postId", postId,
@@ -345,7 +359,7 @@ public class CommunityController {
         List<PostEntity> feed = communityStore.feed(authorUserId);
         return ApiResponse.ok(Map.of(
                 "module", "论坛管理",
-                "publishedPosts", feed.size(),
+                "publishedPosts", feed.stream().filter(post -> "PUBLISHED".equals(post.getStatus())).count(),
                 "pendingAudit", feed.stream().filter(post -> "PENDING".equals(post.getStatus())).count(),
                 "draftsTracked", communityStore.listDrafts(authorUserId).size(),
                 "squareMode", "仅展示已关注用户动态",
@@ -365,6 +379,7 @@ public class CommunityController {
         Long postId = number(request.get("postId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "PUBLISHED"));
         String reason = String.valueOf(request.getOrDefault("reason", ""));
+        if (!List.of("PUBLISHED", "HIDDEN").contains(status)) return ApiResponse.fail("invalid post status");
         return communityStore.auditPost(postId, status, reason)
                 .map(post -> ApiResponse.ok(Map.of(
                         "post", toPostView(post),
@@ -466,5 +481,12 @@ public class CommunityController {
 
     private boolean communityEnabled() {
         return platformConfig == null || platformConfig.enabled("community_enabled", true);
+    }
+
+    private boolean canViewPost(PostEntity post, String authorization) {
+        Long viewerUserId = LocalAuth.userId(authorization);
+        return "PUBLISHED".equals(post.getStatus())
+                || LocalAuth.isAdmin(authorization)
+                || (viewerUserId != null && viewerUserId.equals(post.getUserId()));
     }
 }

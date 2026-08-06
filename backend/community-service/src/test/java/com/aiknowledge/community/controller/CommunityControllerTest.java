@@ -28,6 +28,7 @@ class CommunityControllerTest {
             );
     private final String userAuth = "Bearer " + LocalAuth.issueToken("demo");
     private final String secondUserAuth = "Bearer " + LocalAuth.issueToken("author", 2L, "USER");
+    private final String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 99L, "ADMIN");
 
     @Test
     void disabledCommunityRejectsUserWrites() {
@@ -60,6 +61,47 @@ class CommunityControllerTest {
         assertEquals(0, feed.code());
         assertFalse(feed.data().isEmpty());
         assertEquals("Community Persistence", feed.data().get(0).get("title"));
+        assertEquals("PENDING", created.data().get("status"));
+    }
+
+    @Test
+    void pendingPostIsVisibleOnlyToOwnerAndAdminUntilApproved() {
+        var created = controller.createPost(secondUserAuth, Map.of(
+                "title", "Pending visibility " + System.nanoTime(),
+                "content", "review before publishing"
+        ));
+        Long postId = ((Number) created.data().get("id")).longValue();
+
+        assertEquals(true, controller.feed(secondUserAuth, 2L).data().stream()
+                .anyMatch(post -> postId.equals(post.get("id"))));
+        assertEquals(false, controller.feed(userAuth, null).data().stream()
+                .anyMatch(post -> postId.equals(post.get("id"))));
+        assertEquals(false, controller.followingFeed(userAuth, "2").data().stream()
+                .anyMatch(post -> postId.equals(post.get("id"))));
+        assertEquals(500, controller.detail(userAuth, postId).code());
+        assertEquals(500, controller.likePost(userAuth, Map.of("postId", postId)).code());
+        assertEquals(500, controller.squareCollect(userAuth, Map.of("postId", postId)).code());
+        assertEquals(500, controller.createComment(userAuth, Map.of("postId", postId, "content", "hidden reply")).code());
+        assertEquals(true, controller.feed(adminAuth, null).data().stream()
+                .anyMatch(post -> postId.equals(post.get("id"))));
+
+        assertEquals(0, controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED")).code());
+        assertEquals(0, controller.detail(userAuth, postId).code());
+        assertEquals(true, controller.feed(userAuth, null).data().stream()
+                .anyMatch(post -> postId.equals(post.get("id"))));
+    }
+
+    @Test
+    void editingPublishedPostReturnsItToPendingReview() {
+        var created = controller.createPost(secondUserAuth, Map.of("title", "Before edit", "content", "approved body"));
+        Long postId = ((Number) created.data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+
+        var updated = controller.updatePost(secondUserAuth, Map.of("id", postId, "title", "After edit", "content", "changed body"));
+
+        assertEquals("PENDING", updated.data().get("status"));
+        assertEquals(500, controller.detail(userAuth, postId).code());
+        assertEquals(0, controller.detail(secondUserAuth, postId).code());
     }
 
     @Test
@@ -77,7 +119,9 @@ class CommunityControllerTest {
 
     @Test
     void postCanBeLikedAndFollowingFeedCanBeFiltered() {
-        controller.createPost(secondUserAuth, Map.of("userId", 999L, "title", "followed", "content", "visible"));
+        var created = controller.createPost(secondUserAuth, Map.of("userId", 999L, "title", "followed", "content", "visible"));
+        Long createdPostId = ((Number) created.data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", createdPostId, "status", "PUBLISHED"));
         var filtered = controller.followingFeed(userAuth, "2");
         assertEquals(1, filtered.data().size());
         Long postId = ((Number) filtered.data().get(0).get("id")).longValue();
@@ -162,7 +206,7 @@ class CommunityControllerTest {
 
     @Test
     void commentsCanBeListedWithPostDetail() {
-        int initialCommentCount = controller.comments(1L).data().size();
+        int initialCommentCount = controller.comments(userAuth, 1L).data().size();
         ApiResponse<Map<String, Object>> comment = controller.createComment(userAuth, Map.of(
                 "postId", 1L,
                 "userId", 1L,
@@ -186,7 +230,7 @@ class CommunityControllerTest {
         ));
         assertEquals(500, invalidReply.code());
 
-        ApiResponse<List<Map<String, Object>>> comments = controller.comments(1L);
+        ApiResponse<List<Map<String, Object>>> comments = controller.comments(userAuth, 1L);
         assertEquals(0, comments.code());
         assertEquals(initialCommentCount + 2, comments.data().size());
 

@@ -85,6 +85,7 @@ public class InMemoryCommunityStore implements CommunityStore {
         findPost(post.getId()).ifPresent(existing -> {
             existing.setTitle(post.getTitle());
             existing.setContent(post.getContent());
+            existing.setStatus(post.getStatus());
             existing.setUpdatedAt(LocalDateTime.now());
         });
         persist();
