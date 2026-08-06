@@ -46,7 +46,7 @@ public class InternalNotificationController {
             return ApiResponse.fail("notifications feature is disabled");
         }
         Long userId = number(request.get("userId"));
-        String title = String.valueOf(request.getOrDefault("title", "New notification")).trim();
+        String title = String.valueOf(request.getOrDefault("title", "新通知")).trim();
         String content = String.valueOf(request.getOrDefault("content", "")).trim();
         if (userId == null || userId <= 0 || title.isBlank()) return ApiResponse.fail("valid notification data is required");
         NotificationEntity notification = new NotificationEntity();

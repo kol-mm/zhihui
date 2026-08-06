@@ -229,7 +229,7 @@ public class KnowledgeController {
         KnowledgeFileEntity file = new KnowledgeFileEntity();
         file.setUserId(userId);
         file.setCategoryId(number(request.get("categoryId"), null));
-        file.setTitle(String.valueOf(request.getOrDefault("title", "Untitled knowledge file")));
+        file.setTitle(String.valueOf(request.getOrDefault("title", "未命名知识文件")));
         file.setFileUrl(String.valueOf(request.getOrDefault("fileUrl", "")));
         file.setFileType(fileType);
         file.setParseStatus("PENDING");

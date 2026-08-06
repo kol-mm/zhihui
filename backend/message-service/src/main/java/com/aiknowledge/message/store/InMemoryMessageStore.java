@@ -67,16 +67,16 @@ public class InMemoryMessageStore implements MessageStore {
         notification.setId(notificationIds.incrementAndGet());
         notification.setUserId(1L);
         notification.setType("SYSTEM");
-        notification.setTitle("Local environment is ready");
-        notification.setContent("Message service is running in local memory mode.");
+        notification.setTitle("本地环境已就绪");
+        notification.setContent("消息服务正在以本地存储模式运行。");
         notification.setIsRead(0);
         notification.setCreatedAt(LocalDateTime.now());
         notifications.add(notification);
 
         FaqEntity faq = new FaqEntity();
         faq.setId(faqIds.incrementAndGet());
-        faq.setQuestion("Which file formats are supported?");
-        faq.setAnswer("The local usable version supports Word, PDF, TXT and MD style knowledge records for upload, search and AI Q&A testing.");
+        faq.setQuestion("支持哪些文件格式？");
+        faq.setAnswer("当前版本支持上传 Word、PDF、TXT 和 Markdown 文件，并可用于搜索和 AI 问答。");
         faq.setSortNo(1);
         faq.setEnabled(1);
         faqs.add(faq);

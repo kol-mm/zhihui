@@ -4,7 +4,7 @@
     <article class="detail-document">
       <header class="detail-header">
         <div class="detail-heading">
-          <span class="file-type large">{{ file.fileType?.toUpperCase() || 'DOC' }}</span>
+          <span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span>
           <div><p>知识资源 #{{ file.id }}</p><h1>{{ file.title }}</h1><span>上传者 #{{ file.userId }} · 浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }}</span></div>
         </div>
         <div class="detail-actions">

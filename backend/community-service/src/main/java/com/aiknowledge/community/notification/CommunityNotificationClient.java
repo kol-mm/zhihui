@@ -39,8 +39,8 @@ public class CommunityNotificationClient {
             restClient.post().uri(url).header("X-Internal-Token", token).body(Map.of(
                     "userId", postOwnerId,
                     "type", "COMMENT",
-                    "title", "Your post received a new comment",
-                    "content", "Post #" + postId + ": " + abbreviate(content)
+                    "title", "你的帖子收到新评论",
+                    "content", "帖子 #" + postId + "：" + abbreviate(content)
             )).retrieve().toBodilessEntity();
         } catch (Exception error) {
             log.warn("Failed to create comment notification for post {}: {}", postId, error.getMessage());

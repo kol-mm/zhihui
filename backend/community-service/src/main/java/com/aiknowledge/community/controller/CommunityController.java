@@ -102,7 +102,7 @@ public class CommunityController {
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostEntity post = new PostEntity();
         post.setUserId(userId);
-        post.setTitle(String.valueOf(request.getOrDefault("title", "Untitled post")));
+        post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PENDING");
         PostEntity saved = communityStore.savePost(post);
@@ -122,7 +122,7 @@ public class CommunityController {
         if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this post is denied");
         PostEntity post = new PostEntity();
         post.setId(postId);
-        post.setTitle(String.valueOf(request.getOrDefault("title", "Updated post")));
+        post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus("PENDING");
         PostEntity updated = communityStore.updatePost(post);
@@ -194,7 +194,7 @@ public class CommunityController {
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostDraftEntity draft = new PostDraftEntity();
         draft.setUserId(userId);
-        draft.setTitle(String.valueOf(request.getOrDefault("title", "Untitled draft")));
+        draft.setTitle(String.valueOf(request.getOrDefault("title", "未命名草稿")));
         draft.setContent(String.valueOf(request.getOrDefault("content", "")));
         return ApiResponse.ok(toDraftView(communityStore.saveDraft(draft)));
     }

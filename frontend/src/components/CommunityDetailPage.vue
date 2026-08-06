@@ -6,7 +6,7 @@
         <header class="post-detail-author">
           <div class="user-avatar"><img v-if="author.avatarUrl" :src="resolveApiUrl(author.avatarUrl)" alt="作者头像" /><span v-else>{{ author.nickname.slice(0, 1).toUpperCase() }}</span></div>
           <div><strong>{{ author.nickname }}</strong><span>@{{ author.username }} · 帖子 #{{ post.id }}</span></div>
-          <el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ post.status }}</el-tag>
+          <el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ postStatusLabel(post.status) }}</el-tag>
         </header>
         <h1>{{ post.title }}</h1>
         <p class="post-detail-content">{{ post.content }}</p>
@@ -112,5 +112,9 @@ function submitComment() {
   emit('comment', { content, parentId:replyTarget.value?.id || 0 });
   commentText.value = '';
   replyTarget.value = undefined;
+}
+
+function postStatusLabel(status:string):string {
+  return ({ PUBLISHED:'已发布', PENDING:'待审核', HIDDEN:'已隐藏' } as Record<string,string>)[status] || status;
 }
 </script>
