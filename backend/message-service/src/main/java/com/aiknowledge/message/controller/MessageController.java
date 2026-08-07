@@ -428,11 +428,33 @@ public class MessageController {
         view.put("id", notification.getId());
         view.put("userId", notification.getUserId());
         view.put("type", notification.getType());
-        view.put("title", notification.getTitle());
-        view.put("content", notification.getContent());
+        view.put("title", localizeNotificationTitle(notification));
+        view.put("content", localizeNotificationContent(notification));
         view.put("read", notification.getIsRead() != null && notification.getIsRead() == 1);
         view.put("createdAt", notification.getCreatedAt());
         return view;
+    }
+
+    private String localizeNotificationTitle(NotificationEntity notification) {
+        String title = notification.getTitle() == null ? "" : notification.getTitle();
+        return switch (title) {
+            case "Your post received a new comment" -> "你的帖子收到新评论";
+            case "Local environment is ready" -> "本地环境已就绪";
+            default -> title;
+        };
+    }
+
+    private String localizeNotificationContent(NotificationEntity notification) {
+        String content = notification.getContent() == null ? "" : notification.getContent();
+        if ("COMMENT".equals(notification.getType()) && content.matches("^Post #\\d+:.*")) {
+            int separator = content.indexOf(':');
+            return "帖子 #" + content.substring("Post #".length(), separator) + "：" + content.substring(separator + 1).stripLeading();
+        }
+        if ("SYSTEM".equals(notification.getType())
+                && "Message service is running in local memory mode.".equals(content)) {
+            return "消息服务正在以本地存储模式运行。";
+        }
+        return content;
     }
 
     private Map<String, Object> toFaqView(FaqEntity faq) {

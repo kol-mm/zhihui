@@ -4,6 +4,7 @@ import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.common.UserRelationClient;
+import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
@@ -143,6 +144,27 @@ class MessageControllerTest {
         ApiResponse<List<Map<String, Object>>> notifications = controller.notifications(userAuth, 1L);
         assertEquals(0, notifications.code());
         assertFalse(notifications.data().isEmpty());
+    }
+
+    @Test
+    void historicalPlatformNotificationsAreLocalizedWithoutChangingUserContent() {
+        InMemoryMessageStore store = new InMemoryMessageStore();
+        NotificationEntity notification = new NotificationEntity();
+        notification.setUserId(1L);
+        notification.setType("COMMENT");
+        notification.setTitle("Your post received a new comment");
+        notification.setContent("Post #4: notification integration passed");
+        store.saveNotification(notification);
+        MessageController localized = new MessageController(
+                store,
+                new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events")
+        );
+
+        Map<String, Object> view = localized.notifications(userAuth, 1L).data().stream()
+                .filter(item -> notification.getId().equals(item.get("id")))
+                .findFirst().orElseThrow();
+        assertEquals("你的帖子收到新评论", view.get("title"));
+        assertEquals("帖子 #4：notification integration passed", view.get("content"));
     }
 
     @Test
