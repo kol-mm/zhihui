@@ -179,7 +179,7 @@
 
           <section v-else-if="activeView === 'messages'" class="message-page">
             <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ sessions.length }} 个联系人</p></div><el-button :icon="Plus" circle title="发起私信" @click="newConversation" /></div><div class="session-list"><button v-for="session in sessions" :key="session.id" :class="{ active: messageForm.sessionId === session.id }" @click="openSession(session)"><div class="mini-avatar">{{ sessionPartner(session).nickname.slice(0,1).toUpperCase() }}</div><span><strong>{{ sessionPartner(session).nickname }}</strong><small>{{ session.lastMessage || `@${sessionPartner(session).username}` }}</small></span></button></div><el-empty v-if="!sessions.length" description="暂无私信会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" description="选择联系人并发送第一条消息" /></div><div class="message-compose"><el-input v-model="messageForm.content" :disabled="!messageForm.sessionId" placeholder="输入消息" @keyup.enter="sendMessage" /><el-button type="primary" :icon="Promotion" :disabled="!messageForm.sessionId" @click="sendMessage">发送</el-button></div></section>
+            <section class="surface conversation-panel"><div class="conversation-head"><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" description="选择联系人并发送第一条消息" /></div><div class="message-compose"><el-input v-model="messageForm.content" :disabled="!messageForm.sessionId" placeholder="输入消息" @keyup.enter="sendMessage" /><el-button type="primary" :icon="Promotion" :disabled="!messageForm.sessionId" @click="sendMessage">发送</el-button></div></section>
           </section>
 
           <section v-else-if="activeView === 'ai'" class="ai-page">
@@ -308,6 +308,7 @@ type AiReference = { id:number; file_id:number; title:string; content:string; sc
 type AiMessageView = { role:'user'|'assistant'; content:string; references?:AiReference[] };
 type NavigationItem = { key:string; label:string; icon:ReturnType<typeof markRaw>; badge?:number };
 type DetailRoute = { kind:'knowledge'|'community'; id:number };
+type AuthResult = { token:string; role:string; user:UserRecord };
 
 const authenticated = ref(Boolean(getAuthToken()));
 const busy = ref(false); const aiBusy = ref(false); const aiIndexBusy = ref(false); const mobileMenuOpen = ref(false); const sidebarCollapsed = ref(false);
@@ -437,22 +438,26 @@ async function loadCaptcha(){
 }
 function useAccount(user:string,password:string){ loginForm.value={username:user,password,captchaId:loginForm.value.captchaId,captchaAnswer:''}; }
 
+async function completeAuthentication(result:AuthResult){
+  setAuthToken(result.token);username.value=result.user.username;displayName.value=result.user.nickname;avatarUrl.value=result.user.avatarUrl||'';role.value=result.role;currentUserId.value=result.user.id;
+  localStorage.setItem('ai-knowledge-username',username.value);localStorage.setItem('ai-knowledge-name',displayName.value);localStorage.setItem('ai-knowledge-avatar',avatarUrl.value);localStorage.setItem('ai-knowledge-role',role.value);localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value));
+  authenticated.value=true;portal.value=result.role==='ADMIN'?'admin':'client';activeView.value=result.role==='ADMIN'?'dashboard':'home';syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();
+}
+
 async function registerAccount(){
   if(!registerForm.value.username.trim() || registerForm.value.password.length < 8){ ElMessage.warning('请输入用户名，密码至少 8 位'); return; }
   if(!registerForm.value.captchaAnswer.trim()){ ElMessage.warning('请输入验证码'); return; }
   busy.value=true;
   try{
-    await postData('/user/register',registerForm.value);
-    loginForm.value={username:registerForm.value.username,password:registerForm.value.password,captchaId:'',captchaAnswer:''};
+    const result=await postData<AuthResult>('/user/register',registerForm.value);
     registerDialog.value=false;
-    captchaRefreshPending=true;
-    ElMessage.success('注册成功，验证码将在冷却结束后自动刷新，请再登录');
-    await loadCaptcha();
+    await completeAuthentication(result);
+    ElMessage.success('注册并登录成功');
   }catch(error){ notifyError(error); captchaRefreshPending=true; await loadCaptcha(); }
   finally{ busy.value=false; }
 }
 
-async function login(){if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await loadPublicConfig(); await refreshCurrentView(); await loadDetailRoute(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); captchaRefreshPending=true; await loadCaptcha(); } finally{busy.value=false;} }
+async function login(){if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);captchaRefreshPending=true;await loadCaptcha();}finally{busy.value=false;}}
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value=await getData('/ai/config/public');}catch{platformConfig.value={max_upload_mb:25,notifications_enabled:true,community_enabled:true};}}

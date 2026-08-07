@@ -3,6 +3,7 @@ package com.aiknowledge.message.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.common.UserRelationClient;
 import com.aiknowledge.message.event.LocalEventBusService;
 import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
@@ -83,6 +84,33 @@ class MessageControllerTest {
                 "content", "not allowed"
         )).code());
         assertEquals(500, controller.list(outsiderAuth, sessionId, 3L).code());
+    }
+
+    @Test
+    void recipientCannotDeleteTheSendersMessage() {
+        var session = controller.createSession(userAuth, Map.of("targetUserId", 7L));
+        Long sessionId = ((Number) session.data().get("id")).longValue();
+        Long messageId = ((Number) controller.send(userAuth, Map.of(
+                "sessionId", sessionId,
+                "content", "sender-owned"
+        )).data().get("id")).longValue();
+        String recipientAuth = "Bearer " + LocalAuth.issueToken("recipient", 7L, "USER");
+
+        assertEquals(500, controller.deleteMessage(recipientAuth, Map.of("messageId", messageId)).code());
+        assertEquals(0, controller.deleteMessage(userAuth, Map.of("messageId", messageId)).code());
+    }
+
+    @Test
+    void blockedUsersCannotStartAConversation() {
+        UserRelationClient relations = mock(UserRelationClient.class);
+        when(relations.interactionAllowed(1L, 7L)).thenReturn(false);
+        MessageController restricted = new MessageController(
+                new InMemoryMessageStore(),
+                new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events"),
+                null,
+                relations
+        );
+        assertEquals(500, restricted.createSession(userAuth, Map.of("targetUserId", 7L)).code());
     }
 
     @Test

@@ -67,6 +67,8 @@ class UserControllerTest {
         registrationRequest.put("nickname", "Alice");
         ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
         assertEquals(0, registration.code());
+        assertNotNull(registration.data().get("token"));
+        assertEquals("USER", registration.data().get("role"));
 
         ApiResponse<Map<String, Object>> login =
                 controller.login(credentials("alice", "secret123"));
@@ -88,6 +90,22 @@ class UserControllerTest {
         ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
         assertEquals(500, registration.code());
         assertEquals("USER", LocalAuth.roleForUsername("Admin"));
+    }
+
+    @Test
+    void disabledUserCannotLogin() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin");
+        assertEquals(0, controller.updateUserStatus(adminAuth, Map.of("userId", 1L, "status", "DISABLED")).code());
+        assertEquals(500, controller.login(credentials("demo", "demo")).code());
+        controller.updateUserStatus(adminAuth, Map.of("userId", 1L, "status", "ACTIVE"));
+    }
+
+    @Test
+    void blockedUsersCannotFollowEachOther() {
+        String userAuth = "Bearer " + LocalAuth.issueToken("demo");
+        assertEquals(0, controller.block(userAuth, Map.of("targetUserId", 2L)).code());
+        assertEquals(500, controller.follow(userAuth, Map.of("targetUserId", 2L)).code());
+        assertEquals(0, controller.unblock(userAuth, Map.of("targetUserId", 2L)).code());
     }
 
     @Test

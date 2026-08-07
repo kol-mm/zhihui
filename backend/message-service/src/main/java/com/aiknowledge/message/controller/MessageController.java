@@ -3,6 +3,7 @@ package com.aiknowledge.message.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.common.UserRelationClient;
 import com.aiknowledge.message.entity.ChatMessageEntity;
 import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
@@ -29,12 +30,19 @@ public class MessageController {
     private final MessageStore messageStore;
     private final LocalEventBusService eventBus;
     private final PlatformConfigClient platformConfig;
+    private final UserRelationClient userRelationClient;
 
     @Autowired
-    public MessageController(MessageStore messageStore, LocalEventBusService eventBus, PlatformConfigClient platformConfig) {
+    public MessageController(MessageStore messageStore, LocalEventBusService eventBus,
+                             PlatformConfigClient platformConfig, UserRelationClient userRelationClient) {
         this.messageStore = messageStore;
         this.eventBus = eventBus;
         this.platformConfig = platformConfig;
+        this.userRelationClient = userRelationClient;
+    }
+
+    public MessageController(MessageStore messageStore, LocalEventBusService eventBus, PlatformConfigClient platformConfig) {
+        this(messageStore, eventBus, platformConfig, null);
     }
 
     public MessageController(MessageStore messageStore, LocalEventBusService eventBus) {
@@ -58,6 +66,8 @@ public class MessageController {
         ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
         if (session == null) return ApiResponse.fail("chat session not found");
         if (!isParticipant(session, senderId)) return ApiResponse.fail("user is not a participant of this session");
+        Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
+        if (!interactionAllowed(senderId, recipientId)) return ApiResponse.fail("interaction with this user is blocked");
         if (content.isBlank()) return ApiResponse.fail("message content is required");
         ChatMessageEntity message = new ChatMessageEntity();
         message.setSessionId(sessionId);
@@ -65,7 +75,6 @@ public class MessageController {
         message.setContent(content);
         message.setStatus("NORMAL");
         ChatMessageEntity saved = messageStore.sendMessage(message);
-        Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
         if (notificationsEnabled()) {
         NotificationEntity notification = new NotificationEntity();
         notification.setUserId(recipientId);
@@ -92,6 +101,7 @@ public class MessageController {
         Long targetUserId = number(request.get("targetUserId"), 0L);
         if (userId <= 0 || targetUserId <= 0) return ApiResponse.fail("both users are required");
         if (userId.equals(targetUserId)) return ApiResponse.fail("cannot create a private chat with yourself");
+        if (!interactionAllowed(userId, targetUserId)) return ApiResponse.fail("interaction with this user is blocked");
         return ApiResponse.ok(toSessionView(messageStore.getOrCreateSession(userId, targetUserId), userId));
     }
 
@@ -146,6 +156,9 @@ public class MessageController {
         ChatSessionEntity session = messageStore.findSession(message.getSessionId()).orElse(null);
         if (session == null || !isParticipant(session, userId)) {
             return ApiResponse.fail("user is not a participant of this session");
+        }
+        if (!userId.equals(message.getSenderId()) && !LocalAuth.isAdmin(authorization)) {
+            return ApiResponse.fail("only the sender can delete this message");
         }
         boolean removed = messageStore.deleteMessage(messageId);
         if (removed) eventBus.publish("MESSAGE_DELETED", String.valueOf(messageId), Map.of("removed", true));
@@ -375,6 +388,10 @@ public class MessageController {
         view.put("status", event.getStatus());
         view.put("createdAt", event.getCreatedAt());
         return view;
+    }
+
+    private boolean interactionAllowed(Long userId, Long targetUserId) {
+        return userRelationClient == null || userRelationClient.interactionAllowed(userId, targetUserId);
     }
 
     private Map<String, Object> toMessageView(ChatMessageEntity message) {

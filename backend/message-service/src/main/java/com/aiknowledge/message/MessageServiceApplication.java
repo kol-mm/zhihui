@@ -1,6 +1,7 @@
 package com.aiknowledge.message;
 
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.common.UserRelationClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
@@ -19,5 +20,14 @@ public class MessageServiceApplication {
             @Value("${platform.ai-config-url:http://127.0.0.1:8200/ai/config/public}") String configUrl
     ) {
         return new PlatformConfigClient(objectMapper, configUrl);
+    }
+
+    @Bean
+    UserRelationClient userRelationClient(
+            ObjectMapper objectMapper,
+            @Value("${platform.user-relation-url:http://127.0.0.1:8101/user/internal/relation}") String relationUrl,
+            @Value("${platform.internal-user-token:ai-knowledge-local-internal}") String internalToken
+    ) {
+        return new UserRelationClient(objectMapper, relationUrl, internalToken);
     }
 }

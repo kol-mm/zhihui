@@ -3,6 +3,7 @@ package com.aiknowledge.community.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.common.UserRelationClient;
 import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
@@ -34,14 +35,22 @@ public class CommunityController {
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
     private final PlatformConfigClient platformConfig;
+    private final UserRelationClient userRelationClient;
 
     @Autowired
     public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
-                               CommunityNotificationClient notificationClient, PlatformConfigClient platformConfig) {
+                               CommunityNotificationClient notificationClient, PlatformConfigClient platformConfig,
+                               UserRelationClient userRelationClient) {
         this.communityStore = communityStore;
         this.mediaStorage = mediaStorage;
         this.notificationClient = notificationClient;
         this.platformConfig = platformConfig;
+        this.userRelationClient = userRelationClient;
+    }
+
+    public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
+                               CommunityNotificationClient notificationClient, PlatformConfigClient platformConfig) {
+        this(communityStore, mediaStorage, notificationClient, platformConfig, null);
     }
 
     public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
@@ -156,12 +165,14 @@ public class CommunityController {
         if (comment.getPostId() <= 0 || comment.getContent().isBlank()) return ApiResponse.fail("post and comment content are required");
         var post = communityStore.findPost(comment.getPostId());
         if (post.isEmpty() || !canViewPost(post.get(), authorization)) return ApiResponse.fail("post not found");
+        if (!interactionAllowed(userId, post.get().getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         CommentEntity parent = null;
         if (comment.getParentId() != null && comment.getParentId() > 0) {
             parent = communityStore.listComments(comment.getPostId()).stream()
                     .filter(item -> comment.getParentId().equals(item.getId()))
                     .findFirst().orElse(null);
             if (parent == null) return ApiResponse.fail("parent comment does not belong to this post");
+            if (!interactionAllowed(userId, parent.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         }
         comment.setContent(comment.getContent().trim());
         CommentEntity saved = communityStore.saveComment(comment);
@@ -292,6 +303,7 @@ public class CommunityController {
         CommentEntity comment = buildComment(request, "SQUARE", userId);
         PostEntity post = communityStore.findPost(comment.getPostId()).orElse(null);
         if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        if (!interactionAllowed(userId, post.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         if (comment.getContent().isBlank()) return ApiResponse.fail("comment content is required");
         CommentEntity saved = communityStore.saveComment(comment);
         notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
@@ -309,6 +321,7 @@ public class CommunityController {
         Long postId = number(request.get("postId"), 0L);
         PostEntity post = communityStore.findPost(postId).orElse(null);
         if (postId <= 0 || post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        if (!interactionAllowed(userId, post.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         boolean collected = communityStore.togglePostCollect(userId, postId);
         return ApiResponse.ok(Map.of("postId", postId, "collected", collected));
     }
@@ -338,6 +351,7 @@ public class CommunityController {
         Long postId = number(request.get("postId"), 0L);
         PostEntity post = communityStore.findPost(postId).orElse(null);
         if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        if (!interactionAllowed(userId, post.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         boolean liked = communityStore.togglePostLike(userId, postId);
         return ApiResponse.ok(Map.of(
                 "postId", postId,
@@ -481,6 +495,12 @@ public class CommunityController {
 
     private boolean communityEnabled() {
         return platformConfig == null || platformConfig.enabled("community_enabled", true);
+    }
+
+    private boolean interactionAllowed(Long userId, Long targetUserId) {
+        return userId != null && targetUserId != null
+                && (userId.equals(targetUserId) || userRelationClient == null
+                || userRelationClient.interactionAllowed(userId, targetUserId));
     }
 
     private boolean canViewPost(PostEntity post, String authorization) {

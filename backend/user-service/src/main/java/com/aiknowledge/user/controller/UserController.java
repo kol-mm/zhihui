@@ -119,7 +119,8 @@ public class UserController {
         String nickname = request.getOrDefault("nickname", username).trim();
         user.setNickname(nickname.isBlank() ? username : nickname.substring(0, Math.min(nickname.length(), 64)));
         user.setStatus("ACTIVE");
-        return ApiResponse.ok(toView(userStore.save(user)));
+        UserEntity saved = userStore.save(user);
+        return ApiResponse.ok(authResult(saved));
     }
 
     @PostMapping("/login")
@@ -132,11 +133,22 @@ public class UserController {
         if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
             return ApiResponse.fail("invalid username or password");
         }
-        return ApiResponse.ok(Map.of(
-                "token", LocalAuth.issueToken(username, user.getId(), LocalAuth.roleForUsername(username)),
-                "role", LocalAuth.roleForUsername(username),
-                "user", toView(user)
-        ));
+        if (!"ACTIVE".equals(user.getStatus())) return ApiResponse.fail("user account is disabled");
+        return ApiResponse.ok(authResult(user));
+    }
+
+    @GetMapping("/internal/relation")
+    public ApiResponse<Map<String, Object>> internalRelation(
+            @RequestHeader(name = "X-Internal-Token", required = false) String token,
+            @RequestParam Long userId,
+            @RequestParam Long targetUserId
+    ) {
+        if (!internalToken().equals(token)) return ApiResponse.fail("internal authorization is required");
+        UserEntity target = userStore.findById(targetUserId).orElse(null);
+        boolean blocked = userStore.listBlockedIds(userId).contains(targetUserId)
+                || userStore.listBlockedIds(targetUserId).contains(userId);
+        boolean active = target != null && "ACTIVE".equals(target.getStatus());
+        return ApiResponse.ok(Map.of("blocked", blocked, "targetActive", active, "allowed", active && !blocked));
     }
 
     @GetMapping("/session")
@@ -220,6 +232,10 @@ public class UserController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
+        if (userId.equals(targetUserId)) return ApiResponse.fail("cannot follow yourself");
+        UserEntity target = userStore.findById(targetUserId).orElse(null);
+        if (target == null || !"ACTIVE".equals(target.getStatus())) return ApiResponse.fail("user not found");
+        if (isBlockedEitherDirection(userId, targetUserId)) return ApiResponse.fail("interaction with this user is blocked");
         userStore.follow(userId, targetUserId);
         return ApiResponse.ok(Map.of("userId", userId, "followedUserId", targetUserId, "followed", true));
     }
@@ -257,7 +273,9 @@ public class UserController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long targetUserId = number(request.get("targetUserId"), 0L);
+        if (userId.equals(targetUserId) || userStore.findById(targetUserId).isEmpty()) return ApiResponse.fail("user not found");
         userStore.block(userId, targetUserId);
+        userStore.unfollow(targetUserId, userId);
         return ApiResponse.ok(Map.of("userId", userId, "blockedUserId", targetUserId, "blocked", true));
     }
 
@@ -411,5 +429,24 @@ public class UserController {
 
     private boolean verifyCaptcha(Map<String, String> request) {
         return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"));
+    }
+
+    private boolean isBlockedEitherDirection(Long userId, Long targetUserId) {
+        return userStore.listBlockedIds(userId).contains(targetUserId)
+                || userStore.listBlockedIds(targetUserId).contains(userId);
+    }
+
+    private Map<String, Object> authResult(UserEntity user) {
+        String role = LocalAuth.roleForUsername(user.getUsername());
+        return Map.of(
+                "token", LocalAuth.issueToken(user.getUsername(), user.getId(), role),
+                "role", role,
+                "user", toView(user)
+        );
+    }
+
+    private String internalToken() {
+        String configured = System.getenv("INTERNAL_USER_TOKEN");
+        return configured == null || configured.isBlank() ? "ai-knowledge-local-internal" : configured;
     }
 }
