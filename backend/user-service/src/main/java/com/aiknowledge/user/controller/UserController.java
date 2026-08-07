@@ -186,6 +186,34 @@ public class UserController {
                 .orElseGet(java.util.List::of));
     }
 
+    @GetMapping("/summaries")
+    public ApiResponse<java.util.List<Map<String, Object>>> summaries(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "ids", defaultValue = "") String ids
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
+        try {
+            java.util.List<Long> requestedIds = java.util.Arrays.stream(ids.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .map(Long::valueOf)
+                    .filter(value -> value > 0)
+                    .distinct()
+                    .limit(100)
+                    .toList();
+            if (requestedIds.isEmpty()) return ApiResponse.ok(java.util.List.of());
+            Map<Long, UserEntity> usersById = userStore.findByIds(requestedIds).stream()
+                    .collect(java.util.stream.Collectors.toMap(UserEntity::getId, user -> user));
+            return ApiResponse.ok(requestedIds.stream()
+                    .map(usersById::get)
+                    .filter(java.util.Objects::nonNull)
+                    .map(this::toPublicSummary)
+                    .toList());
+        } catch (NumberFormatException error) {
+            return ApiResponse.fail("user ids must be positive numbers");
+        }
+    }
+
     @PostMapping("/profile")
     public ApiResponse<Map<String, Object>> updateProfile(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -424,6 +452,16 @@ public class UserController {
         view.put("signature", user.getSignature());
         view.put("status", user.getStatus());
         view.put("role", LocalAuth.roleForUsername(user.getUsername()));
+        return view;
+    }
+
+    private Map<String, Object> toPublicSummary(UserEntity user) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", user.getId());
+        view.put("username", user.getUsername());
+        view.put("nickname", user.getNickname());
+        view.put("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl());
+        view.put("status", user.getStatus());
         return view;
     }
 

@@ -75,6 +75,7 @@
         <KnowledgeDetailPage
           v-else-if="detailRoute?.kind === 'knowledge' && detailKnowledge"
           :file="detailKnowledge"
+          :author="communityUser(detailKnowledge.userId)"
           :blocks="detailKnowledgeBlocks"
           :pdf-preview-url="detailPdfPreviewUrl"
           :current-user-id="currentUserId"
@@ -132,7 +133,7 @@
               <section class="surface">
                 <div class="surface-head"><div><h3>社区动态</h3><p>关注内容与最新讨论</p></div><el-button text type="primary" @click="selectView('community')">进入广场</el-button></div>
                 <div v-if="feedPosts.length" class="feed-mini">
-                  <article v-for="post in feedPosts.slice(0, 3)" :key="post.id" class="feed-mini-link" @click="openPostDetail(post)"><div class="mini-avatar">{{ post.userId }}</div><div><strong>{{ post.title }}</strong><p>{{ post.content }}</p><small>用户 {{ post.userId }} · {{ post.likes || 0 }} 赞</small></div></article>
+                  <article v-for="post in feedPosts.slice(0, 3)" :key="post.id" class="feed-mini-link" @click="openPostDetail(post)"><div class="mini-avatar">{{ communityUser(post.userId).nickname.slice(0, 1) }}</div><div><strong>{{ post.title }}</strong><p>{{ post.content }}</p><small>{{ communityUser(post.userId).nickname }} · {{ post.likes || 0 }} 赞</small></div></article>
                 </div><el-empty v-else description="暂无社区动态" />
               </section>
             </div>
@@ -155,7 +156,7 @@
                   <el-tag v-if="file.collected" class="knowledge-collected-badge" type="success" effect="plain">已收藏</el-tag>
                   <img v-if="file.coverUrl" class="knowledge-cover" :src="resolveApiUrl(file.coverUrl)" :alt="`${file.title}封面`" />
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
-                  <h4>{{ file.title }}</h4><p>上传者 #{{ file.userId }} · 资源编号 {{ file.id }}</p>
+                  <h4>{{ file.title }}</h4><p>{{ communityUser(file.userId).nickname }} · @{{ communityUser(file.userId).username }}</p>
                   <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
                   <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.userId !== currentUserId" text :type="isFollowing(file.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(file.userId)">{{ isFollowing(file.userId) ? '取消关注' : '关注作者' }}</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">{{ file.liked ? '取消点赞' : '点赞' }}</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item v-if="file.userId === currentUserId" divided @click="deleteKnowledge(file)">删除资源</el-dropdown-item><el-dropdown-item v-else divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
                 </article>
@@ -358,6 +359,7 @@ const myKnowledge = ref<KnowledgeFile[]>([]); const knowledgeActivityType = ref(
 const adminOverview = ref<Record<string, Record<string, unknown>>>({}); const aiOverview = ref<Record<string, unknown>>({});
 const followData = ref<{ followedUserIds?:number[]; followerUserIds?:number[] }>({});
 const relationTargetUser = ref<UserRecord>(); const conversationUsername = ref(''); const conversationTargetUser = ref<UserRecord>(); const systemHealth = ref<Record<string,boolean>>({});
+const userSummaries = ref<Record<number, UserRecord>>({}); const resolvedUserIds = new Set<number>();
 const aiQuestion = ref(''); const aiMessages = ref<AiMessageView[]>([]); const aiSessions = ref<AiSession[]>([]); const aiSessionId = ref<number>();
 const editingPostId = ref(0); const editingDraftId = ref(0);
 const selectedKnowledge = ref<KnowledgeFile>();
@@ -385,7 +387,7 @@ const healthItems = computed(() => [{label:'网关与用户服务',ok:systemHeal
 const currentMessageSession = computed(() => sessions.value.find(session => session.id === messageForm.value.sessionId));
 const currentMessagePartner = computed(() => currentMessageSession.value ? sessionPartner(currentMessageSession.value) : undefined);
 const postDialogTitle = computed(() => editingPostId.value ? '编辑社区帖子' : editingDraftId.value ? '编辑草稿' : '发布社区帖子');
-const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUserId.value)]);
+const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUserId.value), ...Object.values(userSummaries.value).filter(user => user.id !== currentUserId.value)]);
 const filteredAdminChatSessions = computed(() => adminChatSessions.value.filter(session => governanceMatches(session.id,session.userAId,session.userBId,session.status,session.lastMessage)));
 const filteredAdminComments = computed(() => adminComments.value.filter(comment => governanceMatches(comment.id,comment.postId,comment.userId,comment.content)));
 const filteredAdminDrafts = computed(() => adminDrafts.value.filter(draft => governanceMatches(draft.id,draft.userId,draft.title,draft.content)));
@@ -488,12 +490,14 @@ async function loadDetailRoute(){
     if(route.kind==='knowledge'){
       const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:route.id});
       detailKnowledge.value=detail;detailKnowledgeBlocks.value=parseKnowledgeContent(detail);detailPost.value=undefined;detailComments.value=[];
+      await loadUserSummaries([detail.userId]);
       if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}
       if(detail.fileType?.toLowerCase()==='pdf'&&detail.fileUrl){const blob=await downloadData(`/knowledge/file/${detail.id}`);detailPdfPreviewUrl.value=URL.createObjectURL(blob);}
       await recordBehavior('VIEW','KNOWLEDGE',detail.id);
     }else{
       const [post,commentsResult]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<Comment[]>(`/comment/list?postId=${route.id}`)]);
       detailPost.value=post;detailComments.value=commentsResult;detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];
+      await loadUserSummaries([post.userId,...commentsResult.map(comment=>comment.userId)]);
     }
     window.scrollTo({top:0,behavior:'auto'});
   }catch(error){detailError.value=error instanceof Error?error.message:'详情加载失败，请重试';}
@@ -506,8 +510,8 @@ function handlePopState(){const route=parseDetailPath();if(route)void loadDetail
 async function loadFollowData(){followData.value=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);}
 function isFollowing(userId:number){return Boolean(followData.value.followedUserIds?.includes(userId));}
 async function toggleFollowAuthor(userId:number){if(userId===currentUserId.value)return;const wasFollowing=isFollowing(userId);if(wasFollowing)await deleteData('/user/follow',{targetUserId:userId});else await postData('/user/follow',{targetUserId:userId});await loadFollowData();if(wasFollowing&&feedMode.value==='following')feedPosts.value=feedPosts.value.filter(post=>post.userId!==userId);ElMessage.success(wasFollowing?'已取消关注':'已关注作者');}
-async function loadKnowledge(){ const [files,categories,follows]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories'),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`)]); knowledgeFiles.value=files; knowledgeCategories.value=categories; followData.value=follows; }
-async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; }
+async function loadKnowledge(){ const [files,categories,follows]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories'),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`)]); knowledgeFiles.value=files; knowledgeCategories.value=categories; followData.value=follows; await loadUserSummaries(files.map(file=>file.userId)); }
+async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; await loadUserSummaries(results.map(file=>file.userId)); }
 function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformConfig.value.max_upload_mb*1024*1024){selectedKnowledgeFile.value=undefined;ElMessage.error(`文件不能超过 ${platformConfig.value.max_upload_mb} MB`);return;}selectedKnowledgeFile.value=file.raw;if(file.raw&&!knowledgeForm.value.title)knowledgeForm.value.title=file.name.replace(/\.[^.]+$/,'');}
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
 async function uploadKnowledge(){if(!selectedKnowledgeFile.value&&!knowledgeForm.value.content.trim()){ElMessage.warning('请选择文件或填写文本正文');return;}busy.value=true;try{if(selectedKnowledgeFile.value){const form=new FormData();form.append('file',selectedKnowledgeFile.value);form.append('title',knowledgeForm.value.title);if(knowledgeForm.value.categoryId)form.append('categoryId',String(knowledgeForm.value.categoryId));await postFormData('/knowledge/file/upload',form);}else{const stored=await postData<{fileUrl:string}>('/knowledge/storage/upload',{filename:knowledgeForm.value.filename,content:knowledgeForm.value.content,fileType:knowledgeForm.value.fileType,title:knowledgeForm.value.title});await postData('/knowledge/upload',{title:knowledgeForm.value.title||knowledgeForm.value.filename,fileType:knowledgeForm.value.fileType,fileUrl:stored.fileUrl,content:knowledgeForm.value.content,categoryId:knowledgeForm.value.categoryId||null});}knowledgeDialog.value=false;selectedKnowledgeFile.value=undefined;knowledgeForm.value.title='';knowledgeForm.value.content='';knowledgeForm.value.categoryId=0;await loadKnowledge();ElMessage.success('资料已保存并完成正文索引，等待管理员审核');}catch(error){notifyError(error);}finally{busy.value=false;}}
@@ -525,16 +529,17 @@ async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/f
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
 async function deleteKnowledge(file:KnowledgeFile){await ElMessageBox.confirm(`删除“${file.title}”后正文、收藏和互动记录都无法恢复，确认继续？`,'删除知识资源',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/knowledge/file',{fileId:file.id});if(role.value==='ADMIN'){try{await deleteData(`/ai/admin/index/file/${file.id}`);}catch{/* 本地全文索引和业务数据已完成删除，AI 索引可由管理员稍后重建。 */}}knowledgeFiles.value=knowledgeFiles.value.filter(item=>item.id!==file.id);myKnowledge.value=myKnowledge.value.filter(item=>item.id!==file.id);if(detailKnowledge.value?.id===file.id)leaveDetail();ElMessage.success('知识资源已删除');}
 
-async function loadFeed(mode:'all'|'following'|'mine'=feedMode.value){ if(mode==='mine'){await Promise.all([loadMyPosts(),loadFollowData()]);return;} feedMode.value=mode; const relations=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);followData.value=relations;if(mode==='following')feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);else feedPosts.value=await getData('/square/feed'); }
-function communityUser(userId:number):UserRecord{return userId===currentUserId.value?{id:userId,username:username.value,nickname:displayName.value,avatarUrl:avatarUrl.value,status:'ACTIVE',role:role.value}:{id:userId,username:`user${userId}`,nickname:`用户 ${userId}`,status:'ACTIVE',role:'USER'};}
+async function loadFeed(mode:'all'|'following'|'mine'=feedMode.value){ if(mode==='mine'){await Promise.all([loadMyPosts(),loadFollowData()]);return;} feedMode.value=mode; const relations=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);followData.value=relations;if(mode==='following')feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);else feedPosts.value=await getData('/square/feed');await loadUserSummaries(feedPosts.value.map(post=>post.userId)); }
+function communityUser(userId:number):UserRecord{return userId===currentUserId.value?{id:userId,username:username.value,nickname:displayName.value,avatarUrl:avatarUrl.value,status:'ACTIVE',role:role.value}:userSummaries.value[userId]||{id:userId,username:'unknown',nickname:'已注销用户',status:'DISABLED',role:'USER'};}
+async function loadUserSummaries(userIds:number[]){const requested=[...new Set(userIds.filter(id=>Number.isSafeInteger(id)&&id>0&&!resolvedUserIds.has(id)))];if(!requested.length)return;try{const summaries=await getData<UserRecord[]>(`/user/summaries?ids=${requested.join(',')}`);requested.forEach(id=>resolvedUserIds.add(id));userSummaries.value={...userSummaries.value,...Object.fromEntries(summaries.map(user=>[user.id,user]))};}catch{/* 资料服务短暂不可用时保留内容页面，后续刷新会重试。 */}}
 function handlePostImages(_file:UploadFile, files:UploadFile[]){selectedPostImages.value=files.map(file=>file.raw).filter((file):file is UploadRawFile=>Boolean(file));}
 async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.content.trim()){ElMessage.warning('请填写标题和正文');return;} const wasEditing=Boolean(editingPostId.value);busy.value=true;try{let imageUrls:string[]|undefined;if(selectedPostImages.value.length){const form=new FormData();selectedPostImages.value.forEach(file=>form.append('files',file));const uploaded=await postFormData<{imageUrls:string[]}>('/post/media/upload',form);imageUrls=uploaded.imageUrls;}if(editingPostId.value){await putData('/post/update',{id:editingPostId.value,title:postForm.value.title,content:postForm.value.content,...(imageUrls?{imageUrls}:{})});}else if(editingDraftId.value){await postData('/post/draft/publish',{id:editingDraftId.value,title:postForm.value.title,content:postForm.value.content});}else{await postData('/post/create',{...postForm.value,imageUrls:imageUrls||[]});}postDialog.value=false;await loadDrafts();await loadFeed(wasEditing||feedMode.value==='mine'?'mine':'all');if(detailRoute.value?.kind==='community')await loadDetailRoute();ElMessage.success(wasEditing?'修改已提交审核':'帖子已提交审核');}catch(error){notifyError(error);}finally{busy.value=false;} }
 async function saveDraft(){if(!postForm.value.title.trim()&&!postForm.value.content.trim()){ElMessage.warning('请至少填写标题或正文');return;}if(editingDraftId.value)await putData('/post/draft',{id:editingDraftId.value,title:postForm.value.title||'未命名草稿',content:postForm.value.content});else await postData('/post/draft',{title:postForm.value.title||'未命名草稿',content:postForm.value.content});postDialog.value=false;await loadDrafts();ElMessage.success('草稿已保存'); }
 async function loadDrafts(){ drafts.value=await getData(`/post/drafts?userId=${currentUserId.value}`); }
 async function loadMyKnowledge(){myKnowledge.value=await getData<KnowledgeFile[]>(`/knowledge/mine?type=${knowledgeActivityType.value}`);}
-async function loadCollectedPosts(){collectedPosts.value=await getData<Post[]>('/square/collections');}
+async function loadCollectedPosts(){collectedPosts.value=await getData<Post[]>('/square/collections');await loadUserSummaries(collectedPosts.value.map(post=>post.userId));}
 async function openDrafts(){activeView.value='profile';profileToolTab.value='drafts';await loadProfile();}
-async function loadMyPosts(){feedMode.value='mine';feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`);}
+async function loadMyPosts(){feedMode.value='mine';feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`);await loadUserSummaries(feedPosts.value.map(post=>post.userId));}
 function resetPostEditor(){editingPostId.value=0;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:'',content:''};selectedPostImages.value=[];}
 function editPost(post:Post){editingPostId.value=post.id;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:post.title,content:post.content};selectedPostImages.value=[];postDialog.value=true;}
 function editDraft(draft:Draft){editingDraftId.value=draft.id;editingPostId.value=0;postForm.value={userId:currentUserId.value,title:draft.title,content:draft.content};selectedPostImages.value=[];postDialog.value=true;}
@@ -547,14 +552,14 @@ async function collectPost(post:Post){const result=await postData<PostCollectRes
 async function removeCollectedPost(post:Post){if(post.collected)await collectPost(post);}
 async function deletePost(post:Post){await ElMessageBox.confirm(`删除帖子“${post.title}”后评论和互动记录都无法恢复，确认继续？`,'删除帖子',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/post',{postId:post.id});feedPosts.value=feedPosts.value.filter(item=>item.id!==post.id);collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);if(detailPost.value?.id===post.id)leaveDetail();ElMessage.success('帖子已删除');}
 function openComments(post:Post){navigateToDetail('community',post.id);}
-async function createDetailComment(payload:{content:string;parentId:number}){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,content:payload.content,parentId:payload.parentId});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success(payload.parentId?'回复已发布':'评论已发布');}
+async function createDetailComment(payload:{content:string;parentId:number}){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,content:payload.content,parentId:payload.parentId});detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);await loadUserSummaries(detailComments.value.map(comment=>comment.userId));ElMessage.success(payload.parentId?'回复已发布':'评论已发布');}
 async function deleteComment(comment:Comment){await ElMessageBox.confirm('删除评论后，其下的回复也会一并删除，确认继续？','删除评论',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/comment',{commentId:comment.id});if(detailPost.value)detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已删除');}
 
-async function loadMessageData(){const [chatSessions,notices]=await Promise.all([getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`)]);sessions.value=chatSessions;notifications.value=notices;if(sessions.value.length&&!sessions.value.some(session=>session.id===messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0].id;if(!sessions.value.length)messageForm.value.sessionId=0;await loadMessages();}
+async function loadMessageData(){const [chatSessions,notices]=await Promise.all([getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`)]);sessions.value=chatSessions;notifications.value=notices;await loadUserSummaries(chatSessions.map(session=>session.otherUserId));if(sessions.value.length&&!sessions.value.some(session=>session.id===messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0].id;if(!sessions.value.length)messageForm.value.sessionId=0;await loadMessages();}
 async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
 async function markNotificationRead(notice:Notice){await postData('/notification/read',{notificationId:notice.id});notice.read=true;ElMessage.success('已标记为已读');}
 async function markAllNotificationsRead(){await postData('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));ElMessage.success('全部通知已读');}
-function sessionPartner(session:ChatSession){return {id:session.otherUserId,username:`user${session.otherUserId}`,nickname:`用户 ${session.otherUserId}`,status:'ACTIVE',role:'USER'};}
+function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}
 async function openSession(session:ChatSession){messageForm.value.sessionId=session.id;await loadMessages();}
 async function loadMessages(){messages.value=messageForm.value.sessionId?await getData(`/message/list?sessionId=${messageForm.value.sessionId}&userId=${currentUserId.value}`):[];}
 async function newConversation(){conversationUsername.value='';conversationTargetUser.value=undefined;conversationTargetId.value=0;conversationDialog.value=true;}

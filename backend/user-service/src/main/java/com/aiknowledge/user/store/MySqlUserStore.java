@@ -50,6 +50,12 @@ public class MySqlUserStore implements UserStore {
     }
 
     @Override
+    public List<UserEntity> findByIds(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) return List.of();
+        return userMapper.selectBatchIds(userIds);
+    }
+
+    @Override
     public UserEntity save(UserEntity user) {
         userMapper.insert(user);
         return user;

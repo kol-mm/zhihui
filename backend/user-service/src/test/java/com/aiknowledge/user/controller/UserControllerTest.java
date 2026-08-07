@@ -132,6 +132,21 @@ class UserControllerTest {
         assertFalse(user.containsKey("passwordHash"));
     }
 
+    @Test
+    void authenticatedClientsCanResolveOnlyRequestedUserSummaries() {
+        String auth = "Bearer " + LocalAuth.issueToken("demo");
+        var response = controller.summaries(auth, "2,1,2,999999");
+
+        assertEquals(0, response.code());
+        assertEquals(2, response.data().size());
+        assertEquals(2L, response.data().get(0).get("id"));
+        assertEquals(1L, response.data().get(1).get("id"));
+        assertTrue(response.data().stream().allMatch(user -> user.containsKey("username") && user.containsKey("avatarUrl")));
+        assertTrue(response.data().stream().noneMatch(user -> user.containsKey("passwordHash") || user.containsKey("signature")));
+        assertEquals(500, controller.summaries(null, "1").code());
+        assertEquals(500, controller.summaries(auth, "not-a-number").code());
+    }
+
     private Map<String, String> credentials(String username, String password) {
         var challenge = controller.captcha();
         String question = String.valueOf(challenge.data().get("question"));

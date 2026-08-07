@@ -11,6 +11,8 @@ public interface UserStore {
 
     Optional<UserEntity> findById(Long userId);
 
+    List<UserEntity> findByIds(List<Long> userIds);
+
     UserEntity save(UserEntity user);
 
     Optional<UserEntity> updateProfile(Long userId, String nickname, String avatarUrl, String signature);

@@ -5,7 +5,7 @@
       <header class="detail-header">
         <div class="detail-heading">
           <span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span>
-          <div><p>知识资源 #{{ file.id }}</p><h1>{{ file.title }}</h1><span>上传者 #{{ file.userId }} · 浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }}</span></div>
+          <div><p>知识资源 #{{ file.id }}</p><h1>{{ file.title }}</h1><span>{{ author.nickname }} · @{{ author.username }} · 浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }}</span></div>
         </div>
         <div class="detail-actions">
           <el-button v-if="file.userId !== currentUserId" :type="following ? 'success' : 'default'" :plain="following" @click="emit('follow', file.userId)">{{ following ? '取消关注' : '关注作者' }}</el-button>
@@ -36,8 +36,9 @@ import { resolveApiUrl } from '../api/client';
 
 type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean };
 type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
+type UserSummary = { id:number; username:string; nickname:string; avatarUrl?:string };
 
-defineProps<{ file:KnowledgeFile; blocks:ContentBlock[]; pdfPreviewUrl:string; currentUserId:number; following:boolean }>();
+defineProps<{ file:KnowledgeFile; author:UserSummary; blocks:ContentBlock[]; pdfPreviewUrl:string; currentUserId:number; following:boolean }>();
 const emit = defineEmits<{
   back:[];
   download:[file:KnowledgeFile];

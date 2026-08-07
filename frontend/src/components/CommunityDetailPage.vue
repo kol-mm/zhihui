@@ -66,7 +66,7 @@ const commentById = computed(() => new Map(props.comments.map(comment => [commen
 const rootComments = computed(() => props.comments.filter(comment => !comment.parentId || !commentById.value.has(comment.parentId)));
 
 function userFor(userId:number):UserRecord {
-  return props.users.find(user => user.id === userId) || { id:userId, username:`user${userId}`, nickname:`用户 ${userId}` };
+  return props.users.find(user => user.id === userId) || { id:userId, username:'unknown', nickname:'已注销用户' };
 }
 
 function parentFor(comment:Comment):Comment|undefined {

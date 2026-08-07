@@ -107,6 +107,13 @@ public class InMemoryUserStore implements UserStore {
     }
 
     @Override
+    public List<UserEntity> findByIds(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) return List.of();
+        java.util.Set<Long> requested = new java.util.LinkedHashSet<>(userIds);
+        return users.values().stream().filter(user -> requested.contains(user.getId())).toList();
+    }
+
+    @Override
     public UserEntity save(UserEntity user) {
         if (user.getId() == null) {
             user.setId(ids.incrementAndGet());
