@@ -22,6 +22,10 @@ public interface MessageStore {
 
     int clearMessages(Long sessionId);
 
+    int clearUserMessages(Long userId);
+
+    boolean deleteSession(Long sessionId);
+
     boolean deleteMessage(Long messageId);
 
     Optional<ChatMessageEntity> findMessage(Long messageId);

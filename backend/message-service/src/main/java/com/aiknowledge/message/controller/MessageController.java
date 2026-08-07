@@ -143,6 +143,35 @@ public class MessageController {
         return ApiResponse.ok(Map.of("sessionId", sessionId == null ? "ALL" : sessionId, "removed", removed));
     }
 
+    @PostMapping("/message/clear-all")
+    public ApiResponse<Map<String, Object>> clearAllForUser(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        int removed = messageStore.clearUserMessages(userId);
+        eventBus.publish("USER_MESSAGES_CLEARED", String.valueOf(userId), Map.of("removed", removed));
+        return ApiResponse.ok(Map.of("userId", userId, "removed", removed));
+    }
+
+    @DeleteMapping("/message/session")
+    public ApiResponse<Map<String, Object>> deleteSession(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long sessionId = number(request.get("sessionId"), 0L);
+        ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+        if (session == null) return ApiResponse.ok(Map.of("sessionId", sessionId, "removed", false));
+        if (!isParticipant(session, userId) && !LocalAuth.isAdmin(authorization)) {
+            return ApiResponse.fail("user is not a participant of this session");
+        }
+        boolean removed = messageStore.deleteSession(sessionId);
+        if (removed) eventBus.publish("MESSAGE_SESSION_DELETED", String.valueOf(sessionId), Map.of("removed", true));
+        return ApiResponse.ok(Map.of("sessionId", sessionId, "removed", removed));
+    }
+
     @DeleteMapping("/message")
     public ApiResponse<Map<String, Object>> deleteMessage(
             @RequestHeader(name = "Authorization", required = false) String authorization,

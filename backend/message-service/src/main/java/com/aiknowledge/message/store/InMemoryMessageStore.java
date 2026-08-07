@@ -142,6 +142,25 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public int clearUserMessages(Long userId) {
+        var sessionIds = sessions.stream()
+                .filter(session -> session.getUserAId().equals(userId) || session.getUserBId().equals(userId))
+                .map(ChatSessionEntity::getId).collect(java.util.stream.Collectors.toSet());
+        int before = messages.size();
+        messages.removeIf(message -> sessionIds.contains(message.getSessionId()));
+        persist();
+        return before - messages.size();
+    }
+
+    @Override
+    public boolean deleteSession(Long sessionId) {
+        clearMessages(sessionId);
+        boolean removed = sessions.removeIf(session -> session.getId().equals(sessionId));
+        if (removed) persist();
+        return removed;
+    }
+
+    @Override
     public boolean deleteMessage(Long messageId) {
         boolean removed = messages.removeIf(message -> message.getId().equals(messageId));
         if (removed) persist();

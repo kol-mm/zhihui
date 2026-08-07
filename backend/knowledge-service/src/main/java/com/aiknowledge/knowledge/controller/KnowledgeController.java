@@ -411,21 +411,34 @@ public class KnowledgeController {
 
     @GetMapping("/ranking")
     public ApiResponse<List<Map<String, Object>>> ranking() {
-        Map<Long, List<KnowledgeFileEntity>> filesByUser = knowledgeStore.listFiles().stream()
+        List<KnowledgeFileEntity> allFiles = knowledgeStore.listFiles();
+        Map<Long, Long> ownerByFile = allFiles.stream().filter(file -> file.getId() != null && file.getUserId() != null)
+                .collect(java.util.stream.Collectors.toMap(KnowledgeFileEntity::getId, KnowledgeFileEntity::getUserId, (left, right) -> left));
+        Map<Long, Long> reportsByUser = knowledgeStore.listReports(null).stream()
+                .map(report -> report.get("fileId"))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .map(Number::longValue)
+                .map(ownerByFile::get)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.groupingBy(userId -> userId, java.util.stream.Collectors.counting()));
+        Map<Long, List<KnowledgeFileEntity>> filesByUser = allFiles.stream()
                 .filter(file -> file.getUserId() != null)
                 .collect(java.util.stream.Collectors.groupingBy(KnowledgeFileEntity::getUserId));
         List<Map<String, Object>> ranking = filesByUser.entrySet().stream()
                 .map(entry -> {
                     int views = entry.getValue().stream().mapToInt(file -> file.getViews() == null ? 0 : file.getViews()).sum();
                     int downloads = entry.getValue().stream().mapToInt(file -> file.getDownloads() == null ? 0 : file.getDownloads()).sum();
+                    int violations = Math.toIntExact(reportsByUser.getOrDefault(entry.getKey(), 0L))
+                            + (int) entry.getValue().stream().filter(file -> "REJECTED".equals(file.getAuditStatus())).count();
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("userId", entry.getKey());
                     item.put("nickname", "User " + entry.getKey());
                     item.put("uploads", entry.getValue().size());
                     item.put("views", views);
                     item.put("downloads", downloads);
-                    item.put("score", entry.getValue().size() * 10 + views + downloads * 2);
-                    item.put("violations", 0);
+                    item.put("score", Math.max(0, entry.getValue().size() * 10 + views + downloads * 2 - violations * 5));
+                    item.put("violations", violations);
                     return item;
                 })
                 .sorted(java.util.Comparator.comparingInt(item -> -((Number) item.get("score")).intValue()))

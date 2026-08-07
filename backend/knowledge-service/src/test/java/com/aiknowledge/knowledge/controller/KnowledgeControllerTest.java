@@ -54,6 +54,7 @@ class KnowledgeControllerTest {
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
         controller.view(userAuth, Map.of("fileId", fileId));
         controller.download(userAuth, Map.of("fileId", fileId));
+        controller.report(userAuth, Map.of("fileId", fileId, "reason", "ranking violation"));
 
         var ranking = controller.ranking();
         assertFalse(ranking.data().isEmpty());
@@ -63,6 +64,7 @@ class KnowledgeControllerTest {
         assertTrue(((Number) currentUser.get("uploads")).intValue() >= 1);
         assertTrue(((Number) currentUser.get("views")).intValue() >= 1);
         assertTrue(((Number) currentUser.get("downloads")).intValue() >= 1);
+        assertTrue(((Number) currentUser.get("violations")).intValue() >= 1);
     }
 
     @Test

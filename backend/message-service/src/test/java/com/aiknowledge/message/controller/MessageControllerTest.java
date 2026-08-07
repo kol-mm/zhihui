@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -71,6 +72,19 @@ class MessageControllerTest {
         ApiResponse<Map<String, Object>> cleared = controller.clear(userAuth, Map.of("sessionId", sessionId, "userId", 999L));
         assertEquals(0, cleared.code());
         assertEquals(1, cleared.data().get("removed"));
+    }
+
+    @Test
+    void userCanClearAllOwnMessagesAndDeleteAConversation() {
+        Long firstSessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 7L)).data().get("id")).longValue();
+        Long secondSessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 8L)).data().get("id")).longValue();
+        controller.send(userAuth, Map.of("sessionId", firstSessionId, "content", "first"));
+        controller.send(userAuth, Map.of("sessionId", secondSessionId, "content", "second"));
+
+        assertEquals(2, controller.clearAllForUser(userAuth).data().get("removed"));
+        assertTrue(controller.list(userAuth, firstSessionId, 1L).data().isEmpty());
+        assertEquals(true, controller.deleteSession(userAuth, Map.of("sessionId", firstSessionId)).data().get("removed"));
+        assertFalse(controller.sessions(userAuth, 1L).data().stream().anyMatch(item -> firstSessionId.equals(item.get("id"))));
     }
 
     @Test

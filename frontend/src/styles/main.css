@@ -248,3 +248,17 @@ button { letter-spacing: 0; }
 .captcha-row .el-input { flex: 1; min-width: 0; }
 .captcha-row .el-button { min-width: 132px; white-space: nowrap; }
 .captcha-hint { margin: 0; color: #77837d; font-size: 12px; line-height: 1.5; }
+.ranking-list,.compact-user-list { display:grid; gap:8px; }
+.ranking-list article,.compact-user-list article { min-width:0; display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid #e2e8e5; border-radius:6px; }
+.ranking-list article>strong { width:28px; color:#176b4d; font-size:18px; text-align:center; }
+.ranking-list article>span,.compact-user-list article>span { min-width:0; flex:1; display:grid; }
+.ranking-list small,.compact-user-list small { color:#7a8781; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ranking-list em { color:#176b4d; font-style:normal; font-weight:700; white-space:nowrap; }
+.post-author-link { min-width:0; display:flex; align-items:center; gap:11px; padding:0; border:0; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.post-author-link:hover strong { color:#176b4d; }
+.relation-lists { margin-top:16px; }
+@media (max-width:520px) {
+  .ranking-list article { align-items:flex-start; }
+  .ranking-list em { display:none; }
+  .compact-user-list article { flex-wrap:wrap; }
+}
