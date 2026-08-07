@@ -17,6 +17,7 @@ import com.aiknowledge.knowledge.mapper.KnowledgeCategoryMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -161,18 +162,32 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public void collect(Long userId, Long fileId) {
-        Long existing = collectMapper.selectCount(Wrappers.<KnowledgeCollectEntity>lambdaQuery()
+    @Transactional
+    public boolean toggleCollect(Long userId, Long fileId) {
+        if (fileMapper.selectById(fileId) == null) throw new IllegalArgumentException("knowledge file not found");
+        var match = Wrappers.<KnowledgeCollectEntity>lambdaQuery()
                 .eq(KnowledgeCollectEntity::getUserId, userId)
-                .eq(KnowledgeCollectEntity::getFileId, fileId));
+                .eq(KnowledgeCollectEntity::getFileId, fileId);
+        Long existing = collectMapper.selectCount(match);
         if (existing != null && existing > 0) {
-            return;
+            collectMapper.delete(match);
+            return false;
         }
         KnowledgeCollectEntity collect = new KnowledgeCollectEntity();
         collect.setUserId(userId);
         collect.setFileId(fileId);
         collect.setCreatedAt(LocalDateTime.now());
         collectMapper.insert(collect);
+        return true;
+    }
+
+    @Override
+    public boolean hasCollect(Long userId, Long fileId) {
+        if (userId == null || fileId == null) return false;
+        Long count = collectMapper.selectCount(Wrappers.<KnowledgeCollectEntity>lambdaQuery()
+                .eq(KnowledgeCollectEntity::getUserId, userId)
+                .eq(KnowledgeCollectEntity::getFileId, fileId));
+        return count != null && count > 0;
     }
 
     @Override

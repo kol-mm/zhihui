@@ -9,7 +9,7 @@
         </div>
         <div class="detail-actions">
           <el-button :icon="Star" @click="emit('like', file)">点赞 {{ file.likes || 0 }}</el-button>
-          <el-button :icon="CollectionTag" @click="emit('collect', file)">收藏</el-button>
+          <el-button :type="file.collected ? 'primary' : 'default'" :plain="file.collected" :icon="CollectionTag" @click="emit('collect', file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-button>
           <el-button :icon="Share" @click="emit('forward', file)">转发</el-button>
           <el-button v-if="file.fileUrl" type="primary" :icon="Download" @click="emit('download', file)">下载</el-button>
           <el-button type="danger" text :icon="Warning" @click="emit('report', file)">举报</el-button>
@@ -32,7 +32,7 @@
 import { ArrowLeft, CollectionTag, Download, Share, Star, Warning } from '@element-plus/icons-vue';
 import { resolveApiUrl } from '../api/client';
 
-type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number };
+type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; collected?:boolean };
 type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 
 defineProps<{ file:KnowledgeFile; blocks:ContentBlock[]; pdfPreviewUrl:string }>();

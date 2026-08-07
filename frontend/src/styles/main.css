@@ -236,3 +236,4 @@ button { letter-spacing: 0; }
   .detail-discussion { position:static; height:auto; min-height:0; max-height:none; }
   .detail-comment-list { max-height:520px; }
 }
+.knowledge-collected-badge { align-self: flex-start; margin-bottom: 8px; }

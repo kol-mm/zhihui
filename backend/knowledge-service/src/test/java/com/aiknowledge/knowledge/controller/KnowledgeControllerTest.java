@@ -176,6 +176,28 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void knowledgeCollectionTogglesAndIsUserSpecific() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Collection toggle guide", "fileType", "txt", "content", "collection body"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var first = controller.collect(userAuth, Map.of("fileId", fileId));
+        assertEquals(true, first.data().get("collected"));
+        assertEquals(true, controller.view(userAuth, Map.of("fileId", fileId)).data().get("collected"));
+        assertTrue(controller.mine(userAuth, "COLLECTED", null).data().stream()
+                .anyMatch(item -> fileId.equals(item.get("id"))));
+
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        assertEquals(0, controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED")).code());
+        String otherAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("other-collector", 3L, "USER");
+        assertEquals(false, controller.view(otherAuth, Map.of("fileId", fileId)).data().get("collected"));
+        var second = controller.collect(userAuth, Map.of("fileId", fileId));
+        assertEquals(false, second.data().get("collected"));
+        assertFalse(controller.mine(userAuth, "COLLECTED", null).data().stream()
+                .anyMatch(item -> fileId.equals(item.get("id"))));
+    }
+
+    @Test
     void publicListHidesPendingKnowledgeButAdminCanIncludeIt() {
         var uploaded = controller.upload(userAuth, Map.of(
                 "userId", 1L,

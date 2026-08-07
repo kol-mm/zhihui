@@ -181,14 +181,24 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public void collect(Long userId, Long fileId) {
-        boolean exists = collects.stream()
-                .anyMatch(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
-        if (exists) {
-            return;
+    public boolean toggleCollect(Long userId, Long fileId) {
+        if (find(fileId).isEmpty()) throw new IllegalArgumentException("knowledge file not found");
+        for (CollectRecord record : collects) {
+            if (record.userId().equals(userId) && record.fileId().equals(fileId)) {
+                collects.remove(record);
+                persist();
+                return false;
+            }
         }
         collects.add(new CollectRecord(userId, fileId, LocalDateTime.now()));
         persist();
+        return true;
+    }
+
+    @Override
+    public boolean hasCollect(Long userId, Long fileId) {
+        return userId != null && collects.stream()
+                .anyMatch(record -> userId.equals(record.userId()) && fileId.equals(record.fileId()));
     }
 
     @Override

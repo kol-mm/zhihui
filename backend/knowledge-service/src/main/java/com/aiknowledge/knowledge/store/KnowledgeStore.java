@@ -18,7 +18,8 @@ public interface KnowledgeStore {
     List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType);
     int like(Long userId, Long fileId);
     int likeCount(Long fileId);
-    void collect(Long userId, Long fileId);
+    boolean toggleCollect(Long userId, Long fileId);
+    boolean hasCollect(Long userId, Long fileId);
     List<Map<String, Object>> listCollects(Long userId);
     void report(Long userId, Long fileId, String reason);
     List<Map<String, Object>> listReports(Long userId);

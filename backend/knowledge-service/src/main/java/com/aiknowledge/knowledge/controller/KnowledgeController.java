@@ -250,9 +250,10 @@ public class KnowledgeController {
             @RequestParam(name = "includeAll", defaultValue = "false") boolean includeAll
     ) {
         boolean canViewAll = includeAll && LocalAuth.isAdmin(authorization);
+        Long viewerUserId = LocalAuth.userId(authorization);
         return ApiResponse.ok(knowledgeStore.listFiles().stream()
                 .filter(file -> canViewAll || "APPROVED".equals(file.getAuditStatus()))
-                .map(this::toView).toList());
+                .map(file -> toView(file, viewerUserId)).toList());
     }
 
     @GetMapping("/categories")
@@ -292,7 +293,7 @@ public class KnowledgeController {
     ) {
         return ApiResponse.ok(knowledgeStore.searchFiles(keyword).stream()
                 .filter(file -> canView(file, authorization))
-                .map(this::toView).toList());
+                .map(file -> toView(file, LocalAuth.userId(authorization))).toList());
     }
 
     @GetMapping("/search/fulltext")
@@ -307,7 +308,7 @@ public class KnowledgeController {
                     return fileId == null ? null : knowledgeStore.find(fileId)
                             .filter(file -> canView(file, authorization))
                             .map(file -> {
-                                Map<String, Object> view = toView(file);
+                                Map<String, Object> view = toView(file, LocalAuth.userId(authorization));
                                 view.put("snippet", result.getOrDefault("snippet", ""));
                                 view.put("score", result.getOrDefault("score", 0));
                                 return view;
@@ -331,7 +332,7 @@ public class KnowledgeController {
         return knowledgeStore.view(fileId)
                 .filter(file -> canView(file, authorization))
                 .map(file -> {
-                    Map<String, Object> detail = toView(file);
+                    Map<String, Object> detail = toView(file, LocalAuth.userId(authorization));
                     detail.put("content", fullTextSearch.find(fileId)
                             .map(LocalFullTextSearchService.SearchDocument::getContent)
                             .orElse("该资源尚未保存可预览的正文。"));
@@ -403,8 +404,12 @@ public class KnowledgeController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
-        knowledgeStore.collect(userId, fileId);
-        return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "collected", true));
+        try {
+            boolean collected = knowledgeStore.toggleCollect(userId, fileId);
+            return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "collected", collected));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        }
     }
 
     @GetMapping("/collects")
@@ -427,7 +432,7 @@ public class KnowledgeController {
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         Long target = requestedUserId == null ? userId : requestedUserId;
         try {
-            return ApiResponse.ok(knowledgeStore.listUserFiles(target, type).stream().map(this::toView).toList());
+            return ApiResponse.ok(knowledgeStore.listUserFiles(target, type).stream().map(file -> toView(file, userId)).toList());
         } catch (IllegalArgumentException error) {
             return ApiResponse.fail(error.getMessage());
         }
@@ -551,6 +556,10 @@ public class KnowledgeController {
     }
 
     private Map<String, Object> toView(KnowledgeFileEntity file) {
+        return toView(file, null);
+    }
+
+    private Map<String, Object> toView(KnowledgeFileEntity file, Long viewerUserId) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", file.getId());
         view.put("userId", file.getUserId());
@@ -563,6 +572,7 @@ public class KnowledgeController {
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));
+        view.put("collected", knowledgeStore.hasCollect(viewerUserId, file.getId()));
         List<String> imageUrls = imageUrls(file.getId());
         view.put("imageUrls", imageUrls);
         view.put("coverUrl", imageUrls.isEmpty() ? "" : imageUrls.get(0));

@@ -142,6 +142,7 @@
               </div>
               <div v-if="filteredKnowledge.length" class="knowledge-grid">
                 <article v-for="file in filteredKnowledge" :key="file.id" class="knowledge-card">
+                  <el-tag v-if="file.collected" class="knowledge-collected-badge" type="success" effect="plain">已收藏</el-tag>
                   <img v-if="file.coverUrl" class="knowledge-cover" :src="resolveApiUrl(file.coverUrl)" :alt="`${file.title}封面`" />
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
                   <h4>{{ file.title }}</h4><p>上传者 #{{ file.userId }} · 资源编号 {{ file.id }}</p>
@@ -277,7 +278,8 @@ import { deleteData, downloadData, getAuthToken, getData, postData, postFormData
 import CommunityDetailPage from './components/CommunityDetailPage.vue';
 import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 
-type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number };
+type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number; collected?:boolean };
+type KnowledgeCollectResult = { userId:number; fileId:number; collected:boolean };
 type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean; comments?:Comment[] };
 type PostLikeResult = { postId:number; liked:boolean; created:boolean; likes:number };
@@ -484,7 +486,7 @@ async function downloadKnowledge(file:KnowledgeFile){try{const blob=await downlo
 async function downloadDetailKnowledge(file:KnowledgeFile){await downloadKnowledge(file);if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,downloads:(detailKnowledge.value.downloads||0)+1};}
 async function likeKnowledge(file:KnowledgeFile){ await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id}); await recordBehavior('LIKE','KNOWLEDGE',file.id); ElMessage.success('已点赞'); await loadKnowledge(); }
 async function likeDetailKnowledge(file:KnowledgeFile){await postData('/knowledge/like',{userId:currentUserId.value,fileId:file.id});await recordBehavior('LIKE','KNOWLEDGE',file.id);if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,likes:(detailKnowledge.value.likes||0)+1};ElMessage.success('已点赞');}
-async function collectKnowledge(file:KnowledgeFile){ await postData('/knowledge/collect',{userId:currentUserId.value,fileId:file.id}); ElMessage.success('已收藏'); }
+async function collectKnowledge(file:KnowledgeFile){ const result=await postData<KnowledgeCollectResult>('/knowledge/collect',{fileId:file.id}); file.collected=result.collected; if(detailKnowledge.value?.id===file.id) detailKnowledge.value={...detailKnowledge.value,collected:result.collected}; if(knowledgeActivityType.value==='COLLECTED'&&!result.collected) myKnowledge.value=myKnowledge.value.filter(item=>item.id!==file.id); if(result.collected){await recordBehavior('COLLECT','KNOWLEDGE',file.id);ElMessage.success('已收藏知识');}else ElMessage.success('已取消收藏'); }
 async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/forward',{fileId:file.id});ElMessage.success('已记录转发');await loadMyKnowledge();}
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
 
