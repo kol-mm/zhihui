@@ -10,5 +10,7 @@ class ApiResponseTest {
         assertEquals("成功", ApiResponse.ok("data").message());
         assertEquals("请先登录后再操作", ApiResponse.fail("valid user authorization is required").message());
         assertEquals("文件大小不能超过 25 MB", ApiResponse.fail("file size must not exceed 25 MB").message());
+        assertEquals("操作失败，请稍后重试", ApiResponse.fail("SQLException at C:\\private\\server.log").message());
+        assertEquals("操作失败，请稍后重试", ApiResponse.fail("internal authorization is required").message());
     }
 }

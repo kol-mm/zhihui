@@ -18,7 +18,7 @@ public record ApiResponse<T>(int code, String message, T data) {
             case "valid user authorization is required" -> "请先登录后再操作";
             case "admin authorization is required" -> "需要管理员权限";
             case "admin authorization is required to clear all messages" -> "只有管理员可以清空全部消息";
-            case "internal authorization is required" -> "内部服务认证失败";
+            case "internal authorization is required" -> "操作失败，请稍后重试";
             case "captcha is required or invalid; please obtain a new captcha" -> "验证码错误或已失效，请重新获取";
             case "user not found" -> "用户不存在";
             case "user account is disabled" -> "该用户账号已被禁用";
@@ -96,6 +96,11 @@ public record ApiResponse<T>(int code, String message, T data) {
         if (message.startsWith("failed to ")) {
             return "文件处理失败，请稍后重试";
         }
-        return message;
+        if (message.length() <= 160
+                && message.matches(".*[\\u3400-\\u9fff].*")
+                && !message.matches("(?is).*(https?://|localhost|[a-z]:[\\\\/]|exception|stack|trace|sql|database|com\\.aiknowledge|org\\.springframework|[\\r\\n]).*")) {
+            return message;
+        }
+        return "操作失败，请稍后重试";
     }
 }

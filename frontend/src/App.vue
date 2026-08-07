@@ -285,7 +285,7 @@ import type { UploadFile, UploadRawFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowRight, Bell, ChatDotRound, ChatLineRound, CollectionTag, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
-import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken } from './api/client';
+import { deleteData, downloadData, getAuthToken, getData, postData, postFormData, putData, resolveApiUrl, setAuthToken, toUserMessage } from './api/client';
 import CommunityDetailPage from './components/CommunityDetailPage.vue';
 import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 
@@ -432,7 +432,7 @@ function behaviorActionLabel(action:string){return ({VIEW:'浏览',LIKE:'点赞'
 function behaviorTargetLabel(target:string){return ({KNOWLEDGE:'知识',POST:'帖子',COMMENT:'评论',USER:'用户'} as Record<string,string>)[target]||target;}
 function governanceMatches(...values:unknown[]){const keyword=governanceKeyword.value.trim().toLocaleLowerCase();return !keyword||values.some(value=>String(value??'').toLocaleLowerCase().includes(keyword));}
 function formatDate(value:string){ return value ? new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
-function notifyError(error:unknown){ ElMessage.error(error instanceof Error?error.message:String(error)); }
+function notifyError(error:unknown){ ElMessage.error(toUserMessage(error)); }
 function startCaptchaCooldown(seconds:number){ captchaCooldownRemaining.value=Math.max(0,Math.ceil(seconds)); if(captchaCooldownTimer)clearInterval(captchaCooldownTimer); if(captchaCooldownRemaining.value>0){ captchaCooldownTimer=setInterval(()=>{ captchaCooldownRemaining.value=Math.max(0,captchaCooldownRemaining.value-1); if(captchaCooldownRemaining.value===0 && captchaCooldownTimer){clearInterval(captchaCooldownTimer); captchaCooldownTimer=undefined; if(captchaRefreshPending){captchaRefreshPending=false;void loadCaptcha();} } },1000); } }
 function invalidateCaptcha(){captchaImage.value='';loginForm.value.captchaId='';loginForm.value.captchaAnswer='';registerForm.value.captchaId='';registerForm.value.captchaAnswer='';}
 async function loadCaptcha(){
@@ -476,7 +476,7 @@ function resetDetailState(){detailRoute.value=undefined;detailError.value='';det
 function returnToRoot(){if(window.location.pathname!=='/')window.history.pushState({},'', '/');resetDetailState();}
 function switchPortal(value:'client'|'admin'){ returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; refreshCurrentView(); }
 function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;openNotifications();return;} returnToRoot();activeView.value=key; mobileMenuOpen.value=false; refreshCurrentView(); }
-async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=error instanceof Error?error.message:'页面加载失败，请重试'; notifyError(error); } finally { viewLoading.value=false; } }
+async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(['home','community'].includes(activeView.value)) await loadFeed(feedMode.value); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=toUserMessage(error,'页面加载失败，请重试'); notifyError(error); } finally { viewLoading.value=false; } }
 async function refreshVisiblePage(){if(detailRoute.value)await loadDetailRoute();else await refreshCurrentView();}
 async function runGlobalSearch(){ returnToRoot();portal.value='client';activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
@@ -504,7 +504,7 @@ async function loadDetailRoute(){
       await loadUserSummaries([post.userId,...commentsResult.map(comment=>comment.userId)]);
     }
     window.scrollTo({top:0,behavior:'auto'});
-  }catch(error){detailError.value=error instanceof Error?error.message:'详情加载失败，请重试';}
+  }catch(error){detailError.value=toUserMessage(error,'详情加载失败，请重试');}
   finally{detailLoading.value=false;}
 }
 function navigateToDetail(kind:DetailRoute['kind'],id:number){const path=`/${kind}/${id}`;if(window.location.pathname!==path)window.history.pushState({kind,id},'',path);void loadDetailRoute();}
