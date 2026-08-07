@@ -237,3 +237,7 @@ button { letter-spacing: 0; }
   .detail-comment-list { max-height:520px; }
 }
 .knowledge-collected-badge { align-self: flex-start; margin-bottom: 8px; }
+.exact-user-search { display: flex; gap: 8px; }
+.exact-user-search .el-input { flex: 1; }
+.exact-user-result { display: flex; align-items: baseline; gap: 8px; margin: -4px 0 14px; padding: 10px 12px; color: #2f5d49; background: #f1f8f4; border: 1px solid #d6eade; border-radius: 6px; }
+.exact-user-result span { color: #728079; font-size: 12px; }

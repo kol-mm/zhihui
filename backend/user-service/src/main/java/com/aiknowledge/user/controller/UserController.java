@@ -141,18 +141,15 @@ public class UserController {
     ) {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         String query = keyword.trim().toLowerCase();
-        return ApiResponse.ok(userStore.listUsers().stream()
+        if (query.isBlank()) return ApiResponse.ok(java.util.List.of());
+        return ApiResponse.ok(userStore.findByUsername(query)
                 .filter(user -> "ACTIVE".equals(user.getStatus()))
-                .filter(user -> query.isBlank()
-                        || user.getUsername().toLowerCase().contains(query)
-                        || user.getNickname().toLowerCase().contains(query))
-                .limit(20)
-                .map(user -> Map.<String, Object>of(
+                .map(user -> java.util.List.of(Map.<String, Object>of(
                         "id", user.getId(),
                         "username", user.getUsername(),
                         "nickname", user.getNickname(),
-                        "avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl()))
-                .toList());
+                        "avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl())))
+                .orElseGet(java.util.List::of));
     }
 
     @PostMapping("/profile")

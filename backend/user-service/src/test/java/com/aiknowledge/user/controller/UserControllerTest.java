@@ -86,7 +86,7 @@ class UserControllerTest {
     }
 
     @Test
-    void directoryReturnsActivePublicProfilesWithoutCredentials() {
+    void directoryRequiresAnExactUsernameAndNeverReturnsAFullList() {
         controller.register(Map.of(
                 "username", "directory-user",
                 "password", "secret123",
@@ -94,7 +94,11 @@ class UserControllerTest {
         ));
 
         String auth = "Bearer " + LocalAuth.issueToken("demo");
-        var response = controller.directory(auth, "directory");
+        var blankResponse = controller.directory(auth, "");
+        assertEquals(0, blankResponse.code());
+        assertTrue(blankResponse.data().isEmpty());
+
+        var response = controller.directory(auth, "directory-user");
 
         assertEquals(0, response.code());
         assertFalse(response.data().isEmpty());
