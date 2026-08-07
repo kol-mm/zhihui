@@ -47,7 +47,15 @@ for ($round = 1; $round -le $MaxRetries; $round++) {
 
   $headers = @{}
   try {
-    $loginBody = @{ username = "demo"; password = "demo" } | ConvertTo-Json
+    $captcha = Invoke-RestMethod -Uri "$Gateway/user/captcha" -Method Get -TimeoutSec 8
+    if ($captcha.code -ne 0 -or [string]::IsNullOrWhiteSpace($captcha.data.captchaId)) {
+      throw "Captcha request failed: $($captcha.message)"
+    }
+    if ($captcha.data.question -notmatch '(\d+)\s+\+\s+(\d+)') {
+      throw "Captcha question format is invalid"
+    }
+    $captchaAnswer = [int]$Matches[1] + [int]$Matches[2]
+    $loginBody = @{ username = "demo"; password = "demo"; captchaId = $captcha.data.captchaId; captchaAnswer = "$captchaAnswer" } | ConvertTo-Json
     $login = Invoke-RestMethod -Uri "$Gateway/user/login" -Method Post -ContentType "application/json" -Body $loginBody -TimeoutSec 8
     if ($login.code -ne 0 -or [string]::IsNullOrWhiteSpace($login.data.token)) {
       throw "Login returned business code $($login.code): $($login.message)"

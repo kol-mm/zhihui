@@ -8,6 +8,7 @@
       <el-form label-position="top" @submit.prevent="login">
         <el-form-item label="用户名"><el-input v-model="loginForm.username" size="large" autocomplete="username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="loginForm.password" size="large" type="password" show-password autocomplete="current-password" /></el-form-item>
+        <el-form-item label="验证码"><div class="captcha-row"><el-input v-model="loginForm.captchaAnswer" size="large" inputmode="numeric" maxlength="3" placeholder="计算结果" @keyup.enter="login" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining}s` : (captchaQuestion || '刷新验证码') }}</el-button></div></el-form-item>
         <el-button class="login-button" type="primary" size="large" :loading="busy" native-type="submit">登录</el-button>
         <el-button class="register-entry" text type="primary" @click="registerDialog = true">没有账号？立即注册</el-button>
       </el-form>
@@ -21,6 +22,7 @@
         <el-form-item label="用户名"><el-input v-model="registerForm.username" autocomplete="username" /></el-form-item>
         <el-form-item label="昵称"><el-input v-model="registerForm.nickname" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="registerForm.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+        <el-form-item label="验证码"><div class="captcha-row"><el-input v-model="registerForm.captchaAnswer" inputmode="numeric" maxlength="3" placeholder="计算结果" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining}s` : (captchaQuestion || '刷新验证码') }}</el-button></div></el-form-item>
       </el-form>
       <template #footer><el-button @click="registerDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="registerAccount">注册并登录</el-button></template>
     </el-dialog>
@@ -323,8 +325,9 @@ const governanceKeyword = ref('');
 const profileToolTab = ref('activity');
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false);
 
-const loginForm = ref({ username:'demo', password:'demo' });
-const registerForm = ref({ username:'', nickname:'', password:'' });
+const loginForm = ref({ username:'demo', password:'demo', captchaId:'', captchaAnswer:'' });
+const registerForm = ref({ username:'', nickname:'', password:'', captchaId:'', captchaAnswer:'' });
+const captchaQuestion = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaRefreshPending = false;
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
 const passwordForm = ref({ currentPassword:'', newPassword:'' });
 const knowledgeForm = ref({ userId:currentUserId.value, title:'', filename:'knowledge.txt', fileType:'txt', content:'', fileUrl:'', categoryId:0 });
@@ -421,21 +424,35 @@ function behaviorTargetLabel(target:string){return ({KNOWLEDGE:'知识',POST:'�
 function governanceMatches(...values:unknown[]){const keyword=governanceKeyword.value.trim().toLocaleLowerCase();return !keyword||values.some(value=>String(value??'').toLocaleLowerCase().includes(keyword));}
 function formatDate(value:string){ return value ? new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
 function notifyError(error:unknown){ ElMessage.error(error instanceof Error?error.message:String(error)); }
-function useAccount(user:string,password:string){ loginForm.value={username:user,password}; }
+function startCaptchaCooldown(seconds:number){ captchaCooldownRemaining.value=Math.max(0,Math.ceil(seconds)); if(captchaCooldownTimer)clearInterval(captchaCooldownTimer); if(captchaCooldownRemaining.value>0){ captchaCooldownTimer=setInterval(()=>{ captchaCooldownRemaining.value=Math.max(0,captchaCooldownRemaining.value-1); if(captchaCooldownRemaining.value===0 && captchaCooldownTimer){clearInterval(captchaCooldownTimer); captchaCooldownTimer=undefined; if(captchaRefreshPending){captchaRefreshPending=false;void loadCaptcha();} } },1000); } }
+async function loadCaptcha(){
+  if(captchaLoading.value || captchaCooldownRemaining.value>0)return;
+  captchaLoading.value=true;
+  try{
+    const result=await getData<{captchaId?:string;question?:string;cooldown?:boolean;retryAfterSeconds?:number}>('/user/captcha');
+    if(result.cooldown){ const seconds=result.retryAfterSeconds || 60; startCaptchaCooldown(seconds); ElMessage.info(`验证码刷新请等待 ${seconds} 秒`); return; }
+    if(!result.captchaId || !result.question)throw new Error('验证码获取失败，请稍后重试');
+    captchaQuestion.value=result.question;loginForm.value.captchaId=result.captchaId;loginForm.value.captchaAnswer='';registerForm.value.captchaId=result.captchaId;registerForm.value.captchaAnswer='';startCaptchaCooldown(60);
+  }catch(error){notifyError(error);}finally{captchaLoading.value=false;}
+}
+function useAccount(user:string,password:string){ loginForm.value={username:user,password,captchaId:loginForm.value.captchaId,captchaAnswer:''}; }
 
 async function registerAccount(){
-  if(!registerForm.value.username.trim() || registerForm.value.password.length < 6){ ElMessage.warning('请输入用户名，密码至少 6 位'); return; }
+  if(!registerForm.value.username.trim() || registerForm.value.password.length < 8){ ElMessage.warning('请输入用户名，密码至少 8 位'); return; }
+  if(!registerForm.value.captchaAnswer.trim()){ ElMessage.warning('请输入验证码'); return; }
   busy.value=true;
   try{
     await postData('/user/register',registerForm.value);
-    loginForm.value={username:registerForm.value.username,password:registerForm.value.password};
+    loginForm.value={username:registerForm.value.username,password:registerForm.value.password,captchaId:'',captchaAnswer:''};
     registerDialog.value=false;
-    await login();
-  }catch(error){ notifyError(error); }
+    captchaRefreshPending=true;
+    ElMessage.success('注册成功，验证码将在冷却结束后自动刷新，请再登录');
+    await loadCaptcha();
+  }catch(error){ notifyError(error); captchaRefreshPending=true; await loadCaptcha(); }
   finally{ busy.value=false; }
 }
 
-async function login(){ busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await loadPublicConfig(); await refreshCurrentView(); await loadDetailRoute(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); } finally{busy.value=false;} }
+async function login(){if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true; try { const result=await postData<{token:string;role:string;user:UserRecord}>('/user/login',loginForm.value); setAuthToken(result.token); username.value=result.user.username; displayName.value=result.user.nickname; avatarUrl.value=result.user.avatarUrl||''; role.value=result.role; currentUserId.value=result.user.id; localStorage.setItem('ai-knowledge-username',username.value); localStorage.setItem('ai-knowledge-name',displayName.value); localStorage.setItem('ai-knowledge-avatar',avatarUrl.value); localStorage.setItem('ai-knowledge-role',role.value); localStorage.setItem('ai-knowledge-user-id',String(currentUserId.value)); authenticated.value=true; portal.value=result.role==='ADMIN'?'admin':'client'; activeView.value=result.role==='ADMIN'?'dashboard':'home'; syncUserForms(); await loadPublicConfig(); await refreshCurrentView(); await loadDetailRoute(); ElMessage.success('登录成功'); } catch(error){ notifyError(error); captchaRefreshPending=true; await loadCaptcha(); } finally{busy.value=false;} }
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value=await getData('/ai/config/public');}catch{platformConfig.value={max_upload_mb:25,notifications_enabled:true,community_enabled:true};}}
@@ -582,6 +599,6 @@ async function loadSystemAdmin(){const [overview,events]=await Promise.all([getD
 async function saveAiConfig(){await postData('/ai/admin/config',aiConfig.value);ElMessage.success('AI 配置已保存');await loadSystemAdmin();}
 async function rebuildAiIndex(){aiIndexBusy.value=true;try{const files=(await getData<KnowledgeFile[]>('/knowledge/list?includeAll=true')).filter(file=>file.auditStatus==='APPROVED');const documents:{file_id:number;title:string;text:string}[]=[];for(const file of files){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);if(detail.content?.trim())documents.push({file_id:file.id,title:detail.title,text:detail.content});}const result=await postData<{documents:number;chunks:number}>('/ai/admin/index/rebuild',{documents});await loadSystemAdmin();ElMessage.success(`已重建 ${result.documents} 个文档、${result.chunks} 个知识切片`);}catch(error){notifyError(error);}finally{aiIndexBusy.value=false;}}
 
-onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);if(authenticated.value)await restoreSession();});
-onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
+onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);await loadCaptcha();if(authenticated.value)await restoreSession();});
+onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
 </script>

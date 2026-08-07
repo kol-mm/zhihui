@@ -241,3 +241,6 @@ button { letter-spacing: 0; }
 .exact-user-search .el-input { flex: 1; }
 .exact-user-result { display: flex; align-items: baseline; gap: 8px; margin: -4px 0 14px; padding: 10px 12px; color: #2f5d49; background: #f1f8f4; border: 1px solid #d6eade; border-radius: 6px; }
 .exact-user-result span { color: #728079; font-size: 12px; }
+.captcha-row { display: flex; align-items: stretch; gap: 8px; }
+.captcha-row .el-input { flex: 1; min-width: 0; }
+.captcha-row .el-button { min-width: 132px; white-space: nowrap; }

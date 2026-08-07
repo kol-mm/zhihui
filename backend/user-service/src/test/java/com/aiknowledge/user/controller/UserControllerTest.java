@@ -8,6 +8,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Map;
+import java.util.HashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,7 +27,7 @@ class UserControllerTest {
     @Test
     void demoUserCanLogin() {
         ApiResponse<Map<String, Object>> response =
-                controller.login(Map.of("username", "demo", "password", "demo"));
+                controller.login(credentials("demo", "demo"));
 
         assertEquals(0, response.code());
         assertNotNull(response.data().get("token"));
@@ -46,23 +47,29 @@ class UserControllerTest {
     @Test
     void adminTokenContainsAdminRole() {
         ApiResponse<Map<String, Object>> response =
-                controller.login(Map.of("username", "admin", "password", "admin123"));
+                controller.login(credentials("admin", "admin123"));
         assertEquals(0, response.code());
         String token = String.valueOf(response.data().get("token"));
         assertEquals(true, LocalAuth.isAdmin("Bearer " + token));
     }
 
     @Test
+    void captchaIsRequiredAndCanOnlyBeUsedOnce() {
+        assertEquals(500, controller.login(Map.of("username", "demo", "password", "demo")).code());
+        Map<String, String> request = credentials("demo", "demo");
+        assertEquals(0, controller.login(request).code());
+        assertEquals(500, controller.login(request).code());
+    }
+
+    @Test
     void registeredUserCanLogin() {
-        ApiResponse<Map<String, Object>> registration = controller.register(Map.of(
-                "username", "alice",
-                "password", "secret123",
-                "nickname", "Alice"
-        ));
+        Map<String, String> registrationRequest = credentials("alice", "secret123");
+        registrationRequest.put("nickname", "Alice");
+        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
         assertEquals(0, registration.code());
 
         ApiResponse<Map<String, Object>> login =
-                controller.login(Map.of("username", "alice", "password", "secret123"));
+                controller.login(credentials("alice", "secret123"));
         assertEquals(0, login.code());
     }
 
@@ -71,27 +78,23 @@ class UserControllerTest {
         String auth = "Bearer " + LocalAuth.issueToken("demo");
         var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass"));
         assertEquals(0, changed.code());
-        assertEquals(0, controller.login(Map.of("username", "demo", "password", "new-demo-pass")).code());
+        assertEquals(0, controller.login(credentials("demo", "new-demo-pass")).code());
     }
 
     @Test
     void reservedAdminNameCannotBeRegisteredWithDifferentCase() {
-        ApiResponse<Map<String, Object>> registration = controller.register(Map.of(
-                "username", "Admin",
-                "password", "secret123",
-                "nickname", "Not Admin"
-        ));
+        Map<String, String> registrationRequest = credentials("Admin", "secret123");
+        registrationRequest.put("nickname", "Not Admin");
+        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
         assertEquals(500, registration.code());
         assertEquals("USER", LocalAuth.roleForUsername("Admin"));
     }
 
     @Test
     void directoryRequiresAnExactUsernameAndNeverReturnsAFullList() {
-        controller.register(Map.of(
-                "username", "directory-user",
-                "password", "secret123",
-                "nickname", "Directory User"
-        ));
+        Map<String, String> registrationRequest = credentials("directory-user", "secret123");
+        registrationRequest.put("nickname", "Directory User");
+        controller.register(registrationRequest);
 
         String auth = "Bearer " + LocalAuth.issueToken("demo");
         var blankResponse = controller.directory(auth, "");
@@ -109,6 +112,19 @@ class UserControllerTest {
         assertTrue(user.containsKey("avatarUrl"));
         assertFalse(user.containsKey("password"));
         assertFalse(user.containsKey("passwordHash"));
+    }
+
+    private Map<String, String> credentials(String username, String password) {
+        var challenge = controller.captcha();
+        String question = String.valueOf(challenge.data().get("question"));
+        String[] values = question.replace("= ?", "").split("\\+");
+        int answer = Integer.parseInt(values[0].trim()) + Integer.parseInt(values[1].trim());
+        Map<String, String> request = new HashMap<>();
+        request.put("username", username);
+        request.put("password", password);
+        request.put("captchaId", String.valueOf(challenge.data().get("captchaId")));
+        request.put("captchaAnswer", String.valueOf(answer));
+        return request;
     }
 
     @Test

@@ -59,13 +59,13 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
     }
 
     private int requestLimit(String path, String method) {
-        if (path.equals("/user/login") || path.equals("/user/register")) return 10;
+        if (path.equals("/user/login") || path.equals("/user/register") || path.equals("/user/captcha")) return 10;
         if (!"GET".equals(method) && !"OPTIONS".equals(method)) return 120;
         return 600;
     }
 
     private String rateClass(String path) {
-        if (path.equals("/user/login") || path.equals("/user/register")) return "auth";
+        if (path.equals("/user/login") || path.equals("/user/register") || path.equals("/user/captcha")) return "auth";
         return "general";
     }
 

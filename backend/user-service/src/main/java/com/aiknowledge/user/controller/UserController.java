@@ -5,6 +5,8 @@ import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.store.UserStore;
 import com.aiknowledge.user.storage.UserAvatarStorageService;
+import com.aiknowledge.user.security.CaptchaService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,22 +32,40 @@ public class UserController {
     private final UserStore userStore;
     private final PasswordEncoder passwordEncoder;
     private final UserAvatarStorageService avatarStorage;
+    private final CaptchaService captchaService;
 
     @Autowired
-    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage) {
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage, CaptchaService captchaService) {
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
         this.avatarStorage = avatarStorage;
+        this.captchaService = captchaService;
+    }
+
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage) {
+        this(userStore, passwordEncoder, avatarStorage, new CaptchaService());
     }
 
     public UserController(UserStore userStore, PasswordEncoder passwordEncoder) {
         this(userStore, passwordEncoder, new UserAvatarStorageService("local", "../data/user-avatars",
-                "http://127.0.0.1:9000", "ai-user-avatar", "aiknowledge", "ai-knowledge-local-change-me"));
+                "http://127.0.0.1:9000", "ai-user-avatar", "aiknowledge", "ai-knowledge-local-change-me"), new CaptchaService());
     }
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
         return ApiResponse.ok(Map.of("service", "user-service", "time", Instant.now().toString()));
+    }
+
+    @GetMapping("/captcha")
+    public ApiResponse<Map<String, Object>> captcha(HttpServletRequest request) {
+        String clientKey = request.getHeader("X-Captcha-Client");
+        if (clientKey == null || clientKey.isBlank()) clientKey = request.getRemoteAddr();
+        return ApiResponse.ok(captchaService.issue(clientKey));
+    }
+
+    /** Backward-compatible helper for direct controller tests. */
+    public ApiResponse<Map<String, Object>> captcha() {
+        return ApiResponse.ok(captchaService.issue());
     }
 
     @PostMapping(value = "/avatar/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -77,6 +97,7 @@ public class UserController {
 
     @PostMapping("/register")
     public ApiResponse<Map<String, Object>> register(@RequestBody Map<String, String> request) {
+        if (!verifyCaptcha(request)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
             return ApiResponse.fail("username must contain 3-32 letters, numbers, underscores or hyphens");
@@ -103,6 +124,7 @@ public class UserController {
 
     @PostMapping("/login")
     public ApiResponse<Map<String, Object>> login(@RequestBody Map<String, String> request) {
+        if (!verifyCaptcha(request)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         String password = request.getOrDefault("password", "");
         if (username.length() > 32 || password.length() > 128) return ApiResponse.fail("invalid username or password");
@@ -385,5 +407,9 @@ public class UserController {
         view.put("status", user.getStatus());
         view.put("role", LocalAuth.roleForUsername(user.getUsername()));
         return view;
+    }
+
+    private boolean verifyCaptcha(Map<String, String> request) {
+        return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"));
     }
 }

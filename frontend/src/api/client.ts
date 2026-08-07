@@ -12,6 +12,17 @@ export function resolveApiUrl(path: string): string {
 }
 
 const AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
+const CAPTCHA_CLIENT_KEY = 'ai-knowledge-captcha-client';
+
+function getCaptchaClientKey() {
+  const existing = localStorage.getItem(CAPTCHA_CLIENT_KEY);
+  if (existing) return existing;
+  const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `captcha-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  localStorage.setItem(CAPTCHA_CLIENT_KEY, generated);
+  return generated;
+}
 
 export function setAuthToken(token: string) {
   localStorage.setItem(AUTH_TOKEN_KEY, token);
@@ -25,6 +36,9 @@ api.interceptors.request.use((config) => {
   const token = getAuthToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (String(config.url || '').includes('/user/captcha')) {
+    config.headers['X-Captcha-Client'] = getCaptchaClientKey();
   }
   return config;
 });
@@ -61,6 +75,7 @@ function toReadableError(url: string, error: unknown): Error {
 function localizeBackendMessage(message: string): string {
   const text = message.trim();
   const exact: Record<string, string> = {
+    'captcha is required or invalid; please obtain a new captcha': '验证码错误或已失效，已安排在冷却结束后刷新',
     'valid user authorization is required': '请先登录后再操作',
     'admin authorization is required': '需要管理员权限',
     'internal authorization is required': '内部服务认证失败',
