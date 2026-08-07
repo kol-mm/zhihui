@@ -163,14 +163,18 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public int like(Long userId, Long fileId) {
-        boolean exists = likes.stream()
-                .anyMatch(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
-        if (!exists) {
-            likes.add(new LikeRecord(userId, fileId, LocalDateTime.now()));
-            persist();
-        }
-        return likeCount(fileId);
+    public synchronized boolean toggleLike(Long userId, Long fileId) {
+        if (find(fileId).isEmpty()) throw new IllegalArgumentException("knowledge file not found");
+        boolean removed = likes.removeIf(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
+        if (!removed) likes.add(new LikeRecord(userId, fileId, LocalDateTime.now()));
+        persist();
+        return !removed;
+    }
+
+    @Override
+    public boolean hasLike(Long userId, Long fileId) {
+        return userId != null && likes.stream()
+                .anyMatch(record -> userId.equals(record.userId()) && fileId.equals(record.fileId()));
     }
 
     @Override
@@ -249,6 +253,19 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
             persist();
         });
         return found;
+    }
+
+    @Override
+    public synchronized boolean deleteFile(Long fileId) {
+        boolean removed = files.removeIf(file -> fileId.equals(file.getId()));
+        if (!removed) return false;
+        collects.removeIf(record -> fileId.equals(record.fileId()));
+        likes.removeIf(record -> fileId.equals(record.fileId()));
+        reports.removeIf(record -> fileId.equals(record.fileId()));
+        downloads.removeIf(record -> fileId.equals(record.fileId()));
+        forwards.removeIf(record -> fileId.equals(record.fileId()));
+        persist();
+        return true;
     }
 
     @Override

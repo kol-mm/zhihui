@@ -366,8 +366,47 @@ public class KnowledgeController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long fileId = number(request.get("fileId"), 0L);
-        int likes = knowledgeStore.like(userId, fileId);
-        return ApiResponse.ok(Map.of("userId", userId, "fileId", fileId, "liked", true, "likes", likes));
+        try {
+            boolean liked = knowledgeStore.toggleLike(userId, fileId);
+            return ApiResponse.ok(Map.of(
+                    "userId", userId,
+                    "fileId", fileId,
+                    "liked", liked,
+                    "likes", knowledgeStore.likeCount(fileId)
+            ));
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        }
+    }
+
+    @DeleteMapping("/file")
+    public ApiResponse<Map<String, Object>> deleteFile(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long fileId = number(request.get("fileId"), 0L);
+        KnowledgeFileEntity file = knowledgeStore.find(fileId).orElse(null);
+        if (file == null) return ApiResponse.fail("knowledge file not found");
+        if (!LocalAuth.isAdmin(authorization) && !userId.equals(file.getUserId())) {
+            return ApiResponse.fail("access to this knowledge file is denied");
+        }
+        boolean removed = knowledgeStore.deleteFile(fileId);
+        if (!removed) return ApiResponse.fail("knowledge file not found");
+        boolean indexRemoved = fullTextSearch.remove(fileId);
+        boolean storageRemoved = false;
+        try {
+            storageRemoved = fileStorage.delete(file.getFileUrl());
+        } catch (RuntimeException ignored) {
+            // The business record is deleted even if an external object store is temporarily unavailable.
+        }
+        return ApiResponse.ok(Map.of(
+                "fileId", fileId,
+                "removed", true,
+                "indexRemoved", indexRemoved,
+                "storageRemoved", storageRemoved
+        ));
     }
 
     @GetMapping("/ranking")
@@ -572,6 +611,7 @@ public class KnowledgeController {
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));
+        view.put("liked", knowledgeStore.hasLike(viewerUserId, file.getId()));
         view.put("collected", knowledgeStore.hasCollect(viewerUserId, file.getId()));
         List<String> imageUrls = imageUrls(file.getId());
         view.put("imageUrls", imageUrls);

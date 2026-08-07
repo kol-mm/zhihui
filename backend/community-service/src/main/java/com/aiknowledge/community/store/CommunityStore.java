@@ -47,6 +47,8 @@ public interface CommunityStore {
 
     long countPostLikes(Long postId);
 
+    boolean removePost(Long postId);
+
     boolean removeComment(Long commentId);
 
     boolean removeDraft(Long draftId);

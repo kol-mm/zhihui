@@ -403,6 +403,39 @@ public class CommunityController {
                 .orElseGet(() -> ApiResponse.fail("post not found"));
     }
 
+    @DeleteMapping("/post")
+    public ApiResponse<Map<String, Object>> removePost(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long postId = number(request.get("postId"), 0L);
+        PostEntity post = communityStore.findPost(postId).orElse(null);
+        if (post == null) return ApiResponse.fail("post not found");
+        if (!LocalAuth.isAdmin(authorization) && !userId.equals(post.getUserId())) {
+            return ApiResponse.fail("access to this post is denied");
+        }
+        return ApiResponse.ok(Map.of("postId", postId, "removed", communityStore.removePost(postId)));
+    }
+
+    @DeleteMapping("/comment")
+    public ApiResponse<Map<String, Object>> removeOwnComment(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        Long commentId = number(request.get("commentId"), 0L);
+        CommentEntity comment = communityStore.listComments(null).stream()
+                .filter(item -> commentId.equals(item.getId())).findFirst().orElse(null);
+        if (comment == null) return ApiResponse.fail("comment not found");
+        if (!LocalAuth.isAdmin(authorization) && !userId.equals(comment.getUserId())) {
+            return ApiResponse.fail("access to this comment is denied");
+        }
+        return ApiResponse.ok(Map.of("commentId", commentId, "removed", communityStore.removeComment(commentId)));
+    }
+
     @DeleteMapping("/comment/admin")
     public ApiResponse<Map<String, Object>> removeComment(
             @RequestHeader(name = "Authorization", required = false) String authorization,

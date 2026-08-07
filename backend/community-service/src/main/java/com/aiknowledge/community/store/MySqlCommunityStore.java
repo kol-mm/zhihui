@@ -223,6 +223,37 @@ public class MySqlCommunityStore implements CommunityStore {
         Long count = likeMapper.selectCount(Wrappers.<PostLikeEntity>lambdaQuery().eq(PostLikeEntity::getPostId, postId));
         return count == null ? 0 : count;
     }
-    @Override public boolean removeComment(Long commentId) { return commentMapper.deleteById(commentId) > 0; }
+
+    @Override
+    @Transactional
+    public boolean removePost(Long postId) {
+        if (postMapper.selectById(postId) == null) return false;
+        commentMapper.delete(Wrappers.<CommentEntity>lambdaQuery().eq(CommentEntity::getPostId, postId));
+        collectMapper.delete(Wrappers.<PostCollectEntity>lambdaQuery().eq(PostCollectEntity::getPostId, postId));
+        imageMapper.delete(Wrappers.<PostImageEntity>lambdaQuery().eq(PostImageEntity::getPostId, postId));
+        likeMapper.delete(Wrappers.<PostLikeEntity>lambdaQuery().eq(PostLikeEntity::getPostId, postId));
+        return postMapper.deleteById(postId) > 0;
+    }
+
+    @Override
+    @Transactional
+    public boolean removeComment(Long commentId) {
+        CommentEntity root = commentMapper.selectById(commentId);
+        if (root == null) return false;
+        List<CommentEntity> all = commentMapper.selectList(Wrappers.<CommentEntity>lambdaQuery()
+                .eq(CommentEntity::getPostId, root.getPostId()));
+        java.util.Set<Long> removedIds = new java.util.LinkedHashSet<>();
+        removedIds.add(commentId);
+        boolean changed;
+        do {
+            changed = all.stream()
+                    .filter(item -> item.getParentId() != null && removedIds.contains(item.getParentId()))
+                    .map(CommentEntity::getId)
+                    .filter(removedIds::add)
+                    .count() > 0;
+        } while (changed);
+        return commentMapper.deleteByIds(removedIds) > 0;
+    }
+
     @Override public boolean removeDraft(Long draftId) { return draftMapper.deleteById(draftId) > 0; }
 }

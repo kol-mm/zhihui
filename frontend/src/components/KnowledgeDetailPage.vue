@@ -9,10 +9,11 @@
         </div>
         <div class="detail-actions">
           <el-button v-if="file.userId !== currentUserId" :type="following ? 'success' : 'default'" :plain="following" @click="emit('follow', file.userId)">{{ following ? '取消关注' : '关注作者' }}</el-button>
-          <el-button :icon="Star" @click="emit('like', file)">点赞 {{ file.likes || 0 }}</el-button>
+          <el-button :type="file.liked ? 'primary' : 'default'" :plain="file.liked" :icon="Star" @click="emit('like', file)">{{ file.liked ? '取消点赞' : '点赞' }} {{ file.likes || 0 }}</el-button>
           <el-button :type="file.collected ? 'primary' : 'default'" :plain="file.collected" :icon="CollectionTag" @click="emit('collect', file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-button>
           <el-button :icon="Share" @click="emit('forward', file)">转发</el-button>
           <el-button v-if="file.fileUrl" type="primary" :icon="Download" @click="emit('download', file)">下载</el-button>
+          <el-button v-if="file.userId === currentUserId" type="danger" plain :icon="Delete" @click="emit('delete', file)">删除资源</el-button>
           <el-button type="danger" text :icon="Warning" @click="emit('report', file)">举报</el-button>
         </div>
       </header>
@@ -30,10 +31,10 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowLeft, CollectionTag, Download, Share, Star, Warning } from '@element-plus/icons-vue';
+import { ArrowLeft, CollectionTag, Delete, Download, Share, Star, Warning } from '@element-plus/icons-vue';
 import { resolveApiUrl } from '../api/client';
 
-type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; collected?:boolean };
+type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean };
 type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 
 defineProps<{ file:KnowledgeFile; blocks:ContentBlock[]; pdfPreviewUrl:string; currentUserId:number; following:boolean }>();
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   collect:[file:KnowledgeFile];
   forward:[file:KnowledgeFile];
   report:[file:KnowledgeFile];
+  delete:[file:KnowledgeFile];
   follow:[userId:number];
 }>();
 </script>

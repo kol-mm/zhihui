@@ -16,6 +16,7 @@ import com.aiknowledge.knowledge.mapper.KnowledgeForwardMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeCategoryMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -140,18 +141,39 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public int like(Long userId, Long fileId) {
-        Long existing = likeMapper.selectCount(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+    @Transactional
+    public boolean toggleLike(Long userId, Long fileId) {
+        if (fileMapper.selectById(fileId) == null) throw new IllegalArgumentException("knowledge file not found");
+        var match = Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                .eq(KnowledgeLikeEntity::getUserId, userId)
+                .eq(KnowledgeLikeEntity::getFileId, fileId);
+        Long existing = likeMapper.selectCount(match);
+        if (existing != null && existing > 0) {
+            likeMapper.delete(match);
+            return false;
+        }
+        KnowledgeLikeEntity like = new KnowledgeLikeEntity();
+        like.setUserId(userId);
+        like.setFileId(fileId);
+        like.setCreatedAt(LocalDateTime.now());
+        try {
+            likeMapper.insert(like);
+            return true;
+        } catch (DuplicateKeyException ignored) {
+            likeMapper.delete(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                    .eq(KnowledgeLikeEntity::getUserId, userId)
+                    .eq(KnowledgeLikeEntity::getFileId, fileId));
+            return false;
+        }
+    }
+
+    @Override
+    public boolean hasLike(Long userId, Long fileId) {
+        if (userId == null || fileId == null) return false;
+        Long count = likeMapper.selectCount(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
                 .eq(KnowledgeLikeEntity::getUserId, userId)
                 .eq(KnowledgeLikeEntity::getFileId, fileId));
-        if (existing == null || existing == 0) {
-            KnowledgeLikeEntity like = new KnowledgeLikeEntity();
-            like.setUserId(userId);
-            like.setFileId(fileId);
-            like.setCreatedAt(LocalDateTime.now());
-            likeMapper.insert(like);
-        }
-        return likeCount(fileId);
+        return count != null && count > 0;
     }
 
     @Override
@@ -241,6 +263,18 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         file.setAuditStatus(auditStatus);
         fileMapper.updateById(file);
         return Optional.of(file);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteFile(Long fileId) {
+        if (fileMapper.selectById(fileId) == null) return false;
+        collectMapper.delete(Wrappers.<KnowledgeCollectEntity>lambdaQuery().eq(KnowledgeCollectEntity::getFileId, fileId));
+        likeMapper.delete(Wrappers.<KnowledgeLikeEntity>lambdaQuery().eq(KnowledgeLikeEntity::getFileId, fileId));
+        reportMapper.delete(Wrappers.<KnowledgeReportEntity>lambdaQuery().eq(KnowledgeReportEntity::getFileId, fileId));
+        downloadMapper.delete(Wrappers.<KnowledgeDownloadEntity>lambdaQuery().eq(KnowledgeDownloadEntity::getFileId, fileId));
+        forwardMapper.delete(Wrappers.<KnowledgeForwardEntity>lambdaQuery().eq(KnowledgeForwardEntity::getFileId, fileId));
+        return fileMapper.deleteById(fileId) > 0;
     }
 
     @Override

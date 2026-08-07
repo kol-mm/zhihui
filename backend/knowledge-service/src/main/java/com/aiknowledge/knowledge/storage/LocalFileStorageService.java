@@ -5,6 +5,7 @@ import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -89,6 +90,23 @@ public class LocalFileStorageService {
             return new StoredContent(Files.readAllBytes(target), objectName);
         } catch (Exception error) {
             throw new IllegalStateException("failed to read stored file", error);
+        }
+    }
+
+    public boolean delete(String fileUrl) {
+        if (fileUrl == null || fileUrl.isBlank()) return false;
+        String objectName = objectName(fileUrl);
+        try {
+            if ("minio".equalsIgnoreCase(storageMode)) {
+                ensureBucket();
+                minioClient.removeObject(RemoveObjectArgs.builder().bucket(minioBucket).object(objectName).build());
+                return true;
+            }
+            Path target = storageRoot.resolve(objectName).normalize();
+            if (!target.startsWith(storageRoot)) throw new IllegalArgumentException("invalid storage path");
+            return Files.deleteIfExists(target);
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to delete stored file", error);
         }
     }
 

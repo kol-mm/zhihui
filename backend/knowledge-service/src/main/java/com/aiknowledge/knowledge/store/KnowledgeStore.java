@@ -16,7 +16,8 @@ public interface KnowledgeStore {
     Optional<KnowledgeFileEntity> download(Long userId, Long fileId);
     void forward(Long userId, Long fileId);
     List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType);
-    int like(Long userId, Long fileId);
+    boolean toggleLike(Long userId, Long fileId);
+    boolean hasLike(Long userId, Long fileId);
     int likeCount(Long fileId);
     boolean toggleCollect(Long userId, Long fileId);
     boolean hasCollect(Long userId, Long fileId);
@@ -25,6 +26,7 @@ public interface KnowledgeStore {
     List<Map<String, Object>> listReports(Long userId);
     Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result);
     Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason);
+    boolean deleteFile(Long fileId);
     List<KnowledgeCategoryEntity> listCategories();
     KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category);
     boolean deleteCategory(Long categoryId);

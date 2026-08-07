@@ -247,4 +247,40 @@ class KnowledgeControllerTest {
         var resolved = controller.resolveReport(auth, Map.of("reportId", reportId, "status", "RESOLVED", "result", "closed"));
         assertEquals("RESOLVED", resolved.data().get("status"));
     }
+
+    @Test
+    void knowledgeLikeCanBeToggled() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Like toggle guide", "fileType", "txt", "content", "toggle body"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var liked = controller.like(userAuth, Map.of("fileId", fileId));
+        assertEquals(true, liked.data().get("liked"));
+        assertEquals(1, ((Number) liked.data().get("likes")).intValue());
+        assertEquals(true, controller.view(userAuth, Map.of("fileId", fileId)).data().get("liked"));
+
+        var unliked = controller.like(userAuth, Map.of("fileId", fileId));
+        assertEquals(false, unliked.data().get("liked"));
+        assertEquals(0, ((Number) unliked.data().get("likes")).intValue());
+    }
+
+    @Test
+    void ownerCanDeleteKnowledgeAndItsIndex() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Disposable knowledge", "fileType", "txt", "content", "unique disposable phrase"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        controller.like(userAuth, Map.of("fileId", fileId));
+        controller.collect(userAuth, Map.of("fileId", fileId));
+        controller.report(userAuth, Map.of("fileId", fileId, "reason", "test"));
+
+        String otherAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("other-delete", 3L, "USER");
+        assertEquals(500, controller.deleteFile(otherAuth, Map.of("fileId", fileId)).code());
+
+        var deleted = controller.deleteFile(userAuth, Map.of("fileId", fileId));
+        assertEquals(true, deleted.data().get("removed"));
+        assertEquals(true, deleted.data().get("indexRemoved"));
+        assertTrue(controller.fullTextSearch(userAuth, "unique disposable phrase").data().isEmpty());
+        assertFalse(controller.mine(userAuth, "LIKED", null).data().stream().anyMatch(item -> fileId.equals(item.get("id"))));
+        assertEquals(500, controller.view(userAuth, Map.of("fileId", fileId)).code());
+    }
 }

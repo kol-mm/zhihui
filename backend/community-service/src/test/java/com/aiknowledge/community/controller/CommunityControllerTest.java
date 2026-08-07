@@ -11,6 +11,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -237,5 +238,37 @@ class CommunityControllerTest {
         ApiResponse<Map<String, Object>> detail = controller.detail(userAuth, 1L);
         assertEquals(0, detail.code());
         assertFalse(((List<?>) detail.data().get("comments")).isEmpty());
+    }
+
+    @Test
+    void deletingCommentAlsoDeletesItsReplies() {
+        var parent = controller.createComment(userAuth, Map.of("postId", 1L, "content", "parent to remove"));
+        Long parentId = ((Number) parent.data().get("id")).longValue();
+        var reply = controller.createComment(secondUserAuth, Map.of(
+                "postId", 1L, "parentId", parentId, "content", "child to remove"));
+        Long replyId = ((Number) reply.data().get("id")).longValue();
+
+        assertEquals(500, controller.removeOwnComment(secondUserAuth, Map.of("commentId", parentId)).code());
+        assertEquals(true, controller.removeOwnComment(userAuth, Map.of("commentId", parentId)).data().get("removed"));
+        List<Map<String, Object>> remaining = controller.comments(userAuth, 1L).data();
+        assertFalse(remaining.stream().anyMatch(item -> parentId.equals(item.get("id"))));
+        assertFalse(remaining.stream().anyMatch(item -> replyId.equals(item.get("id"))));
+    }
+
+    @Test
+    void ownerCanDeletePostAndAssociatedInteractions() {
+        var created = controller.createPost(userAuth, Map.of(
+                "title", "Post to delete", "content", "removable post", "imageUrls", List.of("local-file://one.png")));
+        Long postId = ((Number) created.data().get("id")).longValue();
+        assertEquals(0, controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED")).code());
+        assertEquals(0, controller.createComment(secondUserAuth, Map.of("postId", postId, "content", "temporary comment")).code());
+        assertEquals(0, controller.likePost(secondUserAuth, Map.of("postId", postId)).code());
+        assertEquals(0, controller.squareCollect(secondUserAuth, Map.of("postId", postId)).code());
+
+        assertEquals(500, controller.removePost(secondUserAuth, Map.of("postId", postId)).code());
+        assertEquals(true, controller.removePost(userAuth, Map.of("postId", postId)).data().get("removed"));
+        assertFalse(controller.feed(adminAuth, null).data().stream().anyMatch(item -> postId.equals(item.get("id"))));
+        assertTrue(controller.squareCollections(secondUserAuth, null).data().stream().noneMatch(item -> postId.equals(item.get("id"))));
+        assertEquals(500, controller.detail(userAuth, postId).code());
     }
 }

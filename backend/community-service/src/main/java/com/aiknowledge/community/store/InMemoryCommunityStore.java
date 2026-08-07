@@ -239,8 +239,30 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
-    public boolean removeComment(Long commentId) {
-        boolean removed = comments.removeIf(item -> item.getId().equals(commentId));
+    public synchronized boolean removePost(Long postId) {
+        boolean removed = posts.removeIf(item -> postId.equals(item.getId()));
+        if (!removed) return false;
+        comments.removeIf(item -> postId.equals(item.getPostId()));
+        collects.removeIf(item -> postId.equals(item.getPostId()));
+        images.removeIf(item -> postId.equals(item.postId()));
+        likes.removeIf(item -> postId.equals(item.postId()));
+        persist();
+        return true;
+    }
+
+    @Override
+    public synchronized boolean removeComment(Long commentId) {
+        java.util.Set<Long> removedIds = new java.util.LinkedHashSet<>();
+        removedIds.add(commentId);
+        boolean changed;
+        do {
+            changed = comments.stream()
+                    .filter(item -> item.getParentId() != null && removedIds.contains(item.getParentId()))
+                    .map(CommentEntity::getId)
+                    .filter(removedIds::add)
+                    .count() > 0;
+        } while (changed);
+        boolean removed = comments.removeIf(item -> removedIds.contains(item.getId()));
         if (removed) persist();
         return removed;
     }

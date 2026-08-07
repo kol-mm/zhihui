@@ -79,6 +79,12 @@ public class LocalFullTextSearchService {
         return documents.stream().filter(document -> fileId != null && fileId.equals(document.getFileId())).findFirst();
     }
 
+    public boolean remove(Long fileId) {
+        boolean removed = documents.removeIf(document -> fileId != null && fileId.equals(document.getFileId()));
+        if (removed) persist();
+        return removed;
+    }
+
     public Map<String, Object> status() {
         return Map.of(
                 "mode", mode,
