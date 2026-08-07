@@ -8,6 +8,7 @@
           <div><p>知识资源 #{{ file.id }}</p><h1>{{ file.title }}</h1><span>上传者 #{{ file.userId }} · 浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }}</span></div>
         </div>
         <div class="detail-actions">
+          <el-button v-if="file.userId !== currentUserId" :type="following ? 'success' : 'default'" :plain="following" @click="emit('follow', file.userId)">{{ following ? '取消关注' : '关注作者' }}</el-button>
           <el-button :icon="Star" @click="emit('like', file)">点赞 {{ file.likes || 0 }}</el-button>
           <el-button :type="file.collected ? 'primary' : 'default'" :plain="file.collected" :icon="CollectionTag" @click="emit('collect', file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-button>
           <el-button :icon="Share" @click="emit('forward', file)">转发</el-button>
@@ -35,7 +36,7 @@ import { resolveApiUrl } from '../api/client';
 type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; collected?:boolean };
 type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
 
-defineProps<{ file:KnowledgeFile; blocks:ContentBlock[]; pdfPreviewUrl:string }>();
+defineProps<{ file:KnowledgeFile; blocks:ContentBlock[]; pdfPreviewUrl:string; currentUserId:number; following:boolean }>();
 const emit = defineEmits<{
   back:[];
   download:[file:KnowledgeFile];
@@ -43,5 +44,6 @@ const emit = defineEmits<{
   collect:[file:KnowledgeFile];
   forward:[file:KnowledgeFile];
   report:[file:KnowledgeFile];
+  follow:[userId:number];
 }>();
 </script>

@@ -6,6 +6,7 @@
         <header class="post-detail-author">
           <div class="user-avatar"><img v-if="author.avatarUrl" :src="resolveApiUrl(author.avatarUrl)" alt="作者头像" /><span v-else>{{ author.nickname.slice(0, 1).toUpperCase() }}</span></div>
           <div><strong>{{ author.nickname }}</strong><span>@{{ author.username }} · 帖子 #{{ post.id }}</span></div>
+          <el-button v-if="post.userId !== currentUserId" text :type="following ? 'success' : 'primary'" @click="emit('follow', post.userId)">{{ following ? '取消关注' : '关注作者' }}</el-button>
           <el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ postStatusLabel(post.status) }}</el-tag>
         </header>
         <h1>{{ post.title }}</h1>
@@ -53,8 +54,8 @@ type Post = { id:number; userId:number; title:string; content:string; status:str
 type Comment = { id:number; userId:number; parentId?:number; content:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string };
 
-const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number }>();
-const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; comment:[payload:{content:string;parentId:number}] }>();
+const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean }>();
+const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; comment:[payload:{content:string;parentId:number}]; follow:[userId:number] }>();
 const commentText = ref('');
 const replyTarget = ref<Comment>();
 const commentInput = ref<{ focus:()=>void }>();

@@ -75,12 +75,15 @@
           :file="detailKnowledge"
           :blocks="detailKnowledgeBlocks"
           :pdf-preview-url="detailPdfPreviewUrl"
+          :current-user-id="currentUserId"
+          :following="isFollowing(detailKnowledge.userId)"
           @back="leaveDetail"
           @download="downloadDetailKnowledge"
           @like="likeDetailKnowledge"
           @collect="collectKnowledge"
           @forward="forwardKnowledge"
           @report="reportKnowledge"
+          @follow="toggleFollowAuthor"
         />
         <CommunityDetailPage
           v-else-if="detailRoute?.kind === 'community' && detailPost"
@@ -88,11 +91,13 @@
           :comments="detailComments"
           :users="communityDirectory"
           :current-user-id="currentUserId"
+          :following="isFollowing(detailPost.userId)"
           @back="leaveDetail"
           @like="likeDetailPost"
           @collect="collectPost"
           @edit="editPost"
           @comment="createDetailComment"
+          @follow="toggleFollowAuthor"
         />
         <div v-else-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
         <div v-else-if="viewError" class="view-error"><el-icon><Warning /></el-icon><span>{{ viewError }}</span><el-button size="small" type="primary" @click="refreshCurrentView">重试</el-button></div>
@@ -147,7 +152,7 @@
                   <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
                   <h4>{{ file.title }}</h4><p>上传者 #{{ file.userId }} · 资源编号 {{ file.id }}</p>
                   <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
-                  <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">点赞</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">收藏</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
+                  <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.userId !== currentUserId" text :type="isFollowing(file.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(file.userId)">{{ isFollowing(file.userId) ? '取消关注' : '关注作者' }}</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">点赞</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">收藏</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
                 </article>
               </div><el-empty v-else description="没有匹配的知识资源" />
             </section>
@@ -162,7 +167,7 @@
                   <div class="post-author"><div class="user-avatar"><img v-if="communityUser(post.userId).avatarUrl" :src="resolveApiUrl(communityUser(post.userId).avatarUrl || '')" alt="头像" /><span v-else>{{ communityUser(post.userId).nickname.slice(0, 1).toUpperCase() }}</span></div><div><strong>{{ communityUser(post.userId).nickname }}</strong><span>@{{ communityUser(post.userId).username }} · 帖子 #{{ post.id }}</span></div><el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ postStatusLabel(post.status) }}</el-tag></div>
                   <button class="post-title-button" @click="openPostDetail(post)"><h3>{{ post.title }}</h3></button><p>{{ post.content }}</p>
                   <div v-if="post.imageUrls?.length" class="post-images"><img v-for="image in post.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
-                  <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button text :icon="ChatDotRound" @click="openComments(post)">评论</el-button><el-button text :type="post.collected ? 'primary' : 'default'" :icon="CollectionTag" @click="collectPost(post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button></div>
+                  <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button v-if="post.userId !== currentUserId" text :type="isFollowing(post.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(post.userId)">{{ isFollowing(post.userId) ? '取消关注' : '关注作者' }}</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button text :icon="ChatDotRound" @click="openComments(post)">评论</el-button><el-button text :type="post.collected ? 'primary' : 'default'" :icon="CollectionTag" @click="collectPost(post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button></div>
                 </article>
                 <el-empty v-if="!feedPosts.length" description="还没有动态，发布第一条帖子吧" />
               </section>
@@ -472,7 +477,10 @@ function navigateToDetail(kind:DetailRoute['kind'],id:number){const path=`/${kin
 function leaveDetail(){const destination=detailRoute.value?.kind||'home';returnToRoot();portal.value='client';activeView.value=destination;void refreshCurrentView();window.scrollTo({top:0,behavior:'auto'});}
 function handlePopState(){const route=parseDetailPath();if(route)void loadDetailRoute();else{resetDetailState();void refreshCurrentView();}}
 
-async function loadKnowledge(){ const [files,categories]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories')]); knowledgeFiles.value=files; knowledgeCategories.value=categories; }
+async function loadFollowData(){followData.value=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);}
+function isFollowing(userId:number){return Boolean(followData.value.followedUserIds?.includes(userId));}
+async function toggleFollowAuthor(userId:number){if(userId===currentUserId.value)return;const wasFollowing=isFollowing(userId);if(wasFollowing)await deleteData('/user/follow',{targetUserId:userId});else await postData('/user/follow',{targetUserId:userId});await loadFollowData();if(wasFollowing&&feedMode.value==='following')feedPosts.value=feedPosts.value.filter(post=>post.userId!==userId);ElMessage.success(wasFollowing?'已取消关注':'已关注作者');}
+async function loadKnowledge(){ const [files,categories,follows]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories'),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`)]); knowledgeFiles.value=files; knowledgeCategories.value=categories; followData.value=follows; }
 async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; }
 function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformConfig.value.max_upload_mb*1024*1024){selectedKnowledgeFile.value=undefined;ElMessage.error(`文件不能超过 ${platformConfig.value.max_upload_mb} MB`);return;}selectedKnowledgeFile.value=file.raw;if(file.raw&&!knowledgeForm.value.title)knowledgeForm.value.title=file.name.replace(/\.[^.]+$/,'');}
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
@@ -490,7 +498,7 @@ async function collectKnowledge(file:KnowledgeFile){ const result=await postData
 async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/forward',{fileId:file.id});ElMessage.success('已记录转发');await loadMyKnowledge();}
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
 
-async function loadFeed(mode:'all'|'following'|'mine'=feedMode.value){ if(mode==='mine'){await loadMyPosts();return;} feedMode.value=mode; if(mode==='following'){const relations=await getData<{followedUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`); feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);}else feedPosts.value=await getData('/square/feed'); }
+async function loadFeed(mode:'all'|'following'|'mine'=feedMode.value){ if(mode==='mine'){await Promise.all([loadMyPosts(),loadFollowData()]);return;} feedMode.value=mode; const relations=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);followData.value=relations;if(mode==='following')feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);else feedPosts.value=await getData('/square/feed'); }
 function communityUser(userId:number):UserRecord{return userId===currentUserId.value?{id:userId,username:username.value,nickname:displayName.value,avatarUrl:avatarUrl.value,status:'ACTIVE',role:role.value}:{id:userId,username:`user${userId}`,nickname:`用户 ${userId}`,status:'ACTIVE',role:'USER'};}
 function handlePostImages(_file:UploadFile, files:UploadFile[]){selectedPostImages.value=files.map(file=>file.raw).filter((file):file is UploadRawFile=>Boolean(file));}
 async function createPost(){ if(!postForm.value.title.trim()||!postForm.value.content.trim()){ElMessage.warning('请填写标题和正文');return;} const wasEditing=Boolean(editingPostId.value);busy.value=true;try{let imageUrls:string[]|undefined;if(selectedPostImages.value.length){const form=new FormData();selectedPostImages.value.forEach(file=>form.append('files',file));const uploaded=await postFormData<{imageUrls:string[]}>('/post/media/upload',form);imageUrls=uploaded.imageUrls;}if(editingPostId.value){await putData('/post/update',{id:editingPostId.value,title:postForm.value.title,content:postForm.value.content,...(imageUrls?{imageUrls}:{})});}else if(editingDraftId.value){await postData('/post/draft/publish',{id:editingDraftId.value,title:postForm.value.title,content:postForm.value.content});}else{await postData('/post/create',{...postForm.value,imageUrls:imageUrls||[]});}postDialog.value=false;await loadDrafts();await loadFeed(wasEditing||feedMode.value==='mine'?'mine':'all');if(detailRoute.value?.kind==='community')await loadDetailRoute();ElMessage.success(wasEditing?'修改已提交审核':'帖子已提交审核');}catch(error){notifyError(error);}finally{busy.value=false;} }
