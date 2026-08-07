@@ -48,6 +48,10 @@ class ChatRequest(BaseModel):
     session_id: int | None = None
 
 
+class SessionTitleRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=100)
+
+
 class AiConfigRequest(BaseModel):
     data_source_scope: str = "all-approved"
     match_limit: int = Field(default=5, ge=1, le=20)
@@ -555,6 +559,51 @@ def chat_history(
                              "messages": [row_to_dict(row) for row in messages]})
 
 
+@app.put("/ai/session/{session_id}", response_model=ApiResponse)
+def rename_chat_session(
+    session_id: int,
+    request: SessionTitleRequest,
+    authorization: str | None = Header(default=None),
+) -> ApiResponse:
+    claims = require_user(authorization)
+    title = request.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="session title is required")
+    init_db()
+    with connect() as conn:
+        session = conn.execute(
+            "SELECT id, user_id, title, created_at FROM ai_chat_session WHERE id = ?", (session_id,)
+        ).fetchone()
+        if session is None:
+            raise HTTPException(status_code=404, detail="AI session not found")
+        if claims.get("role") != "ADMIN" and int(session["user_id"] or 0) != int(claims["uid"]):
+            raise HTTPException(status_code=403, detail="access to this AI session is denied")
+        conn.execute("UPDATE ai_chat_session SET title = ? WHERE id = ?", (title, session_id))
+    return ApiResponse(data={"id": session_id, "title": title, "renamed": True})
+
+
+@app.delete("/ai/session/{session_id}", response_model=ApiResponse)
+def delete_chat_session(
+    session_id: int,
+    authorization: str | None = Header(default=None),
+) -> ApiResponse:
+    claims = require_user(authorization)
+    init_db()
+    with connect() as conn:
+        session = conn.execute(
+            "SELECT id, user_id FROM ai_chat_session WHERE id = ?", (session_id,)
+        ).fetchone()
+        if session is None:
+            raise HTTPException(status_code=404, detail="AI session not found")
+        if claims.get("role") != "ADMIN" and int(session["user_id"] or 0) != int(claims["uid"]):
+            raise HTTPException(status_code=403, detail="access to this AI session is denied")
+        removed_messages = conn.execute(
+            "DELETE FROM ai_chat_message WHERE session_id = ?", (session_id,)
+        ).rowcount
+        conn.execute("DELETE FROM ai_chat_session WHERE id = ?", (session_id,))
+    return ApiResponse(data={"id": session_id, "removed": True, "removed_messages": removed_messages})
+
+
 @app.get("/ai/admin/overview", response_model=ApiResponse)
 def ai_admin_overview(authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
@@ -626,23 +675,6 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
     answer = compatible_answer(request.question, matched, config) if config.get("provider") == "openai-compatible" else None
     if not answer:
         answer = local_answer(request.question, matched)
-    assistant_message = save_message(session_id, "assistant", answer)
-    return ApiResponse(
-        data={
-            "session_id": session_id,
-            "answer": answer,
-            "references": matched,
-            "messages": [user_message, assistant_message],
-            "created_at": assistant_message["created_at"],
-        }
-    )
-
-    if matched:
-        context = "；".join(chunk["content"] for chunk in matched[:2])
-        answer = f"基于当前本地知识库，与“{request.question}”最相关的资料是：{context}"
-    else:
-        answer = f"当前本地知识库还没有可引用资料，已记录你的问题：“{request.question}”。"
-
     assistant_message = save_message(session_id, "assistant", answer)
     return ApiResponse(
         data={

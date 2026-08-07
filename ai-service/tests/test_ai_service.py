@@ -89,6 +89,31 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(len(history.data["sessions"]), 1)
         self.assertEqual(len(history.data["messages"]), 2)
 
+    def test_user_can_rename_and_delete_own_chat_session(self) -> None:
+        created = self.main.chat(
+            self.main.ChatRequest(question="session lifecycle"), authorization=self.user_auth
+        )
+        session_id = created.data["session_id"]
+
+        renamed = self.main.rename_chat_session(
+            session_id, self.main.SessionTitleRequest(title="  检索方案讨论  "), authorization=self.user_auth
+        )
+        self.assertTrue(renamed.data["renamed"])
+        history = self.main.chat_history(user_id=1, authorization=self.user_auth)
+        self.assertEqual(history.data["sessions"][0]["title"], "检索方案讨论")
+
+        other_auth = self.issue_token("other", 8, "USER")
+        with self.assertRaises(self.main.HTTPException) as denied:
+            self.main.delete_chat_session(session_id, authorization=other_auth)
+        self.assertEqual(denied.exception.status_code, 403)
+
+        deleted = self.main.delete_chat_session(session_id, authorization=self.user_auth)
+        self.assertTrue(deleted.data["removed"])
+        self.assertEqual(deleted.data["removed_messages"], 2)
+        history = self.main.chat_history(user_id=1, authorization=self.user_auth)
+        self.assertEqual(history.data["sessions"], [])
+        self.assertEqual(history.data["messages"], [])
+
     def test_admin_can_manage_ai_configuration(self) -> None:
         auth = self.issue_token("admin", 2, "ADMIN")
 
