@@ -25,10 +25,23 @@ from pydantic import BaseModel, Field
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = APP_DIR.parent / "data" / "ai_service.db"
 VECTOR_DIMENSION = int(os.getenv("AI_VECTOR_DIMENSION", "128"))
+SENSITIVE_CONTENT_PATTERNS = (
+    re.compile(r"\$env:", re.IGNORECASE),
+    re.compile(r"\b(?:export|set)\s+[A-Z][A-Z0-9_]*\s*=", re.IGNORECASE),
+    re.compile(r"\b[A-Z][A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY|PRIVATE_KEY|_PATH)\b\s*=", re.IGNORECASE),
+    re.compile(r"(?:https?://|jdbc:)(?:localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)", re.IGNORECASE),
+    re.compile(r"\b[a-z]:[\\/]", re.IGNORECASE),
+    re.compile(r"(?:^|\s)\.[\\/](?:ai-service|backend|frontend|data|logs)\b", re.IGNORECASE),
+    re.compile(r"\b(?:mvn(?:\.cmd)?|npm(?:\.cmd)?|powershell|java\s+-jar|uvicorn|mysql(?:\.exe)?)\b", re.IGNORECASE),
+    re.compile(r"\b(?:start-local|restart-local|stop-local)\.(?:ps1|cmd|bat)\b", re.IGNORECASE),
+    re.compile(r"/(?:internal|actuator)/", re.IGNORECASE),
+    re.compile(r"^\s*```"),
+)
+INTERNAL_TITLE_PATTERN = re.compile(r"(?:\bacceptance\b|\bsmoke\s*test\b|\binternal\b|验收|内部测试)", re.IGNORECASE)
 
 class ApiResponse(BaseModel):
     code: int = 0
-    message: str = "ok"
+    message: str = "成功"
     data: dict[str, Any]
 
 
@@ -68,6 +81,50 @@ class AiConfigRequest(BaseModel):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def contains_sensitive_content(value: str) -> bool:
+    text = value or ""
+    return any(pattern.search(text) for pattern in SENSITIVE_CONTENT_PATTERNS)
+
+
+def public_title(value: str | None) -> str:
+    title = (value or "").strip()
+    return "平台知识文档" if not title or INTERNAL_TITLE_PATTERN.search(title) else title
+
+
+def sanitize_answer(value: str) -> str:
+    text = (value or "").strip()
+    text = re.sub(
+        r"(?is)^Based on the local knowledge base, the most relevant material for .*? is:\s*",
+        "根据知识库内容，相关信息如下：\n",
+        text,
+    )
+    if text.lower().startswith("the local knowledge base has no matching references yet"):
+        return "知识库中暂未找到可安全展示的相关内容。"
+    safe_lines = [line for line in text.splitlines() if not contains_sensitive_content(line)]
+    cleaned = "\n".join(safe_lines).strip()
+    return cleaned or "知识库中暂未找到可安全展示的相关内容。"
+
+
+def public_platform_answer(question: str) -> str | None:
+    normalized = re.sub(r"\s+", "", question.lower())
+    if "知识" in normalized and any(keyword in normalized for keyword in ("格式", "文件类型", "上传类型")):
+        return "平台知识库支持 TXT、Markdown（.md）、PDF 和 Word（.docx）格式，单个文件大小不能超过管理员设置的上传上限。"
+    if "搜索" in normalized and any(keyword in normalized for keyword in ("全文", "知识", "怎么", "如何")):
+        return "在知识库页面输入标题或正文关键词即可搜索，也可以按 Word、PDF、TXT、Markdown 格式筛选结果。"
+    if "社区" in normalized and any(keyword in normalized for keyword in ("功能", "可以", "支持")):
+        return "社区支持发布和审核帖子、点赞与取消点赞、收藏、评论与回复、关注作者以及举报不当内容。"
+    return None
+
+
+def purge_sensitive_chunks(conn: sqlite3.Connection) -> int:
+    rows = conn.execute("SELECT id, title, content FROM knowledge_chunk").fetchall()
+    sensitive_ids = [int(row["id"]) for row in rows if contains_sensitive_content(row["content"])]
+    if not sensitive_ids:
+        return 0
+    placeholders = ",".join("?" for _ in sensitive_ids)
+    return conn.execute(f"DELETE FROM knowledge_chunk WHERE id IN ({placeholders})", sensitive_ids).rowcount
 
 
 def db_path() -> Path:
@@ -131,6 +188,7 @@ def init_db() -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(knowledge_chunk)").fetchall()}
         if "embedding" not in columns:
             conn.execute("ALTER TABLE knowledge_chunk ADD COLUMN embedding TEXT")
+        purge_sensitive_chunks(conn)
 
 
 @asynccontextmanager
@@ -274,14 +332,11 @@ def score_chunk(question: str, chunk: sqlite3.Row) -> int:
     if not keyword:
         return 0
 
-    tokens = [
-        token
-        for token in keyword.replace("，", " ").replace(",", " ").split()
-        if token
-    ]
+    question_tokens = {token for token in tokenize(keyword) if len(token) >= 2}
+    content_tokens = {token for token in tokenize(haystack) if len(token) >= 2}
+    overlap = question_tokens & content_tokens
     exact_score = haystack.count(keyword) * 10
-    token_score = sum(haystack.count(token) for token in tokens)
-    return exact_score + token_score
+    return exact_score + len(overlap) * 2
 
 
 def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -298,17 +353,22 @@ def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
 
     scored: list[tuple[float, sqlite3.Row]] = []
     for row in rows:
+        if contains_sensitive_content(row["content"]):
+            continue
+        lexical_raw = score_chunk(question, row)
+        if lexical_raw <= 0:
+            continue
         stored_vector = json.loads(row["embedding"]) if row["embedding"] else build_embedding(row["content"])
         vector_score = cosine_similarity(question_vector, stored_vector)
-        lexical_score = min(score_chunk(question, row) / 20, 1.0)
+        lexical_score = min(lexical_raw / 20, 1.0)
         scored.append((vector_score * 0.75 + lexical_score * 0.25, row))
-    matched = [row for score, row in sorted(scored, key=lambda item: (item[0], item[1]["id"]), reverse=True) if score > 0]
-    if not matched:
-        matched = rows[:limit]
-    return [
-        {key: row[key] for key in row.keys() if key != "embedding"}
-        for row in matched[:limit]
-    ]
+    matched = [row for _, row in sorted(scored, key=lambda item: (item[0], item[1]["id"]), reverse=True)]
+    result: list[dict[str, Any]] = []
+    for row in matched[:limit]:
+        item = {key: row[key] for key in row.keys() if key != "embedding"}
+        item["title"] = public_title(item.get("title"))
+        result.append(item)
+    return result
 
 
 def ensure_session(request: ChatRequest, user_id: int) -> int:
@@ -334,6 +394,8 @@ def ensure_session(request: ChatRequest, user_id: int) -> int:
 
 
 def save_message(session_id: int, role: str, content: str) -> dict[str, Any]:
+    if role == "assistant":
+        content = sanitize_answer(content)
     with connect() as conn:
         cursor = conn.execute(
             """
@@ -356,8 +418,8 @@ def save_message(session_id: int, role: str, content: str) -> dict[str, Any]:
 def local_answer(question: str, matched: list[dict[str, Any]]) -> str:
     if matched:
         context = "\n".join(chunk["content"] for chunk in matched[:2])
-        return f"Based on the local knowledge base, the most relevant material for '{question}' is:\n{context}"
-    return f"The local knowledge base has no matching references yet. Your question was recorded: '{question}'"
+        return sanitize_answer(f"根据知识库内容，相关信息如下：\n{context}")
+    return "知识库中暂未找到与该问题相关的公开内容。"
 
 
 def validate_upstream_url(value: str, resolve_dns: bool) -> None:
@@ -405,12 +467,13 @@ def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict
         return None
     context = "\n\n".join(
         f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
-    ) or "No matching knowledge references were found."
+        if not contains_sensitive_content(str(item.get("content", "")))
+    ) or "未找到匹配的公开知识内容。"
     payload = {
         "model": str(config.get("model") or "local-rag"),
         "temperature": float(config.get("temperature", 0.2)),
         "messages": [
-            {"role": "system", "content": "Answer using the supplied knowledge references. Be concise and cite references when available.\n\n" + context},
+            {"role": "system", "content": "请仅根据提供的公开知识内容回答，保持简洁；不得输出环境变量、密钥、内部地址、服务器路径或部署命令。\n\n" + context},
             {"role": "user", "content": question},
         ],
     }
@@ -473,8 +536,8 @@ def parse_document(request: TextRequest, authorization: str | None = Header(defa
 
 
 def index_document(conn: sqlite3.Connection, request: TextRequest) -> list[dict[str, Any]]:
-    chunks = split_text(request.text)
-    title = request.title or "本地解析文档"
+    chunks = [chunk for chunk in split_text(request.text) if not contains_sensitive_content(chunk)]
+    title = public_title(request.title or "本地解析文档")
     created_at = now_iso()
     created: list[dict[str, Any]] = []
     file_id = request.file_id or 0
@@ -555,8 +618,14 @@ def chat_history(
             "WHERE (? IS NULL OR s.user_id = ?) AND (? IS NULL OR m.session_id = ?) ORDER BY m.id",
             (effective_user_id, effective_user_id, session_id, session_id),
         ).fetchall()
+    public_messages = []
+    for row in messages:
+        item = row_to_dict(row)
+        if item.get("role") == "assistant":
+            item["content"] = sanitize_answer(str(item.get("content", "")))
+        public_messages.append(item)
     return ApiResponse(data={"sessions": [row_to_dict(row) for row in sessions],
-                             "messages": [row_to_dict(row) for row in messages]})
+                             "messages": public_messages})
 
 
 @app.put("/ai/session/{session_id}", response_model=ApiResponse)
@@ -671,10 +740,14 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
     session_id = ensure_session(request, user_id)
     user_message = save_message(session_id, "user", request.question)
     config = read_ai_config()
-    matched = retrieve_chunks(request.question, limit=int(config["match_limit"]))
-    answer = compatible_answer(request.question, matched, config) if config.get("provider") == "openai-compatible" else None
+    public_answer = public_platform_answer(request.question)
+    matched = [] if public_answer else retrieve_chunks(request.question, limit=int(config["match_limit"]))
+    answer = public_answer
+    if not answer and config.get("provider") == "openai-compatible":
+        answer = compatible_answer(request.question, matched, config)
     if not answer:
         answer = local_answer(request.question, matched)
+    answer = sanitize_answer(answer)
     assistant_message = save_message(session_id, "assistant", answer)
     return ApiResponse(
         data={

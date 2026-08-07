@@ -142,6 +142,52 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(second.data["count"], 1)
         self.assertEqual(self.main.vector_status().data["indexed_chunks"], 1)
 
+    def test_internal_configuration_is_filtered_from_index_answers_and_history(self) -> None:
+        parsed = self.main.parse_document(
+            self.main.TextRequest(
+                file_id=88,
+                title="Internal acceptance",
+                text=("知识库支持安全检索\n"
+                      "$env:MYSQL_PASSWORD = \"secret\"\n"
+                      "http://127.0.0.1:8080/internal/status"),
+            ),
+            authorization=self.user_auth,
+        )
+        self.assertEqual(parsed.data["count"], 1)
+        self.assertEqual(parsed.data["chunks"][0]["title"], "平台知识文档")
+        serialized = json.dumps(parsed.data, ensure_ascii=False)
+        self.assertNotIn("MYSQL_PASSWORD", serialized)
+        self.assertNotIn("127.0.0.1", serialized)
+
+        with self.main.connect() as conn:
+            session_id = conn.execute(
+                "INSERT INTO ai_chat_session(user_id, title, created_at) VALUES (?, ?, ?)",
+                (1, "历史回答", self.main.now_iso()),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO ai_chat_message(session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, "assistant",
+                 "Based on the local knowledge base, the most relevant material for 'test' is:\n安全内容\n$env:CHROMA_PATH = '.\\data'",
+                 self.main.now_iso()),
+            )
+
+        history = self.main.chat_history(user_id=1, authorization=self.user_auth)
+        history_text = json.dumps(history.data, ensure_ascii=False)
+        self.assertIn("根据知识库内容", history_text)
+        self.assertIn("安全内容", history_text)
+        self.assertNotIn("CHROMA_PATH", history_text)
+        self.assertNotIn("Based on the local knowledge base", history_text)
+
+    def test_public_platform_questions_use_safe_chinese_answers(self) -> None:
+        response = self.main.chat(
+            self.main.ChatRequest(question="平台支持哪些知识格式？"),
+            authorization=self.user_auth,
+        )
+        self.assertIn("TXT", response.data["answer"])
+        self.assertIn("PDF", response.data["answer"])
+        self.assertNotIn("Based on", response.data["answer"])
+        self.assertEqual(response.data["references"], [])
+
     def test_admin_can_rebuild_and_remove_index(self) -> None:
         auth = self.issue_token("admin", 2, "ADMIN")
         rebuilt = self.main.rebuild_index(self.main.RebuildIndexRequest(documents=[
