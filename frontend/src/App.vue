@@ -8,7 +8,7 @@
       <el-form label-position="top" @submit.prevent="login">
         <el-form-item label="用户名"><el-input v-model="loginForm.username" size="large" autocomplete="username" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="loginForm.password" size="large" type="password" show-password autocomplete="current-password" /></el-form-item>
-        <el-form-item label="验证码"><div class="captcha-row"><el-input v-model="loginForm.captchaAnswer" size="large" inputmode="numeric" maxlength="3" placeholder="计算结果" @keyup.enter="login" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining}s` : (captchaQuestion || '刷新验证码') }}</el-button></div></el-form-item>
+        <el-form-item label="人机验证"><div class="captcha-control"><div class="captcha-challenge"><img v-if="captchaImage" :src="captchaImage" alt="计算验证码" /><span v-else>{{ captchaLoading ? '正在获取验证码…' : '验证码暂不可用' }}</span></div><div class="captcha-row"><el-input v-model="loginForm.captchaAnswer" size="large" inputmode="numeric" maxlength="3" placeholder="请输入图片中的计算结果" @keyup.enter="login" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining} 秒后可换` : '换一张' }}</el-button></div><p class="captcha-hint">请计算图片中的算式，用于确认当前操作由真人完成。</p></div></el-form-item>
         <el-button class="login-button" type="primary" size="large" :loading="busy" native-type="submit">登录</el-button>
         <el-button class="register-entry" text type="primary" @click="registerDialog = true">没有账号？立即注册</el-button>
       </el-form>
@@ -22,7 +22,7 @@
         <el-form-item label="用户名"><el-input v-model="registerForm.username" autocomplete="username" /></el-form-item>
         <el-form-item label="昵称"><el-input v-model="registerForm.nickname" /></el-form-item>
         <el-form-item label="密码"><el-input v-model="registerForm.password" type="password" show-password autocomplete="new-password" /></el-form-item>
-        <el-form-item label="验证码"><div class="captcha-row"><el-input v-model="registerForm.captchaAnswer" inputmode="numeric" maxlength="3" placeholder="计算结果" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining}s` : (captchaQuestion || '刷新验证码') }}</el-button></div></el-form-item>
+        <el-form-item label="人机验证"><div class="captcha-control"><div class="captcha-challenge"><img v-if="captchaImage" :src="captchaImage" alt="计算验证码" /><span v-else>{{ captchaLoading ? '正在获取验证码…' : '验证码暂不可用' }}</span></div><div class="captcha-row"><el-input v-model="registerForm.captchaAnswer" inputmode="numeric" maxlength="3" placeholder="请输入图片中的计算结果" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining} 秒后可换` : '换一张' }}</el-button></div><p class="captcha-hint">请计算图片中的算式，用于确认当前操作由真人完成。</p></div></el-form-item>
       </el-form>
       <template #footer><el-button @click="registerDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="registerAccount">注册并登录</el-button></template>
     </el-dialog>
@@ -333,7 +333,7 @@ const knowledgeDialog = ref(false); const readerDialog = ref(false); const postD
 
 const loginForm = ref({ username:'demo', password:'demo', captchaId:'', captchaAnswer:'' });
 const registerForm = ref({ username:'', nickname:'', password:'', captchaId:'', captchaAnswer:'' });
-const captchaQuestion = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaRefreshPending = false;
+const captchaImage = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaRefreshPending = false;
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
 const passwordForm = ref({ currentPassword:'', newPassword:'' });
 const knowledgeForm = ref({ userId:currentUserId.value, title:'', filename:'knowledge.txt', fileType:'txt', content:'', fileUrl:'', categoryId:0 });
@@ -434,14 +434,16 @@ function governanceMatches(...values:unknown[]){const keyword=governanceKeyword.
 function formatDate(value:string){ return value ? new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
 function notifyError(error:unknown){ ElMessage.error(error instanceof Error?error.message:String(error)); }
 function startCaptchaCooldown(seconds:number){ captchaCooldownRemaining.value=Math.max(0,Math.ceil(seconds)); if(captchaCooldownTimer)clearInterval(captchaCooldownTimer); if(captchaCooldownRemaining.value>0){ captchaCooldownTimer=setInterval(()=>{ captchaCooldownRemaining.value=Math.max(0,captchaCooldownRemaining.value-1); if(captchaCooldownRemaining.value===0 && captchaCooldownTimer){clearInterval(captchaCooldownTimer); captchaCooldownTimer=undefined; if(captchaRefreshPending){captchaRefreshPending=false;void loadCaptcha();} } },1000); } }
+function invalidateCaptcha(){captchaImage.value='';loginForm.value.captchaId='';loginForm.value.captchaAnswer='';registerForm.value.captchaId='';registerForm.value.captchaAnswer='';}
 async function loadCaptcha(){
   if(captchaLoading.value || captchaCooldownRemaining.value>0)return;
   captchaLoading.value=true;
   try{
-    const result=await getData<{captchaId?:string;question?:string;cooldown?:boolean;retryAfterSeconds?:number}>('/user/captcha');
-    if(result.cooldown){ const seconds=result.retryAfterSeconds || 60; startCaptchaCooldown(seconds); ElMessage.info(`验证码刷新请等待 ${seconds} 秒`); return; }
-    if(!result.captchaId || !result.question)throw new Error('验证码获取失败，请稍后重试');
-    captchaQuestion.value=result.question;loginForm.value.captchaId=result.captchaId;loginForm.value.captchaAnswer='';registerForm.value.captchaId=result.captchaId;registerForm.value.captchaAnswer='';startCaptchaCooldown(60);
+    const result=await getData<{captchaId?:string;image?:string;cooldown?:boolean;retryAfterSeconds?:number}>('/user/captcha');
+    if(result.captchaId&&result.image){captchaImage.value=result.image;loginForm.value.captchaId=result.captchaId;registerForm.value.captchaId=result.captchaId;}
+    if(result.cooldown){ const seconds=result.retryAfterSeconds || 60; startCaptchaCooldown(seconds); if(!result.captchaId||!result.image)ElMessage.info(`验证码刷新请等待 ${seconds} 秒`); return; }
+    if(!result.captchaId || !result.image)throw new Error('验证码获取失败，请稍后重试');
+    loginForm.value.captchaAnswer='';registerForm.value.captchaAnswer='';startCaptchaCooldown(60);
   }catch(error){notifyError(error);}finally{captchaLoading.value=false;}
 }
 function useAccount(user:string,password:string){ loginForm.value={username:user,password,captchaId:loginForm.value.captchaId,captchaAnswer:''}; }
@@ -461,11 +463,11 @@ async function registerAccount(){
     registerDialog.value=false;
     await completeAuthentication(result);
     ElMessage.success('注册并登录成功');
-  }catch(error){ notifyError(error); captchaRefreshPending=true; await loadCaptcha(); }
+  }catch(error){ notifyError(error); invalidateCaptcha(); captchaRefreshPending=true; await loadCaptcha(); }
   finally{ busy.value=false; }
 }
 
-async function login(){if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);captchaRefreshPending=true;await loadCaptcha();}finally{busy.value=false;}}
+async function login(){if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);invalidateCaptcha();captchaRefreshPending=true;await loadCaptcha();}finally{busy.value=false;}}
 function logout(){ localStorage.removeItem('ai-knowledge-local-token'); ['ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(key=>localStorage.removeItem(key)); authenticated.value=false; }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;localStorage.setItem('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value=await getData('/ai/config/public');}catch{platformConfig.value={max_upload_mb:25,notifications_enabled:true,community_enabled:true};}}

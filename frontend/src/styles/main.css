@@ -241,6 +241,10 @@ button { letter-spacing: 0; }
 .exact-user-search .el-input { flex: 1; }
 .exact-user-result { display: flex; align-items: baseline; gap: 8px; margin: -4px 0 14px; padding: 10px 12px; color: #2f5d49; background: #f1f8f4; border: 1px solid #d6eade; border-radius: 6px; }
 .exact-user-result span { color: #728079; font-size: 12px; }
+.captcha-control { display: grid; width: 100%; gap: 9px; }
+.captcha-challenge { display: flex; align-items: center; justify-content: center; width: 170px; height: 48px; overflow: hidden; border: 1px solid #cfdbd5; border-radius: 5px; background: #f2f6f3; color: #64736c; font-size: 13px; }
+.captcha-challenge img { display: block; width: 170px; height: 48px; object-fit: cover; }
 .captcha-row { display: flex; align-items: stretch; gap: 8px; }
 .captcha-row .el-input { flex: 1; min-width: 0; }
 .captcha-row .el-button { min-width: 132px; white-space: nowrap; }
+.captcha-hint { margin: 0; color: #77837d; font-size: 12px; line-height: 1.5; }
