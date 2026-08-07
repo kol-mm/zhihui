@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS user (
   nickname VARCHAR(64) NOT NULL,
   signature VARCHAR(255),
   status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+  role VARCHAR(16) NOT NULL DEFAULT 'USER',
+  publish_policy VARCHAR(32) NOT NULL DEFAULT 'STANDARD',
+  messaging_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -25,11 +28,11 @@ CREATE TABLE IF NOT EXISTS user_follow (id BIGINT PRIMARY KEY AUTO_INCREMENT, us
 CREATE TABLE IF NOT EXISTS user_block (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, blocked_user_id BIGINT NOT NULL, reason VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_block(user_id, blocked_user_id));
 CREATE TABLE IF NOT EXISTS user_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, reporter_id BIGINT NOT NULL, target_user_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) NOT NULL DEFAULT 'PENDING', result VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_user_report_status(status, created_at));
 CREATE TABLE IF NOT EXISTS user_behavior_log (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, behavior_type VARCHAR(32) NOT NULL, target_type VARCHAR(32) NOT NULL, target_id BIGINT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY idx_user_behavior(user_id, behavior_type, created_at));
-INSERT INTO user (id, username, password_hash, nickname, status)
+INSERT INTO user (id, username, password_hash, nickname, status, role, publish_policy, messaging_enabled)
 VALUES
-  (1, 'demo', '$2a$10$s.FoZgtcejwp0LTrreQ2oO7yrGQ8pgeBuaXyIQvGx1WbD1awva9Ja', 'Demo User', 'ACTIVE'),
-  (2, 'admin', '$2a$10$HpKsfL9ZMThcXh4e8zmZeOcgwyNea4eqc6mXVWwYVFHGNrj2bywkS', 'Local Admin', 'ACTIVE')
-ON DUPLICATE KEY UPDATE username = VALUES(username);
+  (1, 'demo', '$2a$10$s.FoZgtcejwp0LTrreQ2oO7yrGQ8pgeBuaXyIQvGx1WbD1awva9Ja', 'Demo User', 'ACTIVE', 'USER', 'STANDARD', 1),
+  (2, 'admin', '$2a$10$HpKsfL9ZMThcXh4e8zmZeOcgwyNea4eqc6mXVWwYVFHGNrj2bywkS', 'Local Admin', 'ACTIVE', 'ADMIN', 'STANDARD', 1)
+ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role);
 
 USE knowledge_db;
 CREATE TABLE IF NOT EXISTS knowledge_category (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL, parent_id BIGINT DEFAULT 0, sort_no INT DEFAULT 0);

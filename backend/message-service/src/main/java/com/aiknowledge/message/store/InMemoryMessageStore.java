@@ -116,6 +116,17 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public Optional<ChatSessionEntity> updateSessionStatus(Long sessionId, String status) {
+        Optional<ChatSessionEntity> found = findSession(sessionId);
+        found.ifPresent(session -> {
+            session.setStatus(status);
+            session.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
+    @Override
     public ChatMessageEntity sendMessage(ChatMessageEntity message) {
         message.setId(messageIds.incrementAndGet());
         message.setCreatedAt(LocalDateTime.now());

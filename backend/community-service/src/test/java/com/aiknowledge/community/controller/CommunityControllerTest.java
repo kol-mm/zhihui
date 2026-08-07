@@ -3,6 +3,7 @@ package com.aiknowledge.community.controller;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.common.UserRelationClient;
 import com.aiknowledge.community.store.InMemoryCommunityStore;
 import org.junit.jupiter.api.Test;
 
@@ -253,6 +254,47 @@ class CommunityControllerTest {
         List<Map<String, Object>> remaining = controller.comments(userAuth, 1L).data();
         assertFalse(remaining.stream().anyMatch(item -> parentId.equals(item.get("id"))));
         assertFalse(remaining.stream().anyMatch(item -> replyId.equals(item.get("id"))));
+    }
+
+    @Test
+    void adminCanHideAndRestoreComments() {
+        var comment = controller.createComment(userAuth, Map.of("postId", 1L, "content", "moderated"));
+        Long commentId = ((Number) comment.data().get("id")).longValue();
+
+        assertEquals(0, controller.updateCommentStatus(adminAuth, Map.of(
+                "commentId", commentId, "status", "HIDDEN")).code());
+        assertFalse(controller.comments(userAuth, 1L).data().stream().anyMatch(item -> commentId.equals(item.get("id"))));
+        assertTrue(controller.comments(adminAuth, 1L).data().stream().anyMatch(item -> commentId.equals(item.get("id"))));
+
+        assertEquals(0, controller.updateCommentStatus(adminAuth, Map.of(
+                "commentId", commentId, "status", "VISIBLE")).code());
+        assertTrue(controller.comments(userAuth, 1L).data().stream().anyMatch(item -> commentId.equals(item.get("id"))));
+    }
+
+    @Test
+    void accountWithBlockedPublishingPolicyCannotCreateOrPublishPosts() {
+        UserRelationClient relations = mock(UserRelationClient.class);
+        when(relations.publishingAllowed(1L)).thenReturn(false);
+        CommunityController restricted = new CommunityController(
+                new InMemoryCommunityStore(),
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password"),
+                new com.aiknowledge.community.notification.CommunityNotificationClient(false, "", ""),
+                null,
+                relations
+        );
+        assertEquals(500, restricted.createPost(userAuth, Map.of("title", "blocked", "content", "blocked")).code());
+        var draft = restricted.saveDraft(userAuth, Map.of("title", "draft", "content", "draft"));
+        assertEquals(500, restricted.publishDraft(userAuth, Map.of("id", draft.data().get("id"))).code());
+    }
+
+    @Test
+    void adminCanRunExpiredDraftCleanup() {
+        controller.saveDraft(userAuth, Map.of("title", "recent", "content", "keep"));
+        var result = controller.removeExpiredDrafts(adminAuth, Map.of("retentionDays", 30));
+        assertEquals(0, result.code());
+        assertEquals(0, result.data().get("removed"));
     }
 
     @Test

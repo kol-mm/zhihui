@@ -266,6 +266,17 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public Optional<KnowledgeFileEntity> updateFileMetadata(Long fileId, String title, Long categoryId, String auditStatus) {
+        KnowledgeFileEntity file = fileMapper.selectById(fileId);
+        if (file == null) return Optional.empty();
+        file.setTitle(title);
+        file.setCategoryId(categoryId);
+        file.setAuditStatus(auditStatus);
+        fileMapper.updateById(file);
+        return Optional.of(file);
+    }
+
+    @Override
     @Transactional
     public boolean deleteFile(Long fileId) {
         if (fileMapper.selectById(fileId) == null) return false;

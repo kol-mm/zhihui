@@ -23,6 +23,8 @@ public interface UserStore {
 
     Optional<UserEntity> updateStatus(Long userId, String status);
 
+    Optional<UserEntity> updateGovernance(Long userId, String role, String publishPolicy, boolean messagingEnabled);
+
     boolean follow(Long userId, Long targetUserId);
 
     boolean unfollow(Long userId, Long targetUserId);

@@ -16,6 +16,9 @@ public class UserEntity {
     private String nickname;
     private String signature;
     private String status;
+    private String role;
+    private String publishPolicy;
+    private Boolean messagingEnabled;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -74,6 +77,13 @@ public class UserEntity {
     public void setStatus(String status) {
         this.status = status;
     }
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
+    public String getPublishPolicy() { return publishPolicy; }
+    public void setPublishPolicy(String publishPolicy) { this.publishPolicy = publishPolicy; }
+    public Boolean getMessagingEnabled() { return messagingEnabled; }
+    public void setMessagingEnabled(Boolean messagingEnabled) { this.messagingEnabled = messagingEnabled; }
 
     public LocalDateTime getCreatedAt() {
         return createdAt;

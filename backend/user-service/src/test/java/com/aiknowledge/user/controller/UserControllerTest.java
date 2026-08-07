@@ -101,6 +101,43 @@ class UserControllerTest {
     }
 
     @Test
+    void adminCanUpdateUserGovernanceAndThePolicyIsExposedInternally() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        var updated = controller.updateUserGovernance(adminAuth, Map.of(
+                "userId", 1L,
+                "role", "USER",
+                "status", "ACTIVE",
+                "publishPolicy", "PRE_REVIEW",
+                "messagingEnabled", false,
+                "nickname", "审核中用户"
+        ));
+
+        assertEquals(0, updated.code());
+        assertEquals("PRE_REVIEW", updated.data().get("publishPolicy"));
+        assertEquals(false, updated.data().get("messagingEnabled"));
+        var policy = controller.internalRelation("ai-knowledge-local-internal", 1L, 2L);
+        assertEquals(0, policy.code());
+        assertEquals(true, policy.data().get("publishAllowed"));
+        assertEquals(true, policy.data().get("preAuditRequired"));
+        assertEquals(false, policy.data().get("messagingAllowed"));
+
+        controller.updateUserGovernance(adminAuth, Map.of(
+                "userId", 1L,
+                "publishPolicy", "STANDARD",
+                "messagingEnabled", true
+        ));
+    }
+
+    @Test
+    void normalUserCannotUpdateGovernance() {
+        String userAuth = "Bearer " + LocalAuth.issueToken("demo", 1L, "USER");
+        assertEquals(500, controller.updateUserGovernance(userAuth, Map.of(
+                "userId", 2L,
+                "role", "USER"
+        )).code());
+    }
+
+    @Test
     void blockedUsersCannotFollowEachOther() {
         String userAuth = "Bearer " + LocalAuth.issueToken("demo");
         assertEquals(0, controller.block(userAuth, Map.of("targetUserId", 2L)).code());

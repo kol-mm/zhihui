@@ -268,9 +268,28 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
+    public Optional<CommentEntity> updateCommentStatus(Long commentId, String status) {
+        Optional<CommentEntity> found = comments.stream().filter(item -> commentId.equals(item.getId())).findFirst();
+        found.ifPresent(comment -> {
+            comment.setStatus(status);
+            persist();
+        });
+        return found;
+    }
+
+    @Override
     public boolean removeDraft(Long draftId) {
         boolean removed = drafts.removeIf(item -> item.getId().equals(draftId));
         if (removed) persist();
+        return removed;
+    }
+
+    @Override
+    public int removeDraftsBefore(LocalDateTime cutoff) {
+        int before = drafts.size();
+        drafts.removeIf(item -> item.getUpdatedAt() != null && item.getUpdatedAt().isBefore(cutoff));
+        int removed = before - drafts.size();
+        if (removed > 0) persist();
         return removed;
     }
 

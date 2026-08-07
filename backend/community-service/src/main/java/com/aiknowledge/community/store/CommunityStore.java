@@ -51,7 +51,11 @@ public interface CommunityStore {
 
     boolean removeComment(Long commentId);
 
+    Optional<CommentEntity> updateCommentStatus(Long commentId, String status);
+
     boolean removeDraft(Long draftId);
+
+    int removeDraftsBefore(LocalDateTime cutoff);
 
     record PostImageRecord(Long id, Long postId, String imageUrl, LocalDateTime createdAt) { }
     record PostLikeRecord(Long id, Long userId, Long postId, LocalDateTime createdAt) { }

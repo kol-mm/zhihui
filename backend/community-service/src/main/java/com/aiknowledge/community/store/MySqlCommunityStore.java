@@ -255,5 +255,19 @@ public class MySqlCommunityStore implements CommunityStore {
         return commentMapper.deleteByIds(removedIds) > 0;
     }
 
+    @Override
+    public Optional<CommentEntity> updateCommentStatus(Long commentId, String status) {
+        CommentEntity comment = commentMapper.selectById(commentId);
+        if (comment == null) return Optional.empty();
+        comment.setStatus(status);
+        commentMapper.updateById(comment);
+        return Optional.of(comment);
+    }
+
     @Override public boolean removeDraft(Long draftId) { return draftMapper.deleteById(draftId) > 0; }
+
+    @Override
+    public int removeDraftsBefore(LocalDateTime cutoff) {
+        return draftMapper.delete(Wrappers.<PostDraftEntity>lambdaQuery().lt(PostDraftEntity::getUpdatedAt, cutoff));
+    }
 }

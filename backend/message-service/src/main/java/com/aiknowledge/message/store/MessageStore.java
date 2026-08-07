@@ -16,6 +16,8 @@ public interface MessageStore {
 
     List<ChatSessionEntity> listSessions(Long userId);
 
+    Optional<ChatSessionEntity> updateSessionStatus(Long sessionId, String status);
+
     ChatMessageEntity sendMessage(ChatMessageEntity message);
 
     List<ChatMessageEntity> listMessages(Long sessionId);

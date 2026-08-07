@@ -95,6 +95,31 @@ function Test-HealthUrl {
     }
 }
 
+function Test-RegisteredListener {
+    param([int]$Port)
+    if (-not (Test-Path -LiteralPath $ProcessFile)) { return $false }
+
+    $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $listener) { return $false }
+    $process = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+    if (-not $process) { return $false }
+
+    try {
+        $entries = @(Get-Content -LiteralPath $ProcessFile -Raw | ConvertFrom-Json)
+        foreach ($entry in $entries) {
+            $registeredPid = if ($entry.listenerPid) { [int]$entry.listenerPid } else { [int]$entry.pid }
+            $registeredStart = if ($entry.listenerStartTimeUtc) { [string]$entry.listenerStartTimeUtc } else { [string]$entry.startTimeUtc }
+            if ([int]$entry.port -ne $Port -or $registeredPid -ne $process.Id) { continue }
+            $expected = [DateTime]::Parse($registeredStart).ToUniversalTime()
+            $actual = $process.StartTime.ToUniversalTime()
+            return [Math]::Abs(($actual - $expected).TotalSeconds) -le 2
+        }
+    } catch {
+        return $false
+    }
+    return $false
+}
+
 function Save-ProcessRegistry {
     $script:ManagedProcesses | ConvertTo-Json -Depth 4 | Set-Content -Path $ProcessFile -Encoding UTF8
 }
@@ -163,11 +188,11 @@ function Start-ManagedProcess {
     )
 
     if (Test-Port $Port) {
-        if (Test-HealthUrl $HealthUrl) {
+        if ((Test-HealthUrl $HealthUrl) -and (Test-RegisteredListener -Port $Port)) {
             Write-Host "[$Name] already healthy on port $Port; reusing it." -ForegroundColor Yellow
             return $null
         }
-        throw "[$Name] cannot start: port $Port is occupied but $HealthUrl is not healthy. Stop the conflicting process first."
+        throw "[$Name] cannot start: port $Port is occupied by a process that is not registered to this local project run. Stop the conflicting process first."
     }
 
     $outputLog = Join-Path $Logs "$Name.log"
@@ -205,6 +230,15 @@ try {
 
     if ($SkipMinio -and $UseExternalMinio) {
         throw "SkipMinio and UseExternalMinio cannot be used together."
+    }
+
+    if ($SkipNacos) {
+        $env:SPRING_CLOUD_NACOS_DISCOVERY_ENABLED = "false"
+        $env:USER_SERVICE_URL = "http://127.0.0.1:8101"
+        $env:KNOWLEDGE_SERVICE_URL = "http://127.0.0.1:8102"
+        $env:COMMUNITY_SERVICE_URL = "http://127.0.0.1:8103"
+        $env:MESSAGE_SERVICE_URL = "http://127.0.0.1:8104"
+        Write-Host "[nacos] skipped; gateway will use direct local service addresses." -ForegroundColor Yellow
     }
 
     $PowerShellExe = Assert-Command "powershell.exe" "PowerShell is required on Windows."

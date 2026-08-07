@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +110,7 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
+        if (!publishingAllowed(userId)) return ApiResponse.fail("posting is disabled for this account");
         PostEntity post = new PostEntity();
         post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
@@ -149,7 +151,7 @@ public class CommunityController {
         if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         Long userId = LocalAuth.userId(authorization);
         Map<String, Object> detail = toPostView(post, userId);
-        detail.put("comments", communityStore.listComments(id).stream().map(this::toCommentView).toList());
+        detail.put("comments", visibleComments(id, authorization));
         return ApiResponse.ok(detail);
     }
 
@@ -192,7 +194,7 @@ public class CommunityController {
             PostEntity post = communityStore.findPost(postId).orElse(null);
             if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         }
-        return ApiResponse.ok(communityStore.listComments(postId).stream().map(this::toCommentView).toList());
+        return ApiResponse.ok(visibleComments(postId, authorization));
     }
 
     @PostMapping("/post/draft")
@@ -233,6 +235,7 @@ public class CommunityController {
         PostDraftEntity draft = communityStore.findDraft(draftId).orElse(null);
         if (draft == null) return ApiResponse.fail("draft not found");
         if (!LocalAuth.canAccessUser(authorization, draft.getUserId())) return ApiResponse.fail("access to this draft is denied");
+        if (!publishingAllowed(draft.getUserId())) return ApiResponse.fail("posting is disabled for this account");
         PostEntity post = new PostEntity();
         post.setUserId(draft.getUserId());
         post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
@@ -446,6 +449,20 @@ public class CommunityController {
         return ApiResponse.ok(Map.of("commentId", commentId, "removed", communityStore.removeComment(commentId)));
     }
 
+    @PostMapping("/comment/admin/status")
+    public ApiResponse<Map<String, Object>> updateCommentStatus(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long commentId = number(request.get("commentId"), 0L);
+        String status = String.valueOf(request.getOrDefault("status", "HIDDEN"));
+        if (!List.of("VISIBLE", "HIDDEN").contains(status)) return ApiResponse.fail("invalid comment status");
+        return communityStore.updateCommentStatus(commentId, status)
+                .map(comment -> ApiResponse.ok(toCommentView(comment)))
+                .orElseGet(() -> ApiResponse.fail("comment not found"));
+    }
+
     @DeleteMapping("/post/admin/draft")
     public ApiResponse<Map<String, Object>> removeDraft(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -454,6 +471,18 @@ public class CommunityController {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         Long draftId = number(request.get("draftId"), 0L);
         return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
+    }
+
+    @DeleteMapping("/post/admin/drafts/expired")
+    public ApiResponse<Map<String, Object>> removeExpiredDrafts(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        long retentionDays = number(request.get("retentionDays"), 30L);
+        if (retentionDays < 1 || retentionDays > 3650) return ApiResponse.fail("retention days must be between 1 and 3650");
+        int removed = communityStore.removeDraftsBefore(LocalDateTime.now().minusDays(retentionDays));
+        return ApiResponse.ok(Map.of("retentionDays", retentionDays, "removed", removed));
     }
 
     private CommentEntity buildComment(Map<String, Object> request, String source, Long userId) {
@@ -534,6 +563,17 @@ public class CommunityController {
         return userId != null && targetUserId != null
                 && (userId.equals(targetUserId) || userRelationClient == null
                 || userRelationClient.interactionAllowed(userId, targetUserId));
+    }
+
+    private boolean publishingAllowed(Long userId) {
+        return userId != null && (userRelationClient == null || userRelationClient.publishingAllowed(userId));
+    }
+
+    private List<Map<String, Object>> visibleComments(Long postId, String authorization) {
+        return communityStore.listComments(postId).stream()
+                .filter(comment -> LocalAuth.isAdmin(authorization) || "VISIBLE".equals(comment.getStatus()))
+                .map(this::toCommentView)
+                .toList();
     }
 
     private boolean canViewPost(PostEntity post, String authorization) {

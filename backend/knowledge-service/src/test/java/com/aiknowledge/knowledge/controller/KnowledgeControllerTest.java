@@ -132,6 +132,32 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void adminCanEditAndTakeKnowledgeOffline() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Original title", "fileType", "txt", "content", "metadata content"));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        var category = controller.saveCategory(adminAuth, Map.of("name", "Operations", "sortNo", 7));
+        Long categoryId = ((Number) category.data().get("id")).longValue();
+
+        var updated = controller.updateFileMetadata(adminAuth, Map.of(
+                "fileId", fileId,
+                "title", "Updated title",
+                "categoryId", categoryId,
+                "auditStatus", "APPROVED"
+        ));
+        assertEquals(0, updated.code());
+        assertEquals("Updated title", updated.data().get("title"));
+        assertEquals(categoryId, updated.data().get("categoryId"));
+        assertFalse(controller.search(userAuth, "Updated title").data().isEmpty());
+
+        assertEquals("HIDDEN", controller.updateFileMetadata(adminAuth, Map.of(
+                "fileId", fileId, "auditStatus", "HIDDEN")).data().get("auditStatus"));
+        assertTrue(controller.list(userAuth, false).data().stream().noneMatch(item -> fileId.equals(item.get("id"))));
+        assertEquals(500, controller.updateFileMetadata(userAuth, Map.of("fileId", fileId, "title", "Denied")).code());
+    }
+
+    @Test
     void uploadedContentCanBeFoundByFullTextSearch() {
         ApiResponse<Map<String, Object>> upload = controller.upload(userAuth, Map.of(
                 "userId", 1L,

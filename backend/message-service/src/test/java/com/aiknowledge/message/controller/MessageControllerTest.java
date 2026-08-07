@@ -129,6 +129,22 @@ class MessageControllerTest {
     }
 
     @Test
+    void adminCanRestrictArchiveAndRestoreAConversation() {
+        Long sessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 7L)).data().get("id")).longValue();
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+
+        assertEquals("RESTRICTED", controller.updateSessionStatus(adminAuth, Map.of(
+                "sessionId", sessionId, "status", "RESTRICTED")).data().get("status"));
+        assertEquals(500, controller.send(userAuth, Map.of("sessionId", sessionId, "content", "blocked")).code());
+        assertEquals("ARCHIVED", controller.updateSessionStatus(adminAuth, Map.of(
+                "sessionId", sessionId, "status", "ARCHIVED")).data().get("status"));
+        assertEquals(0, controller.list(userAuth, sessionId, 1L).code());
+        assertEquals("ACTIVE", controller.updateSessionStatus(adminAuth, Map.of(
+                "sessionId", sessionId, "status", "ACTIVE")).data().get("status"));
+        assertEquals(0, controller.send(userAuth, Map.of("sessionId", sessionId, "content", "restored")).code());
+    }
+
+    @Test
     void eventBusStoresBusinessEventsAndExposesStatus() {
         controller.createTicket(userAuth, Map.of(
                 "userId", 1L,

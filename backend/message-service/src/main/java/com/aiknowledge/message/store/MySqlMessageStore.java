@@ -73,6 +73,16 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override
+    public Optional<ChatSessionEntity> updateSessionStatus(Long sessionId, String status) {
+        ChatSessionEntity session = sessionMapper.selectById(sessionId);
+        if (session == null) return Optional.empty();
+        session.setStatus(status);
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionMapper.updateById(session);
+        return Optional.of(session);
+    }
+
+    @Override
     public ChatMessageEntity sendMessage(ChatMessageEntity message) {
         messageMapper.insert(message);
         ChatSessionEntity session = sessionMapper.selectById(message.getSessionId());

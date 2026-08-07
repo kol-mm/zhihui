@@ -103,6 +103,18 @@ public class MySqlUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> updateGovernance(Long userId, String role, String publishPolicy, boolean messagingEnabled) {
+        UserEntity user = userMapper.selectById(userId);
+        if (user == null) return Optional.empty();
+        user.setRole(role);
+        user.setPublishPolicy(publishPolicy);
+        user.setMessagingEnabled(messagingEnabled);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return Optional.of(user);
+    }
+
+    @Override
     public boolean follow(Long userId, Long targetUserId) {
         UserFollowEntity existing = followMapper.selectOne(Wrappers.<UserFollowEntity>lambdaQuery()
                 .eq(UserFollowEntity::getUserId, userId)

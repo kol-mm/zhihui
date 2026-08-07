@@ -71,6 +71,9 @@ public class InMemoryUserStore implements UserStore {
             demo.setPasswordHash(passwordEncoder.encode("demo"));
             demo.setNickname("Demo User");
             demo.setStatus("ACTIVE");
+            demo.setRole("USER");
+            demo.setPublishPolicy("STANDARD");
+            demo.setMessagingEnabled(true);
             demo.setCreatedAt(LocalDateTime.now());
             demo.setUpdatedAt(LocalDateTime.now());
             users.put(demo.getUsername(), demo);
@@ -82,10 +85,18 @@ public class InMemoryUserStore implements UserStore {
             admin.setPasswordHash(passwordEncoder.encode("admin123"));
             admin.setNickname("Local Admin");
             admin.setStatus("ACTIVE");
+            admin.setRole("ADMIN");
+            admin.setPublishPolicy("STANDARD");
+            admin.setMessagingEnabled(true);
             admin.setCreatedAt(LocalDateTime.now());
             admin.setUpdatedAt(LocalDateTime.now());
             users.put(admin.getUsername(), admin);
         }
+        users.values().forEach(user -> {
+            if (user.getRole() == null || user.getRole().isBlank()) user.setRole("admin".equals(user.getUsername()) ? "ADMIN" : "USER");
+            if (user.getPublishPolicy() == null || user.getPublishPolicy().isBlank()) user.setPublishPolicy("STANDARD");
+            if (user.getMessagingEnabled() == null) user.setMessagingEnabled(true);
+        });
         ids.set(users.values().stream()
                 .map(UserEntity::getId)
                 .filter(id -> id != null)
@@ -163,6 +174,19 @@ public class InMemoryUserStore implements UserStore {
                 .findFirst();
         found.ifPresent(user -> {
             user.setStatus(status);
+            user.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
+    @Override
+    public Optional<UserEntity> updateGovernance(Long userId, String role, String publishPolicy, boolean messagingEnabled) {
+        Optional<UserEntity> found = findById(userId);
+        found.ifPresent(user -> {
+            user.setRole(role);
+            user.setPublishPolicy(publishPolicy);
+            user.setMessagingEnabled(messagingEnabled);
             user.setUpdatedAt(LocalDateTime.now());
             persist();
         });

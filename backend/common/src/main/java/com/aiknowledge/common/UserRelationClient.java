@@ -32,6 +32,22 @@ public class UserRelationClient {
 
     public boolean interactionAllowed(long userId, long targetUserId) {
         if (userId <= 0 || targetUserId <= 0 || userId == targetUserId) return userId == targetUserId;
+        return fetchPolicy(userId, targetUserId).allowed();
+    }
+
+    public boolean publishingAllowed(long userId) {
+        return userId > 0 && fetchPolicy(userId, userId).publishAllowed();
+    }
+
+    public boolean preAuditRequired(long userId) {
+        return userId > 0 && fetchPolicy(userId, userId).preAuditRequired();
+    }
+
+    public boolean messagingAllowed(long userId, long targetUserId) {
+        return userId > 0 && targetUserId > 0 && fetchPolicy(userId, targetUserId).messagingAllowed();
+    }
+
+    private RelationPolicy fetchPolicy(long userId, long targetUserId) {
         try {
             String url = relationUrl + "?userId=" + encode(userId) + "&targetUserId=" + encode(targetUserId);
             HttpRequest request = HttpRequest.newBuilder(URI.create(url))
@@ -39,15 +55,27 @@ public class UserRelationClient {
                     .header("X-Internal-Token", internalToken)
                     .GET().build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) return false;
+            if (response.statusCode() != 200) return RelationPolicy.DENIED;
             JsonNode root = objectMapper.readTree(response.body());
-            return root.path("code").asInt(500) == 0 && root.path("data").path("allowed").asBoolean(false);
+            if (root.path("code").asInt(500) != 0) return RelationPolicy.DENIED;
+            JsonNode data = root.path("data");
+            return new RelationPolicy(
+                    data.path("allowed").asBoolean(false),
+                    data.path("publishAllowed").asBoolean(false),
+                    data.path("preAuditRequired").asBoolean(false),
+                    data.path("messagingAllowed").asBoolean(false)
+            );
         } catch (Exception ignored) {
-            return false;
+            return RelationPolicy.DENIED;
         }
     }
 
     private String encode(long value) {
         return URLEncoder.encode(String.valueOf(value), StandardCharsets.UTF_8);
+    }
+
+    private record RelationPolicy(boolean allowed, boolean publishAllowed, boolean preAuditRequired,
+                                  boolean messagingAllowed) {
+        private static final RelationPolicy DENIED = new RelationPolicy(false, false, false, false);
     }
 }

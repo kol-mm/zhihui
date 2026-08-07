@@ -13,6 +13,7 @@ import com.aiknowledge.knowledge.store.KnowledgeStore;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -604,6 +605,34 @@ public class KnowledgeController {
                         "reason", reason,
                         "updated", true
                 )))
+                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+    }
+
+    @PutMapping("/admin/file")
+    public ApiResponse<Map<String, Object>> updateFileMetadata(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long fileId = number(request.get("fileId"), 0L);
+        KnowledgeFileEntity existing = knowledgeStore.find(fileId).orElse(null);
+        if (existing == null) return ApiResponse.fail("knowledge file not found");
+        String title = String.valueOf(request.getOrDefault("title", existing.getTitle())).trim();
+        Long categoryId = request.containsKey("categoryId") ? number(request.get("categoryId"), null) : existing.getCategoryId();
+        String auditStatus = String.valueOf(request.getOrDefault("auditStatus", existing.getAuditStatus()));
+        if (title.isBlank() || title.length() > 255) return ApiResponse.fail("knowledge title must contain between 1 and 255 characters");
+        if (!List.of("PENDING", "APPROVED", "REJECTED", "HIDDEN").contains(auditStatus)) {
+            return ApiResponse.fail("invalid knowledge status");
+        }
+        if (categoryId != null && knowledgeStore.listCategories().stream().noneMatch(item -> categoryId.equals(item.getId()))) {
+            return ApiResponse.fail("knowledge category not found");
+        }
+        return knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus)
+                .map(file -> {
+                    fullTextSearch.find(fileId).ifPresent(document ->
+                            fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl()));
+                    return ApiResponse.ok(toView(file));
+                })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
     }
 

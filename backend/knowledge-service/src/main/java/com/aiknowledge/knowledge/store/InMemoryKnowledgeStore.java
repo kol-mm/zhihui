@@ -256,6 +256,18 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public Optional<KnowledgeFileEntity> updateFileMetadata(Long fileId, String title, Long categoryId, String auditStatus) {
+        Optional<KnowledgeFileEntity> found = find(fileId);
+        found.ifPresent(file -> {
+            file.setTitle(title);
+            file.setCategoryId(categoryId);
+            file.setAuditStatus(auditStatus);
+            persist();
+        });
+        return found;
+    }
+
+    @Override
     public synchronized boolean deleteFile(Long fileId) {
         boolean removed = files.removeIf(file -> fileId.equals(file.getId()));
         if (!removed) return false;

@@ -24,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -119,6 +120,9 @@ public class UserController {
         String nickname = request.getOrDefault("nickname", username).trim();
         user.setNickname(nickname.isBlank() ? username : nickname.substring(0, Math.min(nickname.length(), 64)));
         user.setStatus("ACTIVE");
+        user.setRole("USER");
+        user.setPublishPolicy("STANDARD");
+        user.setMessagingEnabled(true);
         UserEntity saved = userStore.save(user);
         return ApiResponse.ok(authResult(saved));
     }
@@ -144,11 +148,22 @@ public class UserController {
             @RequestParam Long targetUserId
     ) {
         if (!internalToken().equals(token)) return ApiResponse.fail("internal authorization is required");
+        UserEntity source = userStore.findById(userId).orElse(null);
         UserEntity target = userStore.findById(targetUserId).orElse(null);
         boolean blocked = userStore.listBlockedIds(userId).contains(targetUserId)
                 || userStore.listBlockedIds(targetUserId).contains(userId);
-        boolean active = target != null && "ACTIVE".equals(target.getStatus());
-        return ApiResponse.ok(Map.of("blocked", blocked, "targetActive", active, "allowed", active && !blocked));
+        boolean sourceActive = source != null && "ACTIVE".equals(source.getStatus());
+        boolean targetActive = target != null && "ACTIVE".equals(target.getStatus());
+        boolean messagingAllowed = sourceActive && targetActive && messagingEnabled(source) && messagingEnabled(target);
+        String publishPolicy = publishPolicy(source);
+        return ApiResponse.ok(Map.of(
+                "blocked", blocked,
+                "targetActive", targetActive,
+                "allowed", messagingAllowed && !blocked,
+                "publishAllowed", sourceActive && !"BLOCKED".equals(publishPolicy),
+                "preAuditRequired", "PRE_REVIEW".equals(publishPolicy),
+                "messagingAllowed", messagingAllowed
+        ));
     }
 
     @GetMapping("/session")
@@ -433,6 +448,38 @@ public class UserController {
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
+    @PostMapping("/admin/governance")
+    public ApiResponse<Map<String, Object>> updateUserGovernance(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        Long userId = number(request.get("userId"), 0L);
+        UserEntity user = userStore.findById(userId).orElse(null);
+        if (user == null) return ApiResponse.fail("user not found");
+        String role = String.valueOf(request.getOrDefault("role", role(user)));
+        String status = String.valueOf(request.getOrDefault("status", user.getStatus()));
+        String publishPolicy = String.valueOf(request.getOrDefault("publishPolicy", publishPolicy(user)));
+        boolean messagingEnabled = !Boolean.FALSE.equals(request.getOrDefault("messagingEnabled", messagingEnabled(user)));
+        if (!List.of("USER", "ADMIN").contains(role)) return ApiResponse.fail("invalid role");
+        if (!List.of("ACTIVE", "DISABLED", "DELETED").contains(status)) return ApiResponse.fail("invalid account status");
+        if (!List.of("STANDARD", "PRE_REVIEW", "BLOCKED").contains(publishPolicy)) return ApiResponse.fail("invalid publish policy");
+        String nickname = String.valueOf(request.getOrDefault("nickname", user.getNickname())).trim();
+        String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl()));
+        String signature = String.valueOf(request.getOrDefault("signature", user.getSignature() == null ? "" : user.getSignature())).trim();
+        if (nickname.length() > 64 || signature.length() > 500 || avatarUrl.length() > 2000) return ApiResponse.fail("profile fields exceed the allowed length");
+        userStore.updateProfile(userId, nickname, avatarUrl, signature);
+        userStore.updateStatus(userId, status);
+        userStore.updateGovernance(userId, role, publishPolicy, messagingEnabled);
+        String resetPassword = String.valueOf(request.getOrDefault("resetPassword", ""));
+        if (!resetPassword.isBlank()) {
+            if (resetPassword.length() < 8 || resetPassword.length() > 128) return ApiResponse.fail("reset password must contain between 8 and 128 characters");
+            userStore.updatePassword(userId, passwordEncoder.encode(resetPassword));
+        }
+        return ApiResponse.ok(toView(userStore.findById(userId).orElseThrow()));
+    }
+
     private Long number(Object value, Long fallback) {
         if (value == null) {
             return fallback;
@@ -451,7 +498,9 @@ public class UserController {
         view.put("avatarUrl", user.getAvatarUrl());
         view.put("signature", user.getSignature());
         view.put("status", user.getStatus());
-        view.put("role", LocalAuth.roleForUsername(user.getUsername()));
+        view.put("role", role(user));
+        view.put("publishPolicy", publishPolicy(user));
+        view.put("messagingEnabled", messagingEnabled(user));
         return view;
     }
 
@@ -475,12 +524,24 @@ public class UserController {
     }
 
     private Map<String, Object> authResult(UserEntity user) {
-        String role = LocalAuth.roleForUsername(user.getUsername());
+        String role = role(user);
         return Map.of(
                 "token", LocalAuth.issueToken(user.getUsername(), user.getId(), role),
                 "role", role,
                 "user", toView(user)
         );
+    }
+
+    private String role(UserEntity user) {
+        return user.getRole() == null || user.getRole().isBlank() ? LocalAuth.roleForUsername(user.getUsername()) : user.getRole();
+    }
+
+    private String publishPolicy(UserEntity user) {
+        return user == null || user.getPublishPolicy() == null || user.getPublishPolicy().isBlank() ? "STANDARD" : user.getPublishPolicy();
+    }
+
+    private boolean messagingEnabled(UserEntity user) {
+        return user != null && !Boolean.FALSE.equals(user.getMessagingEnabled());
     }
 
     private String internalToken() {

@@ -66,8 +66,9 @@ public class MessageController {
         ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
         if (session == null) return ApiResponse.fail("chat session not found");
         if (!isParticipant(session, senderId)) return ApiResponse.fail("user is not a participant of this session");
+        if (!"ACTIVE".equals(session.getStatus())) return ApiResponse.fail("this conversation is not available for sending messages");
         Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
-        if (!interactionAllowed(senderId, recipientId)) return ApiResponse.fail("interaction with this user is blocked");
+        if (!messagingAllowed(senderId, recipientId)) return ApiResponse.fail("private messaging is unavailable for this conversation");
         if (content.isBlank()) return ApiResponse.fail("message content is required");
         ChatMessageEntity message = new ChatMessageEntity();
         message.setSessionId(sessionId);
@@ -101,7 +102,7 @@ public class MessageController {
         Long targetUserId = number(request.get("targetUserId"), 0L);
         if (userId <= 0 || targetUserId <= 0) return ApiResponse.fail("both users are required");
         if (userId.equals(targetUserId)) return ApiResponse.fail("cannot create a private chat with yourself");
-        if (!interactionAllowed(userId, targetUserId)) return ApiResponse.fail("interaction with this user is blocked");
+        if (!messagingAllowed(userId, targetUserId)) return ApiResponse.fail("private messaging is unavailable for these users");
         return ApiResponse.ok(toSessionView(messageStore.getOrCreateSession(userId, targetUserId), userId));
     }
 
@@ -361,6 +362,22 @@ public class MessageController {
         return ApiResponse.ok(messageStore.listMessages(sessionId).stream().map(this::toMessageView).toList());
     }
 
+    @PostMapping("/message/admin/session/status")
+    public ApiResponse<Map<String, Object>> updateSessionStatus(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        Long sessionId = number(request.get("sessionId"), 0L);
+        String status = String.valueOf(request.getOrDefault("status", "RESTRICTED"));
+        if (!List.of("ACTIVE", "RESTRICTED", "ARCHIVED").contains(status)) {
+            return ApiResponse.fail("invalid conversation status");
+        }
+        return messageStore.updateSessionStatus(sessionId, status)
+                .map(session -> ApiResponse.ok(toSessionView(session, session.getUserAId())))
+                .orElseGet(() -> ApiResponse.fail("chat session not found"));
+    }
+
     @GetMapping("/feedback/admin/overview")
     public ApiResponse<Map<String, Object>> feedbackAdminOverview(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -421,6 +438,11 @@ public class MessageController {
 
     private boolean interactionAllowed(Long userId, Long targetUserId) {
         return userRelationClient == null || userRelationClient.interactionAllowed(userId, targetUserId);
+    }
+
+    private boolean messagingAllowed(Long userId, Long targetUserId) {
+        return interactionAllowed(userId, targetUserId)
+                && (userRelationClient == null || userRelationClient.messagingAllowed(userId, targetUserId));
     }
 
     private Map<String, Object> toMessageView(ChatMessageEntity message) {

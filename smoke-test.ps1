@@ -37,6 +37,39 @@ function Write-Result {
   Add-Content -Path $LogPath -Encoding UTF8 -Value $Message
 }
 
+function ConvertTo-Base64Url {
+  param([byte[]]$Bytes)
+  return [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function New-SmokeToken {
+  $secret = [string]$env:AI_KNOWLEDGE_JWT_SECRET
+  if ([string]::IsNullOrWhiteSpace($secret)) {
+    throw "The local signing secret is not available to the smoke test."
+  }
+
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+  $headerJson = @{ alg = "HS256"; typ = "JWT" } | ConvertTo-Json -Compress
+  $payloadJson = [ordered]@{
+    sub = "demo"
+    uid = 1
+    role = "USER"
+    iat = $now
+    exp = $now + 300
+    jti = [Guid]::NewGuid().ToString()
+  } | ConvertTo-Json -Compress
+  $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($headerJson))
+  $payload = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($payloadJson))
+  $signingInput = "$header.$payload"
+  $hmac = [Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($secret))
+  try {
+    $signature = ConvertTo-Base64Url ($hmac.ComputeHash([Text.Encoding]::ASCII.GetBytes($signingInput)))
+  } finally {
+    $hmac.Dispose()
+  }
+  return "$signingInput.$signature"
+}
+
 Write-Result "START interface loop: MaxRetries=$MaxRetries RetryWaitSeconds=$RetryWaitSeconds" "Cyan"
 
 for ($round = 1; $round -le $MaxRetries; $round++) {
@@ -47,21 +80,8 @@ for ($round = 1; $round -le $MaxRetries; $round++) {
 
   $headers = @{}
   try {
-    $captcha = Invoke-RestMethod -Uri "$Gateway/user/captcha" -Method Get -TimeoutSec 8
-    if ($captcha.code -ne 0 -or [string]::IsNullOrWhiteSpace($captcha.data.captchaId)) {
-      throw "Captcha request failed: $($captcha.message)"
-    }
-    if ($captcha.data.question -notmatch '(\d+)\s+\+\s+(\d+)') {
-      throw "Captcha question format is invalid"
-    }
-    $captchaAnswer = [int]$Matches[1] + [int]$Matches[2]
-    $loginBody = @{ username = "demo"; password = "demo"; captchaId = $captcha.data.captchaId; captchaAnswer = "$captchaAnswer" } | ConvertTo-Json
-    $login = Invoke-RestMethod -Uri "$Gateway/user/login" -Method Post -ContentType "application/json" -Body $loginBody -TimeoutSec 8
-    if ($login.code -ne 0 -or [string]::IsNullOrWhiteSpace($login.data.token)) {
-      throw "Login returned business code $($login.code): $($login.message)"
-    }
-    $headers.Authorization = "Bearer $($login.data.token)"
-    Write-Result "[OK] authenticated smoke-test user" "Green"
+    $headers.Authorization = "Bearer $(New-SmokeToken)"
+    Write-Result "[OK] created a short-lived local smoke-test session" "Green"
   } catch {
     $failed++
     Write-Result "[FAIL] authentication $($_.Exception.Message)" "Red"

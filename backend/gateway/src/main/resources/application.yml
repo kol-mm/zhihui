@@ -34,19 +34,19 @@ spring:
             allow-credentials: true
       routes:
         - id: user-service
-          uri: lb://user-service
+          uri: ${USER_SERVICE_URL:lb://user-service}
           predicates:
             - Path=/user/**
         - id: knowledge-service
-          uri: lb://knowledge-service
+          uri: ${KNOWLEDGE_SERVICE_URL:lb://knowledge-service}
           predicates:
             - Path=/knowledge/**
         - id: community-service
-          uri: lb://community-service
+          uri: ${COMMUNITY_SERVICE_URL:lb://community-service}
           predicates:
             - Path=/post/**,/comment/**,/square/**
         - id: message-service
-          uri: lb://message-service
+          uri: ${MESSAGE_SERVICE_URL:lb://message-service}
           predicates:
             - Path=/message/**,/notification/**,/feedback/**,/event/**
         - id: ai-service
