@@ -63,9 +63,6 @@ public class LocalEventBusService {
         return Map.of(
                 "mode", mode,
                 "storedEvents", events.size(),
-                "rabbitHost", rabbitHost,
-                "rabbitPort", rabbitPort,
-                "exchange", exchange,
                 "rabbitReady", !"local".equalsIgnoreCase(mode)
         );
     }

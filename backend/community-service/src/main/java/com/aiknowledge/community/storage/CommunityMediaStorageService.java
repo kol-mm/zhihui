@@ -90,6 +90,10 @@ public class CommunityMediaStorageService {
         }
     }
 
+    public String mode() {
+        return "minio".equalsIgnoreCase(storageMode) ? "minio" : "local";
+    }
+
     private Path localPath(String objectName) {
         Path target = localRoot.resolve(objectName).normalize();
         if (!target.startsWith(localRoot)) throw new IllegalArgumentException("invalid media path");

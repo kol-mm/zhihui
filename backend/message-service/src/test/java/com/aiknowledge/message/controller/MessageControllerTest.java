@@ -156,6 +156,9 @@ class MessageControllerTest {
         assertEquals(0, status.code());
         assertEquals("local", status.data().get("mode"));
         assertEquals(false, status.data().get("rabbitReady"));
+        assertEquals(false, status.data().containsKey("rabbitHost"));
+        assertEquals(false, status.data().containsKey("rabbitPort"));
+        assertEquals(false, status.data().containsKey("exchange"));
 
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
         assertEquals(500, controller.events(userAuth, 20).code());

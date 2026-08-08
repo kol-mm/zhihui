@@ -261,6 +261,15 @@ button { letter-spacing: 0; }
 .post-author-link { min-width:0; display:flex; align-items:center; gap:11px; padding:0; border:0; background:transparent; color:inherit; text-align:left; cursor:pointer; }
 .post-author-link:hover strong { color:#176b4d; }
 .relation-lists { margin-top:16px; }
+.runtime-mode-panel .el-alert { margin-bottom:14px; }
+.runtime-mode-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid #edf0ef; border-left:1px solid #edf0ef; }
+.runtime-mode-grid article { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px; border-right:1px solid #edf0ef; border-bottom:1px solid #edf0ef; }
+.runtime-mode-grid article>div { min-width:0; }
+.runtime-mode-grid strong,.runtime-mode-grid p { display:block; margin:0; }
+.runtime-mode-grid p { margin-top:4px; color:#7d8983; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.runtime-mode-grid .el-tag { flex:none; }
+@media (max-width:1100px) { .runtime-mode-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:620px) { .runtime-mode-grid { grid-template-columns:1fr; } .runtime-mode-grid article { align-items:flex-start; } }
 @media (max-width:520px) {
   .ranking-list article { align-items:flex-start; }
   .ranking-list em { display:none; }

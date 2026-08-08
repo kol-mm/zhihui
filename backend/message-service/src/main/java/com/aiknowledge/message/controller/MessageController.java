@@ -51,7 +51,12 @@ public class MessageController {
 
     @GetMapping("/message/health")
     public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("service", "message-service", "time", Instant.now().toString()));
+        return ApiResponse.ok(Map.of(
+                "service", "message-service",
+                "time", Instant.now().toString(),
+                "dataMode", storeMode(messageStore),
+                "eventMode", eventBus.status().get("mode")
+        ));
     }
 
     @PostMapping("/message/send")
@@ -464,6 +469,10 @@ public class MessageController {
         view.put("status", event.getStatus());
         view.put("createdAt", event.getCreatedAt());
         return view;
+    }
+
+    private String storeMode(Object store) {
+        return store.getClass().getSimpleName().startsWith("MySql") ? "mysql" : "local";
     }
 
     private Map<Long, Map<String, Long>> supportWorkload(List<FeedbackTicketEntity> tickets) {

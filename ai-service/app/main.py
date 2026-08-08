@@ -525,6 +525,7 @@ def health() -> ApiResponse:
             "time": now_iso(),
             "chunk_count": chunk_count,
             "session_count": session_count,
+            "database_mode": "sqlite",
             "vector_mode": os.getenv("AI_VECTOR_MODE", "local"),
         }
     )

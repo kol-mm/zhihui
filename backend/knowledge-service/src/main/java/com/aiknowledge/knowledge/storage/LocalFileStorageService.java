@@ -161,9 +161,6 @@ public class LocalFileStorageService {
         }
         return Map.of(
                 "mode", storageMode,
-                "localRoot", storageRoot.toString(),
-                "minioEndpoint", minioEndpoint,
-                "minioBucket", minioBucket,
                 "minioReady", minioReady
         );
     }

@@ -332,7 +332,11 @@ try {
             if (-not $nacosHome -or -not (Test-Path $startup)) {
                 throw "Nacos was not found. Set NACOS_HOME to the Nacos root directory or use -SkipNacos."
             }
-            Start-Process -FilePath $startup -ArgumentList "-m", "standalone" -WorkingDirectory (Split-Path $startup) -WindowStyle Hidden | Out-Null
+            $nacosOutputLog = Join-Path $Logs "nacos-start.log"
+            $nacosErrorLog = Join-Path $Logs "nacos-start.error.log"
+            Start-Process -FilePath $startup -ArgumentList "-m", "standalone" `
+                -WorkingDirectory (Split-Path $startup) -WindowStyle Hidden `
+                -RedirectStandardOutput $nacosOutputLog -RedirectStandardError $nacosErrorLog | Out-Null
             Set-Content -Path $NacosMarker -Value $nacosHome -Encoding UTF8
             Wait-Service -Name "nacos" -HealthUrl "http://127.0.0.1:8848/nacos/v1/console/health/readiness" -Process $null
         }

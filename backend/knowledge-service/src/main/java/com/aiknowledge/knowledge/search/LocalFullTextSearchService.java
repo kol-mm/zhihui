@@ -89,8 +89,6 @@ public class LocalFullTextSearchService {
         return Map.of(
                 "mode", mode,
                 "indexedDocuments", documents.size(),
-                "elasticsearchEndpoint", elasticEndpoint,
-                "elasticsearchIndex", elasticIndex,
                 "elasticsearchReady", !"local".equalsIgnoreCase(mode)
         );
     }

@@ -193,6 +193,13 @@ class KnowledgeControllerTest {
         ApiResponse<Map<String, Object>> status = controller.searchStatus();
         assertEquals("local", status.data().get("mode"));
         assertEquals(false, status.data().get("elasticsearchReady"));
+        assertFalse(status.data().containsKey("elasticsearchEndpoint"));
+        assertFalse(status.data().containsKey("elasticsearchIndex"));
+
+        ApiResponse<Map<String, Object>> storageStatus = controller.storageStatus();
+        assertFalse(storageStatus.data().containsKey("localRoot"));
+        assertFalse(storageStatus.data().containsKey("minioEndpoint"));
+        assertFalse(storageStatus.data().containsKey("minioBucket"));
     }
 
     @Test

@@ -54,7 +54,12 @@ public class UserController {
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("service", "user-service", "time", Instant.now().toString()));
+        return ApiResponse.ok(Map.of(
+                "service", "user-service",
+                "time", Instant.now().toString(),
+                "dataMode", storeMode(userStore),
+                "avatarStorageMode", avatarStorage.mode()
+        ));
     }
 
     @GetMapping("/captcha")
@@ -534,6 +539,10 @@ public class UserController {
 
     private String role(UserEntity user) {
         return user.getRole() == null || user.getRole().isBlank() ? LocalAuth.roleForUsername(user.getUsername()) : user.getRole();
+    }
+
+    private String storeMode(Object store) {
+        return store.getClass().getSimpleName().startsWith("MySql") ? "mysql" : "local";
     }
 
     private String publishPolicy(UserEntity user) {

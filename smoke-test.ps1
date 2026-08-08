@@ -45,6 +45,12 @@ function ConvertTo-Base64Url {
 function New-SmokeToken {
   $secret = [string]$env:AI_KNOWLEDGE_JWT_SECRET
   if ([string]::IsNullOrWhiteSpace($secret)) {
+    $secretFile = Join-Path $PSScriptRoot ".local-secrets\jwt-secret.txt"
+    if (Test-Path -LiteralPath $secretFile) {
+      $secret = [System.IO.File]::ReadAllText($secretFile).Trim()
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($secret)) {
     throw "The local signing secret is not available to the smoke test."
   }
 

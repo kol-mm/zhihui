@@ -183,7 +183,11 @@ public class KnowledgeController {
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("service", "knowledge-service", "time", Instant.now().toString()));
+        return ApiResponse.ok(Map.of(
+                "service", "knowledge-service",
+                "time", Instant.now().toString(),
+                "dataMode", storeMode(knowledgeStore)
+        ));
     }
 
     @GetMapping("/storage/status")
@@ -678,6 +682,10 @@ public class KnowledgeController {
 
     private boolean isMarkdown(String filename) {
         return filename != null && filename.toLowerCase(java.util.Locale.ROOT).endsWith(".md");
+    }
+
+    private String storeMode(Object store) {
+        return store.getClass().getSimpleName().startsWith("MySql") ? "mysql" : "local";
     }
 
     private Map<String, Object> toCategoryView(KnowledgeCategoryEntity category) {

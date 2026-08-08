@@ -102,7 +102,12 @@ public class CommunityController {
 
     @GetMapping("/post/health")
     public ApiResponse<Map<String, Object>> health() {
-        return ApiResponse.ok(Map.of("service", "community-service", "time", Instant.now().toString()));
+        return ApiResponse.ok(Map.of(
+                "service", "community-service",
+                "time", Instant.now().toString(),
+                "dataMode", storeMode(communityStore),
+                "mediaStorageMode", mediaStorage.mode()
+        ));
     }
 
     @PostMapping("/post/create")
@@ -589,6 +594,10 @@ public class CommunityController {
 
     private boolean communityEnabled() {
         return platformConfig == null || platformConfig.enabled("community_enabled", true);
+    }
+
+    private String storeMode(Object store) {
+        return store.getClass().getSimpleName().startsWith("MySql") ? "mysql" : "local";
     }
 
     private boolean interactionAllowed(Long userId, Long targetUserId) {
