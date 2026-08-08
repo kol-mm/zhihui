@@ -12,10 +12,6 @@
         <el-button class="login-button" type="primary" size="large" :loading="busy" native-type="submit">登录</el-button>
         <el-button class="register-entry" text type="primary" @click="registerDialog = true">没有账号？立即注册</el-button>
       </el-form>
-      <div class="demo-accounts">
-        <button type="button" @click="useAccount('demo', 'demo')"><span>用户体验账号</span><strong>demo / demo</strong></button>
-        <button type="button" @click="useAccount('admin', 'admin123')"><span>管理体验账号</span><strong>admin / admin123</strong></button>
-      </div>
     </section>
     <el-dialog v-model="registerDialog" title="注册社区账号" width="min(460px, 92vw)">
       <el-form label-position="top">
@@ -488,7 +484,6 @@ async function loadCaptcha(){
     loginForm.value.captchaAnswer='';registerForm.value.captchaAnswer='';startCaptchaCooldown(60);
   }catch(error){notifyError(error);}finally{captchaLoading.value=false;}
 }
-function useAccount(user:string,password:string){ loginForm.value={username:user,password,captchaId:loginForm.value.captchaId,captchaAnswer:''}; }
 
 async function completeAuthentication(result:AuthResult){
   setAuthToken(result.token);username.value=result.user.username;displayName.value=result.user.nickname;avatarUrl.value=result.user.avatarUrl||'';role.value=result.role;currentUserId.value=result.user.id;
