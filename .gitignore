@@ -16,6 +16,7 @@ ai-service/**/__pycache__/
 
 logs/
 data/
+backups-lightweight/
 .DS_Store
 Thumbs.db
 ~$*.docx
