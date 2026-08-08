@@ -1,6 +1,6 @@
-# AI 知识社区平台（4 GB 单机版）
+# AI 知识社区平台（Docker Linux 版）
 
-面向知识沉淀、社区交流和 AI 知识问答的一体化平台。当前分支为 `feature/4g-lightweight`，在保留完整业务功能的前提下，针对单台 4 GB 服务器减少基础设施占用；容器化不在当前范围内。
+面向知识沉淀、社区交流和 AI 知识问答的一体化平台。当前 `docker-linux` 分支基于 4 GB 轻量版，提供 Docker Compose 和 Linux 一键部署脚本；不运行 Nacos、MinIO、Redis、RabbitMQ、Elasticsearch 或 Milvus。
 
 ## 版本特点
 
@@ -11,8 +11,9 @@
 - 网关使用本地限流，不依赖 Redis。
 - 全文检索、事件总线和向量检索使用本地实现。
 - AI 服务使用 SQLite、本地向量索引和单 Worker。
-- Python 依赖只安装在 `ai-service/.venv`。
-- 生产前端由 Nginx 托管，后端统一通过 `/api` 访问。
+- Java、Python、Node 构建环境封装在多阶段镜像中。
+- 生产前端由 Nginx 容器托管，后端统一通过 `/api` 访问。
+- MySQL、上传文件和 AI SQLite 使用 Docker 持久卷。
 
 完整版（Nacos + MinIO）位于 `master` 分支。
 
@@ -66,50 +67,32 @@
 └─ *.ps1                    启动、停止、验收和备份脚本
 ```
 
-## 环境要求
+## Linux 环境要求
 
-- Windows PowerShell 5.1 或 PowerShell 7
-- JDK 17
-- Maven 3.6+
-- Node.js 20+
-- Python 3.11+
-- MySQL 8
-- Nginx（仅服务器生产部署需要）
+- Ubuntu 22.04/24.04、Debian 12 或其他现代 Linux 发行版
+- 2 核 CPU、4 GB 内存、20 GB 以上可用磁盘
+- Docker Engine 24+
+- Docker Compose v2（使用 `docker compose` 命令）
+- `curl`、Git 和可访问的软件镜像仓库
 
-无需安装 Nacos、MinIO、Redis、RabbitMQ、Elasticsearch 或 Milvus。
+宿主机不需要安装 Java、Maven、Node.js、Python、MySQL 或 Nginx。
 
-## 快速开始
+## 一键部署
 
-在项目根目录打开 PowerShell，设置 MySQL 密码：
+```bash
+git clone https://github.com/kol-mm/zhihui.git
+cd zhihui
+git switch docker-linux
 
-```powershell
-$env:MYSQL_USERNAME = "root"
-$env:MYSQL_PASSWORD = "你的 MySQL 密码"
+cp .env.example .env
+nano .env
+chmod +x deploy.sh backup.sh restore.sh
+./deploy.sh
 ```
 
-首次运行先初始化并检查数据库：
+必须在 `.env` 中更换数据库密码、JWT 密钥和内部通知令牌。部署脚本会构建镜像、启动服务并循环检查前端、用户服务和 AI 接口，全部成功后输出访问地址。
 
-```powershell
-.\verify-mysql.ps1
-```
-
-本机开发时启动全部服务和 Vite 前端：
-
-```powershell
-.\start-lightweight.ps1 -WithDevFrontend
-```
-
-后续无需重新构建时：
-
-```powershell
-.\restart-lightweight.ps1 -WithDevFrontend -SkipBuild
-```
-
-访问地址：
-
-- 前端：<http://127.0.0.1:5173>
-- 网关：<http://127.0.0.1:8080>
-- AI 健康检查：<http://127.0.0.1:8200/ai/health>
+默认访问地址为 `http://服务器IP`。端口被占用时可在 `.env` 中修改 `HTTP_PORT`。
 
 ## 默认测试账号
 
@@ -132,6 +115,17 @@ $env:MYSQL_PASSWORD = "你的 MySQL 密码"
 | MySQL | 3306 |
 
 ## 验收与测试
+
+查看容器状态及接口：
+
+```bash
+./deploy.sh status
+curl -fsS http://127.0.0.1/healthz
+curl -fsS http://127.0.0.1/api/user/health
+curl -fsS http://127.0.0.1/api/ai/health
+```
+
+以下命令用于不经过容器的 Windows 源码开发验收：
 
 检查轻量化模式是否真正生效：
 
@@ -158,81 +152,67 @@ cd ..\frontend
 npm.cmd run build
 ```
 
-## 生产部署
+## 更新与运维
 
-生产环境先构建前端，然后由 Nginx 托管 `frontend/dist`：
+```bash
+git pull --ff-only
+./deploy.sh update
 
-```powershell
-cd .\frontend
-npm.cmd ci
-npm.cmd run build
+./deploy.sh restart
+./deploy.sh status
+./deploy.sh logs
+./deploy.sh stop
+./deploy.sh start
 ```
 
-Nginx 模板位于 `deploy/nginx/ai-knowledge-4g.conf`。修改其中的站点根目录后执行 `nginx -t`，再加载配置。启动业务服务时默认不启动开发前端：
+`down` 只删除容器和网络，不删除持久卷：
 
-```powershell
-$env:MYSQL_PASSWORD = "你的 MySQL 密码"
-.\start-lightweight.ps1
+```bash
+./deploy.sh down
 ```
 
-4 GB 参数、MySQL 配置和详细部署说明见 [docs/4g-single-server.md](docs/4g-single-server.md)。
+详细说明见 [docs/docker-linux.md](docs/docker-linux.md)。
 
 ## 数据目录与备份
 
-需要同时备份 MySQL、AI SQLite、JWT 密钥和以下本地文件：
+容器版使用 `zhihui_mysql_data` 和 `zhihui_app_data` 两个持久卷。创建一致备份：
 
-- `data/uploads`
-- `data/knowledge-media`
-- `data/community-media`
-- `data/user-avatars`
-- `ai-service/data/ai_service.db`
-- `.local-secrets/jwt-secret.txt`
+```bash
+BACKUP_ROOT=/mnt/backup/zhihui ./backup.sh
+```
 
-创建备份：
+恢复会覆盖当前数据库和应用文件，必须显式确认：
 
-```powershell
-$env:MYSQL_PASSWORD = "你的 MySQL 密码"
-.\backup-lightweight.ps1 -BackupRoot "E:\ai-knowledge-backups"
+```bash
+RESTORE_CONFIRM=YES ./restore.sh /mnt/backup/zhihui/20260808-120000
 ```
 
 备份应保存到另一块磁盘或远程存储，不能只留在应用服务器。
 
 ## 安全配置
 
-正式部署至少应通过服务器环境变量配置：
-
-```powershell
-$env:MYSQL_PASSWORD = "强数据库密码"
-$env:AI_KNOWLEDGE_JWT_SECRET = "长度足够的随机密钥"
-$env:AI_API_KEY = "外部 AI 服务密钥"
-```
+正式部署必须在不提交到 Git 的 `.env` 中配置强密码和随机密钥；可选外部 AI 密钥也只放在该文件中。
 
 不要把密码、JWT 密钥、API Key、数据库备份或上传文件提交到 Git。对外服务应通过 Nginx 启用 HTTPS，数据库和内部服务端口只监听内网或本机。
 
 ## 常用命令
 
-```powershell
-# 停止项目登记的本地进程
-.\stop-local.ps1 -KeepNacos
-
-# 重启轻量化服务
-.\restart-lightweight.ps1 -WithDevFrontend -SkipBuild
-
-# 查看验收结果
-.\verify-lightweight.ps1
-
-# 查看日志
-Get-ChildItem .\logs
+```bash
+./deploy.sh status
+./deploy.sh logs
+docker compose --env-file .env exec mysql mysql -uzhihui -p
+docker compose --env-file .env config
 ```
 
 ## 相关文档
 
 - [4 GB 单机部署](docs/4g-single-server.md)
+- [Docker Linux 一键部署](docs/docker-linux.md)
 - [本地验收清单](docs/local-acceptance-checklist.md)
 - [非容器服务器部署](docs/server-deployment.md)
 
 ## 当前边界
 
-- 当前版本不包含 Docker、Docker Compose 或 Kubernetes。
-- 4 GB 模式针对中低并发单机使用；并发量明显增加时应升级内存或拆分服务。
+- 当前版本包含 Docker Compose，不包含 Kubernetes 或集群编排。
+- 4 GB 容器模式针对中低并发单机使用；并发量明显增加时应升级内存或拆分服务。
 - 本地文件模式不提供对象存储的副本和版本能力，必须建立独立备份。

@@ -1,0 +1,188 @@
+name: zhihui
+
+x-java-common: &java-common
+  SPRING_PROFILES_ACTIVE: mysql
+  SPRING_CLOUD_NACOS_DISCOVERY_ENABLED: "false"
+  SERVICE_BIND_ADDRESS: 0.0.0.0
+  GATEWAY_BIND_ADDRESS: 0.0.0.0
+  USER_AVATAR_STORAGE_MODE: local
+  KNOWLEDGE_STORAGE_MODE: local
+  COMMUNITY_STORAGE_MODE: local
+  AI_KNOWLEDGE_JWT_SECRET: ${AI_KNOWLEDGE_JWT_SECRET:?AI_KNOWLEDGE_JWT_SECRET is required}
+  MYSQL_USERNAME: ${MYSQL_USER:-zhihui}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+  INTERNAL_NOTIFICATION_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
+  JAVA_TOOL_OPTIONS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
+
+x-java-build: &java-build
+  context: .
+  dockerfile: deploy/docker/backend.Dockerfile
+
+services:
+  mysql:
+    image: mysql:8.0.39
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_DATABASE: user_db
+      MYSQL_USER: ${MYSQL_USER:-zhihui}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./deploy/4g/mysql-tuning.cnf:/etc/mysql/conf.d/4g-tuning.cnf:ro
+      - ./docs/sql/schema.sql:/docker-entrypoint-initdb.d/20-schema.sql:ro
+      - ./deploy/docker/mysql/99-grant-app-user.sh:/docker-entrypoint-initdb.d/99-grant-app-user.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 768m
+    networks: [app]
+
+  ai:
+    build:
+      context: .
+      dockerfile: deploy/docker/ai.Dockerfile
+    environment:
+      AI_DB_PATH: /data/ai/ai_service.db
+      AI_VECTOR_MODE: local
+      AI_KNOWLEDGE_JWT_SECRET: ${AI_KNOWLEDGE_JWT_SECRET:?AI_KNOWLEDGE_JWT_SECRET is required}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_TIMEOUT: ${AI_API_TIMEOUT:-30}
+    volumes:
+      - app_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/ai/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [app]
+
+  user-service:
+    build:
+      <<: *java-build
+      args: { SERVICE: user-service }
+    environment:
+      <<: *java-common
+      MYSQL_URL: jdbc:mysql://mysql:3306/user_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    volumes: ["app_data:/data"]
+    depends_on:
+      mysql: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8101/user/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app]
+
+  knowledge-service:
+    build:
+      <<: *java-build
+      args: { SERVICE: knowledge-service }
+    environment:
+      <<: *java-common
+      MYSQL_URL: jdbc:mysql://mysql:3306/knowledge_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    volumes: ["app_data:/data"]
+    depends_on:
+      mysql: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8102/knowledge/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app]
+
+  community-service:
+    build:
+      <<: *java-build
+      args: { SERVICE: community-service }
+    environment:
+      <<: *java-common
+      MYSQL_URL: jdbc:mysql://mysql:3306/community_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      MESSAGE_INTERNAL_URL: http://message-service:8104/internal/notification
+    volumes: ["app_data:/data"]
+    depends_on:
+      mysql: { condition: service_healthy }
+      message-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8103/post/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app]
+
+  message-service:
+    build:
+      <<: *java-build
+      args: { SERVICE: message-service }
+    environment:
+      <<: *java-common
+      MYSQL_URL: jdbc:mysql://mysql:3306/message_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    volumes: ["app_data:/data"]
+    depends_on:
+      mysql: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8104/message/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app]
+
+  gateway:
+    build:
+      <<: *java-build
+      args: { SERVICE: gateway }
+    environment:
+      <<: *java-common
+      USER_SERVICE_URL: http://user-service:8101
+      KNOWLEDGE_SERVICE_URL: http://knowledge-service:8102
+      COMMUNITY_SERVICE_URL: http://community-service:8103
+      MESSAGE_SERVICE_URL: http://message-service:8104
+      AI_SERVICE_URL: http://ai:8200
+    depends_on:
+      user-service: { condition: service_healthy }
+      knowledge-service: { condition: service_healthy }
+      community-service: { condition: service_healthy }
+      message-service: { condition: service_healthy }
+      ai: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/gateway/status >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      gateway: { condition: service_healthy }
+    restart: unless-stopped
+    mem_limit: 128m
+    networks: [app]
+
+volumes:
+  mysql_data:
+  app_data:
+
+networks:
+  app:
+    driver: bridge
+
