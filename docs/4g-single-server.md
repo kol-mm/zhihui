@@ -31,6 +31,13 @@ $env:MYSQL_PASSWORD = "你的 MySQL 密码"
 .\start-lightweight.ps1 -SkipBuild
 ```
 
+重启和验收：
+
+```powershell
+.\restart-lightweight.ps1 -SkipBuild
+.\verify-lightweight.ps1
+```
+
 ## 内存策略
 
 脚本为 Java 服务设置 384 MB 堆上限、128 MB 元空间上限，MySQL 连接池限制为 4 个连接，Tomcat 最大线程数为 40。AI 服务保持单 Worker。实际并发过高时应优先增加服务器内存，不要盲目放大这些上限。
@@ -45,3 +52,10 @@ $env:MYSQL_PASSWORD = "你的 MySQL 密码"
 - `.local-secrets/jwt-secret.txt`
 
 备份任务应写入另一块磁盘或远程存储，不能只保存在本机。
+
+创建完整备份：
+
+```powershell
+$env:MYSQL_PASSWORD = "你的 MySQL 密码"
+.\backup-lightweight.ps1 -BackupRoot "E:\ai-knowledge-backups"
+```
