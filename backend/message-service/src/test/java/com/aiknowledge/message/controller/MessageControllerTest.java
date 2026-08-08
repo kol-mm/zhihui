@@ -254,4 +254,24 @@ class MessageControllerTest {
                 .anyMatch(item -> "FEEDBACK".equals(item.get("type"))
                         && "The button has been fixed.".equals(item.get("content"))));
     }
+
+    @Test
+    void adminCanAssignTicketsAndViewSupportWorkload() {
+        Long ticketId = ((Number) controller.createTicket(userAuth, Map.of(
+                "type", "SUPPORT", "content", "need a support agent"
+        )).data().get("id")).longValue();
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+
+        Map<String, Object> assigned = controller.assignTicket(adminAuth, Map.of(
+                "ticketId", ticketId, "assigneeUserId", 2L
+        )).data();
+        assertEquals(2L, assigned.get("assigneeUserId"));
+        assertEquals("PROCESSING", assigned.get("status"));
+
+        Map<String, Object> overview = controller.feedbackAdminOverview(adminAuth, null).data();
+        assertTrue(((Number) overview.get("supportTickets")).longValue() >= 1L);
+        @SuppressWarnings("unchecked")
+        Map<Long, Map<String, Long>> workload = (Map<Long, Map<String, Long>>) overview.get("supportWorkload");
+        assertEquals(1L, workload.get(2L).get("assigned"));
+    }
 }

@@ -51,4 +51,6 @@ public interface MessageStore {
     List<FeedbackTicketEntity> listTickets(Long userId);
 
     Optional<FeedbackTicketEntity> replyTicket(Long ticketId, String status, String reply);
+
+    Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId);
 }

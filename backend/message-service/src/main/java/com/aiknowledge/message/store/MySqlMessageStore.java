@@ -190,6 +190,19 @@ public class MySqlMessageStore implements MessageStore {
         }
         ticket.setStatus(status);
         ticket.setOfficialReply(reply);
+        ticket.setClosedAt("RESOLVED".equals(status) ? LocalDateTime.now() : null);
+        ticket.setUpdatedAt(LocalDateTime.now());
+        ticketMapper.updateById(ticket);
+        return Optional.of(ticket);
+    }
+
+    @Override
+    public Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId) {
+        FeedbackTicketEntity ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) return Optional.empty();
+        ticket.setAssigneeUserId(assigneeUserId);
+        ticket.setAssignedAt(assigneeUserId == null ? null : LocalDateTime.now());
+        if (assigneeUserId != null && "PENDING".equals(ticket.getStatus())) ticket.setStatus("PROCESSING");
         ticket.setUpdatedAt(LocalDateTime.now());
         ticketMapper.updateById(ticket);
         return Optional.of(ticket);

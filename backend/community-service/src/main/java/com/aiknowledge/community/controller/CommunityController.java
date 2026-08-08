@@ -10,6 +10,8 @@ import com.aiknowledge.community.entity.PostEntity;
 import com.aiknowledge.community.store.CommunityStore;
 import com.aiknowledge.community.storage.CommunityMediaStorageService;
 import com.aiknowledge.community.notification.CommunityNotificationClient;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,6 +34,7 @@ import java.util.Map;
 
 @RestController
 public class CommunityController {
+    private static final ObjectMapper JSON = new ObjectMapper();
     private final CommunityStore communityStore;
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
@@ -209,6 +212,7 @@ public class CommunityController {
         draft.setUserId(userId);
         draft.setTitle(String.valueOf(request.getOrDefault("title", "未命名草稿")));
         draft.setContent(String.valueOf(request.getOrDefault("content", "")));
+        draft.setImageUrlsJson(encodeImageUrls(request.get("imageUrls")));
         return ApiResponse.ok(toDraftView(communityStore.saveDraft(draft)));
     }
 
@@ -223,6 +227,7 @@ public class CommunityController {
         if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this draft is denied");
         existing.setTitle(String.valueOf(request.getOrDefault("title", existing.getTitle())));
         existing.setContent(String.valueOf(request.getOrDefault("content", existing.getContent())));
+        if (request.containsKey("imageUrls")) existing.setImageUrlsJson(encodeImageUrls(request.get("imageUrls")));
         return ApiResponse.ok(toDraftView(communityStore.updateDraft(existing)));
     }
 
@@ -242,6 +247,9 @@ public class CommunityController {
         post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
         post.setStatus("PENDING");
         PostEntity saved = communityStore.savePost(post);
+        List<String> imageUrls = request.containsKey("imageUrls")
+                ? stringList(request.get("imageUrls")) : decodeImageUrls(draft.getImageUrlsJson());
+        communityStore.savePostImages(saved.getId(), imageUrls);
         communityStore.removeDraft(draftId);
         return ApiResponse.ok(toPostView(saved));
     }
@@ -535,6 +543,7 @@ public class CommunityController {
         view.put("userId", draft.getUserId());
         view.put("title", draft.getTitle());
         view.put("content", draft.getContent());
+        view.put("imageUrls", decodeImageUrls(draft.getImageUrlsJson()));
         view.put("updatedAt", draft.getUpdatedAt());
         return view;
     }
@@ -553,6 +562,25 @@ public class CommunityController {
         if (value instanceof List<?> values) return values.stream().map(String::valueOf).toList();
         if (value == null || value.toString().isBlank()) return List.of();
         return java.util.Arrays.stream(value.toString().split(",")).map(String::trim).filter(item -> !item.isBlank()).toList();
+    }
+
+    private String encodeImageUrls(Object value) {
+        List<String> imageUrls = stringList(value);
+        if (imageUrls.size() > 9) throw new IllegalArgumentException("a draft can contain at most 9 images");
+        try {
+            return JSON.writeValueAsString(imageUrls);
+        } catch (Exception error) {
+            throw new IllegalArgumentException("invalid draft images");
+        }
+    }
+
+    private List<String> decodeImageUrls(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        try {
+            return JSON.readValue(value, new TypeReference<>() { });
+        } catch (Exception error) {
+            return List.of();
+        }
     }
 
     private boolean communityEnabled() {

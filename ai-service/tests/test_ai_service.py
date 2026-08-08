@@ -83,7 +83,10 @@ class AiServicePersistenceTest(unittest.TestCase):
         health_response = self.main.health()
         self.assertEqual(health_response.data["chunk_count"], 2)
         self.assertEqual(health_response.data["session_count"], 1)
-        self.assertEqual(health_response.data["vector_dimension"], 128)
+        self.assertNotIn("db_path", health_response.data)
+        self.assertNotIn("vector_dimension", health_response.data)
+        self.assertNotIn("chroma_path", vector_status.data)
+        self.assertNotIn("milvus_endpoint", vector_status.data)
 
         history = self.main.chat_history(user_id=1, authorization=self.user_auth)
         self.assertEqual(len(history.data["sessions"]), 1)
@@ -128,6 +131,28 @@ class AiServicePersistenceTest(unittest.TestCase):
     def test_temperature_is_limited_to_one(self) -> None:
         with self.assertRaises(ValueError):
             self.main.AiConfigRequest(temperature=1.1)
+
+    def test_admin_selected_scope_filters_retrieval_and_is_persisted(self) -> None:
+        admin_auth = self.issue_token("admin", 2, "ADMIN")
+        self.main.parse_document(
+            self.main.TextRequest(file_id=21, title="Selected", text="shared retrieval selected source"),
+            authorization=self.user_auth,
+        )
+        self.main.parse_document(
+            self.main.TextRequest(file_id=22, title="Excluded", text="shared retrieval excluded source"),
+            authorization=self.user_auth,
+        )
+        saved = self.main.save_ai_config(self.main.AiConfigRequest(
+            data_source_scope="admin-selected",
+            selected_file_ids=[21],
+            match_limit=10,
+        ), authorization=admin_auth)
+        self.assertEqual(saved.data["configuration"]["selected_file_ids"], [21])
+
+        retrieved = self.main.retrieve(
+            self.main.ChatRequest(question="shared retrieval"), authorization=self.user_auth
+        )
+        self.assertEqual([item["file_id"] for item in retrieved.data["matches"]], [21])
 
     def test_reindex_replaces_old_file_chunks(self) -> None:
         first = self.main.parse_document(

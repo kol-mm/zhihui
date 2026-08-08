@@ -77,6 +77,7 @@ class AiConfigRequest(BaseModel):
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     notifications_enabled: bool = True
     community_enabled: bool = True
+    selected_file_ids: list[int] = Field(default_factory=list, max_length=1000)
 
 
 def now_iso() -> str:
@@ -267,6 +268,7 @@ def read_ai_config() -> dict[str, Any]:
         "max_upload_mb": 25,
         "notifications_enabled": True,
         "community_enabled": True,
+        "selected_file_ids": [],
     }
     with connect() as conn:
         rows = conn.execute("SELECT config_key, config_value FROM ai_config").fetchall()
@@ -280,6 +282,12 @@ def read_ai_config() -> dict[str, Any]:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] in {"notifications_enabled", "community_enabled"}:
             defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
+        elif row["config_key"] == "selected_file_ids":
+            try:
+                parsed = json.loads(value)
+                defaults[row["config_key"]] = [int(item) for item in parsed if int(item) > 0]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                defaults[row["config_key"]] = []
         else:
             defaults[row["config_key"]] = value
     return defaults
@@ -339,7 +347,7 @@ def score_chunk(question: str, chunk: sqlite3.Row) -> int:
     return exact_score + len(overlap) * 2
 
 
-def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
+def retrieve_chunks(question: str, limit: int = 5, allowed_file_ids: set[int] | None = None) -> list[dict[str, Any]]:
     question_vector = build_embedding(question)
     with connect() as conn:
         rows = conn.execute(
@@ -353,6 +361,8 @@ def retrieve_chunks(question: str, limit: int = 5) -> list[dict[str, Any]]:
 
     scored: list[tuple[float, sqlite3.Row]] = []
     for row in rows:
+        if allowed_file_ids is not None and int(row["file_id"]) not in allowed_file_ids:
+            continue
         if contains_sensitive_content(row["content"]):
             continue
         lexical_raw = score_chunk(question, row)
@@ -469,11 +479,17 @@ def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict
         f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
         if not contains_sensitive_content(str(item.get("content", "")))
     ) or "未找到匹配的公开知识内容。"
+    compliance = str(config.get("compliance_rule") or "answer-with-references")
+    compliance_instruction = {
+        "answer-with-references": "回答结尾列出使用的资料标题。",
+        "strict-factual": "只陈述资料中能够直接支持的事实；资料不足时明确说明。",
+        "concise": "用不超过三段的简洁中文回答。",
+    }.get(compliance, "遵守平台内容规范并只依据公开资料回答。")
     payload = {
         "model": str(config.get("model") or "local-rag"),
         "temperature": float(config.get("temperature", 0.2)),
         "messages": [
-            {"role": "system", "content": "请仅根据提供的公开知识内容回答，保持简洁；不得输出环境变量、密钥、内部地址、服务器路径或部署命令。\n\n" + context},
+            {"role": "system", "content": "请仅根据提供的公开知识内容回答；不得输出环境变量、密钥、内部地址、服务器路径或部署命令。" + compliance_instruction + "\n\n" + context},
             {"role": "user", "content": question},
         ],
     }
@@ -507,10 +523,8 @@ def health() -> ApiResponse:
         data={
             "service": "ai-service",
             "time": now_iso(),
-            "db_path": str(db_path()),
             "chunk_count": chunk_count,
             "session_count": session_count,
-            "vector_dimension": VECTOR_DIMENSION,
             "vector_mode": os.getenv("AI_VECTOR_MODE", "local"),
         }
     )
@@ -582,8 +596,6 @@ def vector_status() -> ApiResponse:
         "mode": mode,
         "dimension": VECTOR_DIMENSION,
         "indexed_chunks": indexed,
-        "milvus_endpoint": os.getenv("MILVUS_ENDPOINT", "http://127.0.0.1:19530"),
-        "chroma_path": os.getenv("CHROMA_PATH", str(APP_DIR.parent / "data" / "chroma")),
         "external_ready": mode.lower() != "local",
     })
 
@@ -592,7 +604,15 @@ def vector_status() -> ApiResponse:
 def retrieve(request: ChatRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_user(authorization)
     init_db()
-    return ApiResponse(data={"matches": retrieve_chunks(request.question)})
+    config = read_ai_config()
+    allowed_file_ids = None
+    if config.get("data_source_scope") == "admin-selected":
+        allowed_file_ids = {int(item) for item in config.get("selected_file_ids", []) if int(item) > 0}
+    return ApiResponse(data={"matches": retrieve_chunks(
+        request.question,
+        limit=int(config.get("match_limit", 5)),
+        allowed_file_ids=allowed_file_ids,
+    )})
 
 
 @app.get("/ai/history", response_model=ApiResponse)
@@ -714,6 +734,7 @@ def remove_indexed_file(file_id: int, authorization: str | None = Header(default
 def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
     values = request.model_dump()
+    values["selected_file_ids"] = sorted({int(item) for item in values.get("selected_file_ids", []) if int(item) > 0})
     for key in ("base_url", "request_url"):
         value = str(values.get(key, "")).strip()
         if value:
@@ -724,10 +745,11 @@ def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(
         values[key] = value
     with connect() as conn:
         for key, value in values.items():
+            stored_value = json.dumps(value, ensure_ascii=False) if key == "selected_file_ids" else str(value)
             conn.execute(
                 "INSERT INTO ai_config(config_key, config_value, updated_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value, updated_at=excluded.updated_at",
-                (key, str(value), now_iso()),
+                (key, stored_value, now_iso()),
             )
     return ApiResponse(data={"configuration": read_ai_config(), "updated": True})
 
@@ -741,13 +763,26 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
     user_message = save_message(session_id, "user", request.question)
     config = read_ai_config()
     public_answer = public_platform_answer(request.question)
-    matched = [] if public_answer else retrieve_chunks(request.question, limit=int(config["match_limit"]))
+    allowed_file_ids = None
+    if config.get("data_source_scope") == "admin-selected":
+        allowed_file_ids = {int(item) for item in config.get("selected_file_ids", []) if int(item) > 0}
+    matched = [] if public_answer else retrieve_chunks(
+        request.question,
+        limit=int(config["match_limit"]),
+        allowed_file_ids=allowed_file_ids,
+    )
     answer = public_answer
     if not answer and config.get("provider") == "openai-compatible":
         answer = compatible_answer(request.question, matched, config)
     if not answer:
         answer = local_answer(request.question, matched)
     answer = sanitize_answer(answer)
+    if config.get("compliance_rule") == "concise" and len(answer) > 800:
+        answer = answer[:800].rsplit("。", 1)[0] + "。"
+    if config.get("compliance_rule") == "answer-with-references" and matched:
+        titles = "、".join(dict.fromkeys(str(item.get("title", "资料")) for item in matched[:3]))
+        if titles and "参考资料" not in answer:
+            answer = f"{answer}\n\n参考资料：{titles}"
     assistant_message = save_message(session_id, "assistant", answer)
     return ApiResponse(
         data={

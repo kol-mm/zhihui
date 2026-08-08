@@ -138,6 +138,7 @@ public class InMemoryCommunityStore implements CommunityStore {
         PostDraftEntity existing = findDraft(draft.getId()).orElseThrow();
         existing.setTitle(draft.getTitle());
         existing.setContent(draft.getContent());
+        existing.setImageUrlsJson(draft.getImageUrlsJson());
         existing.setUpdatedAt(LocalDateTime.now());
         persist();
         return existing;

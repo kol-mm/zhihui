@@ -424,7 +424,7 @@ public class KnowledgeController {
                 .filter(java.util.Objects::nonNull)
                 .collect(java.util.stream.Collectors.groupingBy(userId -> userId, java.util.stream.Collectors.counting()));
         Map<Long, List<KnowledgeFileEntity>> filesByUser = allFiles.stream()
-                .filter(file -> file.getUserId() != null)
+                .filter(file -> file.getUserId() != null && "APPROVED".equals(file.getAuditStatus()))
                 .collect(java.util.stream.Collectors.groupingBy(KnowledgeFileEntity::getUserId));
         List<Map<String, Object>> ranking = filesByUser.entrySet().stream()
                 .map(entry -> {

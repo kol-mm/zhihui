@@ -273,6 +273,22 @@ public class InMemoryMessageStore implements MessageStore {
         found.ifPresent(ticket -> {
             ticket.setStatus(status);
             ticket.setOfficialReply(reply);
+            ticket.setClosedAt("RESOLVED".equals(status) ? LocalDateTime.now() : null);
+            ticket.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
+    @Override
+    public Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId) {
+        Optional<FeedbackTicketEntity> found = tickets.stream()
+                .filter(ticket -> ticket.getId().equals(ticketId))
+                .findFirst();
+        found.ifPresent(ticket -> {
+            ticket.setAssigneeUserId(assigneeUserId);
+            ticket.setAssignedAt(assigneeUserId == null ? null : LocalDateTime.now());
+            if (assigneeUserId != null && "PENDING".equals(ticket.getStatus())) ticket.setStatus("PROCESSING");
             ticket.setUpdatedAt(LocalDateTime.now());
             persist();
         });

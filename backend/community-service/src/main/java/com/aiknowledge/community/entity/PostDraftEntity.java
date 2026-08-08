@@ -13,6 +13,7 @@ public class PostDraftEntity {
     private Long userId;
     private String title;
     private String content;
+    private String imageUrlsJson;
     private LocalDateTime updatedAt;
 
     public Long getId() { return id; }
@@ -23,6 +24,8 @@ public class PostDraftEntity {
     public void setTitle(String title) { this.title = title; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getImageUrlsJson() { return imageUrlsJson; }
+    public void setImageUrlsJson(String imageUrlsJson) { this.imageUrlsJson = imageUrlsJson; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

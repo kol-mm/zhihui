@@ -387,13 +387,41 @@ public class MessageController {
         if (denied != null) {
             return denied;
         }
-        return ApiResponse.ok(Map.of(
-                "module", "工单反馈管理",
-                "tickets", messageStore.listTickets(userId).size(),
-                "faqs", messageStore.listFaqs().size(),
-                "pendingTickets", messageStore.listTickets(userId).stream().filter(ticket -> "PENDING".equals(ticket.getStatus())).count(),
-                "capabilities", List.of("客服配置", "工单处理", "进度跟踪", "FAQ维护")
-        ));
+        List<FeedbackTicketEntity> tickets = messageStore.listTickets(userId);
+        Map<String, Object> overview = new LinkedHashMap<>();
+        overview.put("module", "工单反馈管理");
+        overview.put("tickets", tickets.size());
+        overview.put("faqs", messageStore.listFaqs().size());
+        overview.put("pendingTickets", tickets.stream().filter(ticket -> "PENDING".equals(ticket.getStatus())).count());
+        overview.put("processingTickets", tickets.stream().filter(ticket -> "PROCESSING".equals(ticket.getStatus())).count());
+        overview.put("resolvedTickets", tickets.stream().filter(ticket -> "RESOLVED".equals(ticket.getStatus())).count());
+        overview.put("bugTickets", tickets.stream().filter(ticket -> "BUG".equals(ticket.getType())).count());
+        overview.put("suggestionTickets", tickets.stream().filter(ticket -> "SUGGESTION".equals(ticket.getType())).count());
+        overview.put("supportTickets", tickets.stream().filter(ticket -> "SUPPORT".equals(ticket.getType())).count());
+        overview.put("supportWorkload", supportWorkload(tickets));
+        overview.put("capabilities", List.of("客服分配", "工单处理", "进度跟踪", "接待统计", "FAQ维护"));
+        return ApiResponse.ok(overview);
+    }
+
+    @PostMapping("/feedback/admin/assign")
+    public ApiResponse<Map<String, Object>> assignTicket(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        Long ticketId = number(request.get("ticketId"), 0L);
+        Long rawAssignee = number(request.get("assigneeUserId"), 0L);
+        Long assigneeUserId = rawAssignee != null && rawAssignee > 0 ? rawAssignee : null;
+        return messageStore.assignTicket(ticketId, assigneeUserId)
+                .map(ticket -> {
+                    eventBus.publish("FEEDBACK_TICKET_ASSIGNED", String.valueOf(ticket.getId()), Map.of(
+                            "assigned", assigneeUserId != null,
+                            "assigneeUserId", assigneeUserId == null ? 0L : assigneeUserId
+                    ));
+                    return ApiResponse.ok(toTicketView(ticket));
+                })
+                .orElseGet(() -> ApiResponse.fail("ticket not found"));
     }
 
     @PostMapping("/feedback/admin/reply")
@@ -408,6 +436,8 @@ public class MessageController {
         Long ticketId = number(request.get("ticketId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "PROCESSING"));
         String reply = String.valueOf(request.getOrDefault("reply", ""));
+        if (!List.of("PENDING", "PROCESSING", "RESOLVED").contains(status)) return ApiResponse.fail("invalid ticket status");
+        if (reply.length() > 5000) return ApiResponse.fail("ticket reply is too long");
         return messageStore.replyTicket(ticketId, status, reply)
                 .map(ticket -> {
                     NotificationEntity notification = new NotificationEntity();
@@ -434,6 +464,24 @@ public class MessageController {
         view.put("status", event.getStatus());
         view.put("createdAt", event.getCreatedAt());
         return view;
+    }
+
+    private Map<Long, Map<String, Long>> supportWorkload(List<FeedbackTicketEntity> tickets) {
+        Map<Long, Map<String, Long>> workload = new LinkedHashMap<>();
+        for (FeedbackTicketEntity ticket : tickets) {
+            if (ticket.getAssigneeUserId() == null) continue;
+            Map<String, Long> counts = workload.computeIfAbsent(ticket.getAssigneeUserId(), ignored -> {
+                Map<String, Long> initial = new LinkedHashMap<>();
+                initial.put("assigned", 0L);
+                initial.put("processing", 0L);
+                initial.put("resolved", 0L);
+                return initial;
+            });
+            counts.put("assigned", counts.get("assigned") + 1);
+            if ("PROCESSING".equals(ticket.getStatus())) counts.put("processing", counts.get("processing") + 1);
+            if ("RESOLVED".equals(ticket.getStatus())) counts.put("resolved", counts.get("resolved") + 1);
+        }
+        return workload;
     }
 
     private boolean interactionAllowed(Long userId, Long targetUserId) {
@@ -525,6 +573,9 @@ public class MessageController {
         view.put("content", ticket.getContent());
         view.put("status", ticket.getStatus());
         view.put("reply", ticket.getOfficialReply());
+        view.put("assigneeUserId", ticket.getAssigneeUserId());
+        view.put("assignedAt", ticket.getAssignedAt());
+        view.put("closedAt", ticket.getClosedAt());
         view.put("createdAt", ticket.getCreatedAt());
         view.put("updatedAt", ticket.getUpdatedAt());
         return view;

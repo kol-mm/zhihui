@@ -52,6 +52,8 @@ class KnowledgeControllerTest {
                 "content", "ranking content"
         ));
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+        controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
         controller.view(userAuth, Map.of("fileId", fileId));
         controller.download(userAuth, Map.of("fileId", fileId));
         controller.report(userAuth, Map.of("fileId", fileId, "reason", "ranking violation"));
@@ -65,6 +67,22 @@ class KnowledgeControllerTest {
         assertTrue(((Number) currentUser.get("views")).intValue() >= 1);
         assertTrue(((Number) currentUser.get("downloads")).intValue() >= 1);
         assertTrue(((Number) currentUser.get("violations")).intValue() >= 1);
+    }
+
+    @Test
+    void pendingKnowledgeDoesNotIncreaseContributionUploads() {
+        int before = controller.ranking().data().stream()
+                .filter(item -> Long.valueOf(1L).equals(((Number) item.get("userId")).longValue()))
+                .map(item -> ((Number) item.get("uploads")).intValue())
+                .findFirst().orElse(0);
+
+        controller.upload(userAuth, Map.of("title", "Pending contribution", "fileType", "txt", "content", "pending"));
+
+        int after = controller.ranking().data().stream()
+                .filter(item -> Long.valueOf(1L).equals(((Number) item.get("userId")).longValue()))
+                .map(item -> ((Number) item.get("uploads")).intValue())
+                .findFirst().orElse(0);
+        assertEquals(before, after);
     }
 
     @Test

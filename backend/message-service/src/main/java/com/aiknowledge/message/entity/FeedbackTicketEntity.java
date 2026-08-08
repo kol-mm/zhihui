@@ -15,6 +15,9 @@ public class FeedbackTicketEntity {
     private String content;
     private String status;
     private String officialReply;
+    private Long assigneeUserId;
+    private LocalDateTime assignedAt;
+    private LocalDateTime closedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -30,6 +33,12 @@ public class FeedbackTicketEntity {
     public void setStatus(String status) { this.status = status; }
     public String getOfficialReply() { return officialReply; }
     public void setOfficialReply(String officialReply) { this.officialReply = officialReply; }
+    public Long getAssigneeUserId() { return assigneeUserId; }
+    public void setAssigneeUserId(Long assigneeUserId) { this.assigneeUserId = assigneeUserId; }
+    public LocalDateTime getAssignedAt() { return assignedAt; }
+    public void setAssignedAt(LocalDateTime assignedAt) { this.assignedAt = assignedAt; }
+    public LocalDateTime getClosedAt() { return closedAt; }
+    public void setClosedAt(LocalDateTime closedAt) { this.closedAt = closedAt; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

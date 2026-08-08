@@ -158,7 +158,8 @@ class CommunityControllerTest {
         ApiResponse<Map<String, Object>> draft = controller.saveDraft(userAuth, Map.of(
                 "userId", 1L,
                 "title", "Draft title",
-                "content", "draft content"
+                "content", "draft content",
+                "imageUrls", List.of("/post/media/draft-image")
         ));
         assertEquals(0, draft.code());
 
@@ -166,19 +167,23 @@ class CommunityControllerTest {
         assertEquals(0, drafts.code());
         assertFalse(drafts.data().isEmpty());
         assertEquals("Draft title", drafts.data().get(0).get("title"));
+        assertEquals(List.of("/post/media/draft-image"), drafts.data().get(0).get("imageUrls"));
     }
 
     @Test
     void ownerCanEditPublishAndDeleteDrafts() {
         var editable = controller.saveDraft(userAuth, Map.of("title", "First", "content", "Draft body"));
         Long editableId = ((Number) editable.data().get("id")).longValue();
-        var updated = controller.updateDraft(userAuth, Map.of("id", editableId, "title", "Updated", "content", "Ready"));
+        var updated = controller.updateDraft(userAuth, Map.of("id", editableId, "title", "Updated", "content", "Ready",
+                "imageUrls", List.of("/post/media/first", "/post/media/second")));
         assertEquals(0, updated.code());
         assertEquals("Updated", updated.data().get("title"));
+        assertEquals(2, ((List<?>) updated.data().get("imageUrls")).size());
 
         var published = controller.publishDraft(userAuth, Map.of("id", editableId, "title", "Published"));
         assertEquals(0, published.code());
         assertEquals("Published", published.data().get("title"));
+        assertEquals(List.of("/post/media/first", "/post/media/second"), published.data().get("imageUrls"));
         assertFalse(controller.drafts(userAuth, 1L).data().stream().anyMatch(item -> editableId.equals(item.get("id"))));
 
         var removable = controller.saveDraft(userAuth, Map.of("title", "Remove", "content", "Later"));
