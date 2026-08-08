@@ -1,0 +1,9 @@
+[mysqld]
+# Conservative defaults for a 4 GB single-server host.
+innodb_buffer_pool_size=512M
+innodb_buffer_pool_instances=1
+max_connections=60
+table_open_cache=512
+tmp_table_size=32M
+max_heap_table_size=32M
+performance_schema=OFF
