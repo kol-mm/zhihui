@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class CommunityControllerTest {
@@ -244,6 +246,32 @@ class CommunityControllerTest {
         ApiResponse<Map<String, Object>> detail = controller.detail(userAuth, 1L);
         assertEquals(0, detail.code());
         assertFalse(((List<?>) detail.data().get("comments")).isEmpty());
+    }
+
+    @Test
+    void commentingOnOwnPostOrReplyingToOwnCommentDoesNotNotifySelf() {
+        var notifications = mock(com.aiknowledge.community.notification.CommunityNotificationClient.class);
+        var isolated = new CommunityController(
+                new InMemoryCommunityStore(),
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password"),
+                notifications
+        );
+        var created = isolated.createPost(userAuth, Map.of("title", "Self notification", "content", "body"));
+        Long postId = ((Number) created.data().get("id")).longValue();
+        isolated.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+
+        var parent = isolated.createComment(userAuth, Map.of("postId", postId, "content", "own comment"));
+        Long parentId = ((Number) parent.data().get("id")).longValue();
+        isolated.createComment(userAuth, Map.of(
+                "postId", postId, "parentId", parentId, "content", "reply to myself"));
+
+        verifyNoInteractions(notifications);
+
+        isolated.createComment(secondUserAuth, Map.of(
+                "postId", postId, "parentId", parentId, "content", "reply from another user"));
+        verify(notifications).commentCreated(1L, 2L, postId, "reply from another user");
     }
 
     @Test

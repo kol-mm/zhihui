@@ -182,7 +182,9 @@ public class CommunityController {
         comment.setContent(comment.getContent().trim());
         CommentEntity saved = communityStore.saveComment(comment);
         Long notificationTarget = parent == null ? post.get().getUserId() : parent.getUserId();
-        notificationClient.commentCreated(notificationTarget, userId, post.get().getId(), saved.getContent());
+        if (!userId.equals(notificationTarget)) {
+            notificationClient.commentCreated(notificationTarget, userId, post.get().getId(), saved.getContent());
+        }
         return ApiResponse.ok(toCommentView(saved));
     }
 
@@ -317,7 +319,9 @@ public class CommunityController {
         if (!interactionAllowed(userId, post.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         if (comment.getContent().isBlank()) return ApiResponse.fail("comment content is required");
         CommentEntity saved = communityStore.saveComment(comment);
-        notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
+        if (!userId.equals(post.getUserId())) {
+            notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
+        }
         return ApiResponse.ok(toCommentView(saved));
     }
 

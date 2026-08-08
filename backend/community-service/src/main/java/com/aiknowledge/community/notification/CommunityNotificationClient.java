@@ -38,6 +38,7 @@ public class CommunityNotificationClient {
         try {
             restClient.post().uri(url).header("X-Internal-Token", token).body(Map.of(
                     "userId", postOwnerId,
+                    "actorUserId", commenterId,
                     "type", "COMMENT",
                     "title", "你的帖子收到新评论",
                     "content", "帖子 #" + postId + "：" + abbreviate(content)
