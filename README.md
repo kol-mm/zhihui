@@ -1,210 +1,238 @@
-# AI 知识社区平台（本地可用版本）
+# AI 知识社区平台（4 GB 单机版）
 
-当前发行版本：`1.0.0`。这是可完整本地运行和演示的正式版本，不是 MVP；容器化部署按当前要求暂不包含在内。
+面向知识沉淀、社区交流和 AI 知识问答的一体化平台。当前分支为 `feature/4g-lightweight`，在保留完整业务功能的前提下，针对单台 4 GB 服务器减少基础设施占用；容器化不在当前范围内。
 
-本项目先完成本地可运行版本，暂不做容器化。当前架构保留微服务拆分，并接入本机 Nacos；Python 依赖只安装在 ai-service/.venv，不污染全局环境。
+## 版本特点
 
-## 当前覆盖范围
+- 保留用户端、管理端、知识审核、社区互动、消息反馈和 AI 问答功能。
+- 业务数据使用 MySQL 8 持久化。
+- 服务间使用固定地址直连，不运行 Nacos。
+- 图片和知识附件存入服务器本地目录，不运行 MinIO。
+- 网关使用本地限流，不依赖 Redis。
+- 全文检索、事件总线和向量检索使用本地实现。
+- AI 服务使用 SQLite、本地向量索引和单 Worker。
+- Python 依赖只安装在 `ai-service/.venv`。
+- 生产前端由 Nginx 托管，后端统一通过 `/api` 访问。
 
-- 用户端六大模块：知识库、论坛、消息、广场、个人中心、用户反馈。
-- 管理端六大模块：知识库管理、论坛管理、消息互动管理、平台数据统计、用户账号管理、工单反馈管理。
-- 后端：Spring Cloud Gateway、Nacos Discovery、用户服务、知识库服务、论坛/广场服务、消息/反馈服务。
-- AI 服务：FastAPI，本地 SQLite 持久化知识切片、向量、会话和聊天消息。
-- 前端：Vue 3 + TypeScript + Vite + Element Plus，本地页面已拆分用户端 / 管理端两个入口，并可分别联调接口。
-- 本地基础能力：文件存储、事件总线、全文索引、向量检索均可直接运行，并保留 MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB 配置入口。
-- 鉴权：登录签发 HMAC-SHA256 JWT，包含用户、角色、签发时间和过期时间；管理端接口校验 ADMIN 角色。
-- 完整交互：粉丝/拉黑/用户举报/行为足迹、多图帖子/关注动态/帖子点赞、单条消息删除和会话清理。
-- 管理闭环：知识举报结案、评论和草稿清理、FAQ 运维、AI 数据源与匹配规则配置、问答历史和切片审查。
+完整版（Nacos + MinIO）位于 `master` 分支。
 
-## 本机依赖
+## 功能概览
 
+### 用户端
+
+- 注册、登录、图形验证码、JWT 鉴权和个人资料维护
+- 知识上传、分类、检索、阅读、下载、点赞、收藏和举报
+- 社区发帖、草稿、多图内容、评论、二级回复、点赞和收藏
+- 关注、取消关注、拉黑、私信、通知和行为足迹
+- 用户反馈、FAQ 和工单进度查询
+- 基于已审核知识的 AI 问答、历史会话和参考资料
+
+### 管理端
+
+- 用户、知识、帖子、评论、举报和工单管理
+- 待审核内容预览、通过、驳回和深度内容检索
+- 平台统计、业务事件、运行模式和服务状态展示
+- AI 提供商、请求地址、模型、温度、知识范围和合规规则配置
+- FAQ、通知开关、社区开关和上传限制配置
+
+## 技术栈
+
+| 层级 | 技术 |
+| --- | --- |
+| 前端 | Vue 3、TypeScript、Vite、Element Plus |
+| 网关 | Spring Cloud Gateway |
+| 后端 | Java 17、Spring Boot 3.2、MyBatis-Plus |
+| AI | Python、FastAPI、Uvicorn、SQLite |
+| 数据库 | MySQL 8 |
+| 入口 | Nginx |
+| 本地能力 | 本地文件、全文索引、事件总线、向量检索 |
+
+## 项目结构
+
+```text
+项目/
+├─ frontend/                 Vue 用户端和管理端
+├─ backend/
+│  ├─ gateway/              统一网关
+│  ├─ user-service/         用户与社交关系
+│  ├─ knowledge-service/    知识、审核、检索与文件
+│  ├─ community-service/    社区、评论、草稿与互动
+│  ├─ message-service/      消息、通知、反馈与事件
+│  └─ common/               公共鉴权和响应模型
+├─ ai-service/              AI 问答与向量检索
+├─ data/                    本地上传文件（不提交到 Git）
+├─ deploy/                  Nginx 与 MySQL 配置模板
+├─ docs/                    部署及验收文档
+└─ *.ps1                    启动、停止、验收和备份脚本
+```
+
+## 环境要求
+
+- Windows PowerShell 5.1 或 PowerShell 7
 - JDK 17
 - Maven 3.6+
-- Node.js 20+（PowerShell 下建议使用 npm.cmd）
-- Python 3.11+（当前代码已在 Python 3.14 环境下验证）
-- Nacos 2.x 单机版
-- MySQL 8 可选；默认本地可用版本使用本地 JSON/内存数据和 AI SQLite
+- Node.js 20+
+- Python 3.11+
+- MySQL 8
+- Nginx（仅服务器生产部署需要）
 
-## 启动 Nacos
+无需安装 Nacos、MinIO、Redis、RabbitMQ、Elasticsearch 或 Milvus。
 
-在 Nacos 目录执行：
+## 快速开始
 
-    startup.cmd -m standalone
+在项目根目录打开 PowerShell，设置 MySQL 密码：
 
-默认控制台：
+```powershell
+$env:MYSQL_USERNAME = "root"
+$env:MYSQL_PASSWORD = "你的 MySQL 密码"
+```
 
-    http://127.0.0.1:8848/nacos
+首次运行先初始化并检查数据库：
 
-默认账号密码通常是 nacos / nacos。本项目暂不启动容器版 Nacos。
+```powershell
+.\verify-mysql.ps1
+```
 
-## 一键启动本地可用版本
+本机开发时启动全部服务和 Vite 前端：
 
-项目根目录提供 start-local.ps1，会启动 AI 服务、后端 5 个微服务、网关和前端，并把日志写入 logs 目录。
+```powershell
+.\start-lightweight.ps1 -WithDevFrontend
+```
 
-Windows 下如果想双击启动，请使用：
+后续无需重新构建时：
 
-    start-local.bat
+```powershell
+.\restart-lightweight.ps1 -WithDevFrontend -SkipBuild
+```
 
-如果只想单独启动 Nacos，可以双击：
+访问地址：
 
-    start-nacos.bat
+- 前端：<http://127.0.0.1:5173>
+- 网关：<http://127.0.0.1:8080>
+- AI 健康检查：<http://127.0.0.1:8200/ai/health>
 
-如果在 PowerShell 中启动，请使用：
+## 默认测试账号
 
-    .\start-local.ps1
+仅用于本地初始化和验收，正式部署后应立即修改密码：
 
-如果你的 Nacos 已经启动，脚本会检测 8848 端口并跳过。本机已检测到的默认 Nacos 目录是：
+- 普通用户：`demo / demo`
+- 管理员：`admin / admin123`
 
-    D:\software\nacos-server-2.3.2\nacos
+## 服务端口
 
-若你换了其他安装目录，请先设置 NACOS_HOME：
+| 服务 | 端口 |
+| --- | ---: |
+| 前端开发服务器 | 5173 |
+| 网关 | 8080 |
+| 用户服务 | 8101 |
+| 知识服务 | 8102 |
+| 社区服务 | 8103 |
+| 消息服务 | 8104 |
+| AI 服务 | 8200 |
+| MySQL | 3306 |
 
-    $env:NACOS_HOME = "D:\software\nacos-server-2.3.2\nacos"
-    .\start-local.ps1
+## 验收与测试
 
-常用参数：
+检查轻量化模式是否真正生效：
 
-    .\start-local.ps1 -SkipBuild
-    .\start-local.ps1 -SkipNacos
-    .\start-local.ps1 -SkipMinio
-    .\start-local.ps1 -SkipFrontend
-    .\start-local.ps1 -SkipSmokeTest
+```powershell
+.\verify-lightweight.ps1
+```
 
-默认情况下，启动器会在项目的 `data/minio` 目录上自动启动并管理 MinIO。若 MinIO 已由你手动启动在 `9000` 端口，请使用外部服务模式；启动器只检查并复用它，不会登记或停止该 MinIO 进程：
+运行接口冒烟测试；遇到 503 时每 10 秒重试，最多 30 轮：
 
-    .\start-local.ps1 -UseExternalMinio
+```powershell
+.\smoke-test.ps1 -MaxRetries 30 -RetryWaitSeconds 10
+```
 
-手动启动且未设置账号时，MinIO 的默认账号密码是 `minioadmin / minioadmin`，外部服务模式也使用这组默认值。自定义账号时应在同一个 PowerShell 窗口先设置：
+运行完整测试：
 
-    $env:MINIO_ACCESS_KEY = "你的账号"
-    $env:MINIO_SECRET_KEY = "你的密码"
-    .\start-local.ps1 -UseExternalMinio
+```powershell
+cd .\backend
+mvn.cmd -s maven-settings.xml clean test
 
-`-SkipMinio` 表示完全不使用 MinIO并切换到本地文件目录，不能和 `-UseExternalMinio` 同时使用。
+cd ..\ai-service
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 
-双击 `start-local.bat` 默认执行受控重启：先完成构建和依赖检查，再停止上次由脚本记录的进程，所有健康检查及接口验收通过后才提示成功。脚本不会仅凭端口占用判断服务正常。
+cd ..\frontend
+npm.cmd run build
+```
 
-停止或重启整套本地服务：
+## 生产部署
 
-    .\stop-local.ps1
-    .\restart-local.ps1 -SkipBuild
+生产环境先构建前端，然后由 Nginx 托管 `frontend/dist`：
 
-启动器把进程号记录在 `logs/local-processes.json`，标准输出和错误日志分别写入 `logs/<service>.log` 与 `logs/<service>.error.log`。停止脚本会核对进程启动时间，只结束由本项目启动器记录的进程树。
+```powershell
+cd .\frontend
+npm.cmd ci
+npm.cmd run build
+```
 
-## 启动后端
+Nginx 模板位于 `deploy/nginx/ai-knowledge-4g.conf`。修改其中的站点根目录后执行 `nginx -t`，再加载配置。启动业务服务时默认不启动开发前端：
 
-后端使用 backend/maven-settings.xml，本地 Maven 仓库固定到英文路径，避免 Windows 中文路径下 Java 读取 jar 的权限问题。
+```powershell
+$env:MYSQL_PASSWORD = "你的 MySQL 密码"
+.\start-lightweight.ps1
+```
 
-    cd .\backend
-    mvn -s maven-settings.xml clean install -DskipTests
+4 GB 参数、MySQL 配置和详细部署说明见 [docs/4g-single-server.md](docs/4g-single-server.md)。
 
-建议分别打开 5 个终端启动服务：
+## 数据目录与备份
 
-    mvn -s maven-settings.xml -pl user-service spring-boot:run
-    mvn -s maven-settings.xml -pl knowledge-service spring-boot:run
-    mvn -s maven-settings.xml -pl community-service spring-boot:run
-    mvn -s maven-settings.xml -pl message-service spring-boot:run
-    mvn -s maven-settings.xml -pl gateway spring-boot:run
+需要同时备份 MySQL、AI SQLite、JWT 密钥和以下本地文件：
 
-默认端口：
+- `data/uploads`
+- `data/knowledge-media`
+- `data/community-media`
+- `data/user-avatars`
+- `ai-service/data/ai_service.db`
+- `.local-secrets/jwt-secret.txt`
 
-- Gateway: 8080
-- user-service: 8101
-- knowledge-service: 8102
-- community-service: 8103
-- message-service: 8104
-- ai-service: 8200
-- frontend: 5173
+创建备份：
 
-## 启动 AI 服务
+```powershell
+$env:MYSQL_PASSWORD = "你的 MySQL 密码"
+.\backup-lightweight.ps1 -BackupRoot "E:\ai-knowledge-backups"
+```
 
-    cd .\ai-service
-    .\run.ps1
+备份应保存到另一块磁盘或远程存储，不能只留在应用服务器。
 
-run.ps1 会自动创建并使用 ai-service/.venv，依赖不会安装到全局 Python。默认 SQLite 文件为 ai-service/data/ai_service.db。
+## 安全配置
 
-可用 AI_DB_PATH 指定其他 SQLite 路径。
+正式部署至少应通过服务器环境变量配置：
 
-## 启动前端
+```powershell
+$env:MYSQL_PASSWORD = "强数据库密码"
+$env:AI_KNOWLEDGE_JWT_SECRET = "长度足够的随机密钥"
+$env:AI_API_KEY = "外部 AI 服务密钥"
+```
 
-    cd .\frontend
-    npm.cmd install
-    npm.cmd run dev
+不要把密码、JWT 密钥、API Key、数据库备份或上传文件提交到 Git。对外服务应通过 Nginx 启用 HTTPS，数据库和内部服务端口只监听内网或本机。
 
-访问：
+## 常用命令
 
-    http://127.0.0.1:5173
+```powershell
+# 停止项目登记的本地进程
+.\stop-local.ps1 -KeepNacos
 
-页面默认进入用户端，可切换到管理端。用户端和管理端使用同一个本地前端工程，避免本地运行阶段维护两套启动命令。
+# 重启轻量化服务
+.\restart-lightweight.ps1 -WithDevFrontend -SkipBuild
 
-## 默认账号
+# 查看验收结果
+.\verify-lightweight.ps1
 
-- 普通用户：demo / demo
-- 管理员：admin / admin123
+# 查看日志
+Get-ChildItem .\logs
+```
 
-管理员登录后可进入管理端，执行知识审核、帖子审核、用户状态调整、工单回复，并查看平台数据统计。
+## 相关文档
 
-## 快速验证
+- [4 GB 单机部署](docs/4g-single-server.md)
+- [本地验收清单](docs/local-acceptance-checklist.md)
+- [非容器服务器部署](docs/server-deployment.md)
 
-后端测试：
+## 当前边界
 
-    cd .\backend
-    mvn -s maven-settings.xml clean test
-
-AI 测试：
-
-    cd .\ai-service
-    .\.venv\Scripts\python.exe -m unittest discover -s tests
-
-前端构建：
-
-    cd .\frontend
-    npm.cmd run build
-
-接口 smoke test：
-
-    .\smoke-test.ps1
-
-带 503 自动重试的接口循环检测：
-
-    .\smoke-test.ps1 -MaxRetries 30 -RetryWaitSeconds 10
-
-也可以手动检查：
-
-    curl http://127.0.0.1:8080/user/health
-    curl http://127.0.0.1:8080/knowledge/list
-    curl http://127.0.0.1:8080/square/feed
-    curl http://127.0.0.1:8080/feedback/faqs
-    curl http://127.0.0.1:8200/ai/health
-
-## 可选 MySQL 模式
-
-默认本地可用版本使用本地 JSON/内存数据。需要切换 MySQL 时，先执行：
-
-    mysql -uroot -p < .\docs\sql\schema.sql
-
-再设置环境变量启动服务：
-
-    $env:SPRING_PROFILES_ACTIVE = "mysql"
-    $env:MYSQL_USERNAME = "root"
-    $env:MYSQL_PASSWORD = "你的本地 MySQL 密码"
-    mvn -s maven-settings.xml -pl user-service spring-boot:run
-
-密码只通过环境变量传入，不写进项目配置。也可以通过 MYSQL_URL 分别指定对应业务库。
-
-## 当前完成边界
-
-- 容器化部署：按要求暂不做。
-- 文件存储、消息事件、全文检索、向量检索、JWT/RBAC：已完成本地可运行实现。
-- MinIO、RabbitMQ、Elasticsearch、Milvus/ChromaDB：已保留配置入口；默认不依赖外部服务即可启动。
-
-## 可选能力配置
-
-    $env:AI_KNOWLEDGE_JWT_SECRET = "请替换为长随机字符串"
-    $env:AI_KNOWLEDGE_JWT_EXPIRES_SECONDS = "28800"
-    $env:AI_VECTOR_MODE = "local"
-    $env:AI_VECTOR_DIMENSION = "128"
-    $env:MILVUS_ENDPOINT = "http://127.0.0.1:19530"
-    $env:CHROMA_PATH = ".\\ai-service\\data\\chroma"
-
-本地配置文件还提供 `knowledge.storage.minio`、`message.event.rabbitmq` 和 `knowledge.search.elasticsearch` 节点。默认 `mode: local`，因此不安装外部中间件也能使用对应功能。
+- 当前版本不包含 Docker、Docker Compose 或 Kubernetes。
+- 4 GB 模式针对中低并发单机使用；并发量明显增加时应升级内存或拆分服务。
+- 本地文件模式不提供对象存储的副本和版本能力，必须建立独立备份。
