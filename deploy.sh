@@ -32,7 +32,7 @@ validate_environment() {
     exit 1
   }
 
-  local key value
+  local key value port bind_address
   for key in MYSQL_ROOT_PASSWORD MYSQL_PASSWORD AI_KNOWLEDGE_JWT_SECRET INTERNAL_NOTIFICATION_TOKEN; do
     value="$(read_env "$key")"
     if [[ -z "$value" || "$value" == replace-with-* ]]; then
@@ -47,14 +47,30 @@ validate_environment() {
     exit 1
   }
 
+  bind_address="$(read_env HTTP_BIND_ADDRESS)"
+  bind_address="${bind_address:-0.0.0.0}"
+  [[ "$bind_address" == "0.0.0.0" || "$bind_address" == "127.0.0.1" ]] || {
+    echo "HTTP_BIND_ADDRESS 只能设置为 0.0.0.0 或 127.0.0.1。" >&2
+    exit 1
+  }
+
+  port="$(read_env HTTP_PORT)"
+  port="${port:-80}"
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || {
+    echo "HTTP_PORT 必须是 1-65535 之间的端口号。" >&2
+    exit 1
+  }
+
   chmod 600 "$ENV_FILE"
   compose config --quiet
 }
 
 wait_for_stack() {
-  local port deadline
+  local port deadline bind_address
   port="$(read_env HTTP_PORT)"
   port="${port:-80}"
+  bind_address="$(read_env HTTP_BIND_ADDRESS)"
+  bind_address="${bind_address:-0.0.0.0}"
   deadline=$((SECONDS + 360))
 
   echo "等待服务健康检查完成……"
@@ -71,10 +87,14 @@ wait_for_stack() {
   done
 
   compose ps
-  local host_ip
-  host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  host_ip="${host_ip:-127.0.0.1}"
-  echo "部署完成：http://${host_ip}:${port}"
+  if [[ "$bind_address" == "127.0.0.1" ]]; then
+    echo "部署完成：http://127.0.0.1:${port}（仅宿主机可访问，请配置 HTTPS 反向代理）"
+  else
+    local host_ip
+    host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    host_ip="${host_ip:-127.0.0.1}"
+    echo "部署完成：http://${host_ip}:${port}"
+  fi
 }
 
 require_command docker
