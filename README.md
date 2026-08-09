@@ -158,6 +158,9 @@ npm.cmd run build
 git pull --ff-only
 ./deploy.sh update
 
+# 强制拉取并刷新基础镜像
+./deploy.sh refresh
+
 ./deploy.sh restart
 ./deploy.sh status
 ./deploy.sh logs

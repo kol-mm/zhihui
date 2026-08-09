@@ -484,7 +484,15 @@ git pull --ff-only
 ./deploy.sh update
 ```
 
-`update` 会重新构建发生变化的镜像，并使用原有持久卷重建容器。只执行 `restart` 不会应用镜像、Compose 或 `.env` 的变化。
+`update` 会优先复用服务器已有的基础镜像和构建缓存，重新构建发生变化的内容，并使用原有持久卷重建容器。只执行 `restart` 不会应用镜像、Compose 或 `.env` 的变化。
+
+需要主动检查并拉取最新基础镜像时执行：
+
+```bash
+./deploy.sh refresh
+```
+
+`refresh` 会访问 Docker Hub；网络不稳定时应继续使用普通的 `update`。
 
 ## 15. 数据持久化
 
@@ -646,6 +654,23 @@ sudo ss -ltnp | grep ':80 '
 
 ### 镜像下载或依赖下载超时
 
+如果日志停在下面这一类信息：
+
+```text
+resolve image config for docker.io/docker/dockerfile:1.7
+```
+
+说明 Docker 正在下载 Dockerfile 前端镜像，而不是项目代码编译失败。当前分支已经移除了这项额外依赖。先更新代码：
+
+```bash
+cd /opt/zhihui
+git pull --ff-only
+grep -R "docker/dockerfile" deploy/docker || true
+./deploy.sh update
+```
+
+`grep` 正常情况下不应输出内容。
+
 检查 DNS 和网络：
 
 ```bash
@@ -654,6 +679,39 @@ curl -I https://repo.maven.apache.org
 curl -I https://registry.npmjs.org
 curl -I https://pypi.org
 ```
+
+访问 `https://registry-1.docker.io/v2/` 返回 `401 Unauthorized` 属于正常现象，表示网络已经连通但请求未登录。连接超时、DNS 失败或 TLS 握手失败才属于网络问题。
+
+先分别测试基础镜像：
+
+```bash
+docker pull python:3.11-slim
+docker pull node:20-alpine
+docker pull nginx:1.27-alpine
+docker pull mysql:8.0.39
+docker pull maven:3.9.9-eclipse-temurin-17
+docker pull eclipse-temurin:17-jre-jammy
+```
+
+如果 Docker Hub 在服务器所在地区持续不可达，应在 `/etc/docker/daemon.json` 配置云服务商提供的官方镜像加速地址。示例结构如下，地址需要替换成云厂商控制台分配的真实地址：
+
+```json
+{
+  "registry-mirrors": [
+    "https://你的镜像加速地址"
+  ]
+}
+```
+
+配置后重启 Docker：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+docker info | sed -n '/Registry Mirrors/,+5p'
+```
+
+不要随意使用来源不明的公共镜像站，镜像加速地址应来自服务器云厂商或可信的私有镜像仓库。
 
 网络恢复后再次运行 `./deploy.sh`，Docker BuildKit 会复用已完成的构建缓存。
 

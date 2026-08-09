@@ -1,11 +1,9 @@
-# syntax=docker/dockerfile:1.7
 FROM maven:3.9.9-eclipse-temurin-17 AS builder
 
 WORKDIR /workspace
 COPY backend ./backend
 
-RUN --mount=type=cache,target=/root/.m2 \
-    cd backend && \
+RUN cd backend && \
     mvn -B -DskipTests clean install && \
     for service in gateway user-service knowledge-service community-service message-service; do \
       mvn -B -DskipTests -pl "$service" package spring-boot:repackage; \

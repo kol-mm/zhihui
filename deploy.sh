@@ -107,6 +107,13 @@ case "$ACTION" in
   deploy|update)
     require_command curl
     validate_environment
+    compose build
+    compose up -d --remove-orphans
+    wait_for_stack
+    ;;
+  refresh)
+    require_command curl
+    validate_environment
     compose build --pull
     compose up -d --remove-orphans
     wait_for_stack
@@ -140,7 +147,7 @@ case "$ACTION" in
     compose logs --tail=200 -f
     ;;
   *)
-    echo "用法：./deploy.sh [deploy|update|start|restart|stop|down|status|logs]" >&2
+    echo "用法：./deploy.sh [deploy|update|refresh|start|restart|stop|down|status|logs]" >&2
     exit 2
     ;;
 esac
