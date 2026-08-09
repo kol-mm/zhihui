@@ -207,6 +207,9 @@ cat > .env <<EOF
 HTTP_BIND_ADDRESS=0.0.0.0
 HTTP_PORT=80
 
+MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
+PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
 MYSQL_USER=zhihui
 MYSQL_PASSWORD=${MYSQL_PASSWORD}
@@ -227,6 +230,8 @@ unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET INTERNAL_TOKEN
 | --- | --- |
 | `HTTP_BIND_ADDRESS` | `0.0.0.0` 表示直接对外提供 HTTP；`127.0.0.1` 表示只允许宿主机反代访问 |
 | `HTTP_PORT` | 前端映射到宿主机的端口，默认 `80` |
+| `MAVEN_MIRROR_URL` | Java 依赖仓库，默认使用阿里云 Maven 公共仓库 |
+| `PIP_INDEX_URL` | Python 依赖仓库，默认使用阿里云 PyPI 镜像 |
 | `MYSQL_ROOT_PASSWORD` | MySQL root 密码，只供初始化和备份恢复使用 |
 | `MYSQL_USER` | 应用数据库账号，只能包含字母、数字和下划线 |
 | `MYSQL_PASSWORD` | 应用数据库密码 |
@@ -242,6 +247,15 @@ grep -E '^(HTTP_BIND_ADDRESS|HTTP_PORT|MYSQL_USER|AI_API_TIMEOUT)=' .env
 ```
 
 `.env` 权限应为 `600`。
+
+如果默认国内镜像在当前地区不可用，可以修改为其他可信镜像。例如切回官方源：
+
+```dotenv
+MAVEN_MIRROR_URL=https://repo.maven.apache.org/maven2
+PIP_INDEX_URL=https://pypi.org/simple
+```
+
+修改镜像地址后执行 `./deploy.sh update`，Docker 会重新运行对应的依赖安装层。
 
 ## 9. 部署前检查
 
@@ -712,6 +726,18 @@ docker info | sed -n '/Registry Mirrors/,+5p'
 ```
 
 不要随意使用来源不明的公共镜像站，镜像加速地址应来自服务器云厂商或可信的私有镜像仓库。
+
+基础镜像下载和项目依赖下载是两条不同链路：
+
+- `load metadata for docker.io/library/...`：Docker 基础镜像网络问题，由 Docker daemon 镜像加速或代理解决。
+- Maven 日志中的依赖下载超时：修改 `.env` 的 `MAVEN_MIRROR_URL`。
+- pip 日志中的 Python 包下载超时：修改 `.env` 的 `PIP_INDEX_URL`。
+
+检查 Compose 展开后的构建参数：
+
+```bash
+docker compose --env-file .env config | grep -E 'MAVEN_MIRROR_URL|PIP_INDEX_URL'
+```
 
 网络恢复后再次运行 `./deploy.sh`，Docker BuildKit 会复用已完成的构建缓存。
 

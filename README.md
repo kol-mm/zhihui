@@ -92,6 +92,8 @@ chmod +x deploy.sh backup.sh restore.sh
 
 必须在 `.env` 中更换数据库密码、JWT 密钥和内部通知令牌。部署脚本会构建镜像、启动服务并循环检查前端、用户服务和 AI 接口，全部成功后输出访问地址。
 
+Docker 构建默认使用阿里云 Maven 公共仓库和阿里云 PyPI 镜像，可通过 `.env` 中的 `MAVEN_MIRROR_URL`、`PIP_INDEX_URL` 覆盖。
+
 默认访问地址为 `http://服务器IP`。端口被占用时可在 `.env` 中修改 `HTTP_PORT`。
 
 ## 默认测试账号

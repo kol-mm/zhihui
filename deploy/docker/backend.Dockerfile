@@ -1,12 +1,16 @@
 FROM maven:3.9.9-eclipse-temurin-17 AS builder
 
+ARG MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
+ENV MAVEN_MIRROR_URL=${MAVEN_MIRROR_URL}
+
 WORKDIR /workspace
 COPY backend ./backend
+COPY deploy/docker/maven-settings.xml ./maven-settings.xml
 
 RUN cd backend && \
-    mvn -B -DskipTests clean install && \
+    mvn -B -s /workspace/maven-settings.xml -DskipTests clean install && \
     for service in gateway user-service knowledge-service community-service message-service; do \
-      mvn -B -DskipTests -pl "$service" package spring-boot:repackage; \
+      mvn -B -s /workspace/maven-settings.xml -DskipTests -pl "$service" package spring-boot:repackage; \
     done
 
 FROM eclipse-temurin:17-jre-jammy

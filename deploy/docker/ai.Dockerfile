@@ -1,7 +1,12 @@
 FROM python:3.11-slim
 
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_DEFAULT_TIMEOUT=60 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     AI_DB_PATH=/data/ai/ai_service.db \
     AI_VECTOR_MODE=local
 
