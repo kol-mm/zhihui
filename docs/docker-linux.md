@@ -204,8 +204,8 @@ JWT_SECRET="$(openssl rand -hex 48)"
 INTERNAL_TOKEN="$(openssl rand -hex 32)"
 
 cat > .env <<EOF
-HTTP_BIND_ADDRESS=0.0.0.0
-HTTP_PORT=80
+HTTP_BIND_ADDRESS=127.0.0.1
+HTTP_PORT=8088
 
 MAVEN_MIRROR_URL=https://maven.aliyun.com/repository/public
 PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
@@ -259,18 +259,20 @@ PIP_INDEX_URL=https://pypi.org/simple
 
 ## 9. 部署前检查
 
-检查端口是否被占用：
+检查 HTTPS 公网入口和容器本机入口是否被占用：
 
 ```bash
-sudo ss -ltnp | grep -E ':(80|443)\s' || true
+sudo ss -ltnp | grep -E ':(80|443|8088)\s' || true
 ```
 
-如果 `80` 已被宿主机 Nginx、Apache 或其他程序使用，可以暂时将 `.env` 修改为：
+容器默认只监听宿主机回环地址，不直接暴露公网：
 
 ```dotenv
-HTTP_BIND_ADDRESS=0.0.0.0
+HTTP_BIND_ADDRESS=127.0.0.1
 HTTP_PORT=8088
 ```
+
+公网的 `80/443` 由宿主机 Nginx 使用。如果 `8088` 被占用，可以改为其他未占用端口；运行 `setup-https.sh` 时同时设置相同的 `HTTPS_UPSTREAM_PORT`。
 
 检查 Compose 配置：
 
@@ -284,7 +286,7 @@ docker compose --env-file .env -f compose.yaml config --quiet
 
 ```bash
 cd /opt/zhihui
-chmod +x deploy.sh backup.sh restore.sh
+chmod +x deploy.sh setup-https.sh backup.sh restore.sh
 ./deploy.sh
 ```
 
@@ -331,7 +333,7 @@ cd /opt/zhihui
 
 ```bash
 HTTP_PORT="$(sed -n 's/^HTTP_PORT=//p' .env | tail -n 1)"
-HTTP_PORT="${HTTP_PORT:-80}"
+HTTP_PORT="${HTTP_PORT:-8088}"
 ```
 
 检查前端和 API：
@@ -346,17 +348,7 @@ curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/message/health"
 curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/ai/health"
 ```
 
-从本地电脑访问：
-
-```text
-http://服务器公网IP
-```
-
-如果修改了 `HTTP_PORT`，访问地址需要带端口，例如：
-
-```text
-http://服务器公网IP:8088
-```
+此时只能在服务器本机通过 `http://127.0.0.1:8088` 访问，这是正常的安全状态。完成下一节的 HTTPS 配置后再从本地电脑访问域名。
 
 本地初始化账号仅用于验收：
 
@@ -367,13 +359,77 @@ http://服务器公网IP:8088
 
 ## 12. 配置域名和 HTTPS
 
-先在域名服务商处添加一条 `A` 记录，把域名指向服务器公网 IPv4。等待解析生效：
+### 12.1 部署结构
+
+```text
+浏览器
+  -> HTTPS :443（宿主机 Nginx，TLS 证书）
+  -> HTTP 127.0.0.1:8088（Docker 前端 Nginx，不可从公网直连）
+  -> /api 转发到 Docker 网关
+  -> 用户、知识、社区、消息、AI 和 MySQL（仅 Docker 内网）
+```
+
+宿主机 Nginx 负责 TLS、域名入口和 HTTP 到 HTTPS 跳转；Docker 前端负责 Vue 静态文件和 `/api` 路由。数据库及后端服务没有映射宿主机端口，因此公网只能接触到 `80/443`。
+
+### 12.2 前置条件
+
+1. 准备一个域名，例如 `example.com`，在域名服务商处添加 `A` 记录并指向服务器公网 IPv4。
+2. 云服务器安全组和系统防火墙允许入站 TCP `80`、`443`；不要对公网开放 `8088`、`3306`、`8080` 或其他内部端口。
+3. 确认域名解析已经生效：
 
 ```bash
 dig +short example.com
 ```
 
-让 Docker 前端只监听本机端口，编辑 `.env`：
+输出应当是当前服务器公网 IP。证书机构必须能通过公网访问域名的 `80` 端口，否则无法完成首次签发。
+
+### 12.3 一键启用 HTTPS（Ubuntu/Debian）
+
+更新到包含 HTTPS 脚本的版本后执行：
+
+```bash
+cd /opt/zhihui
+git pull --ff-only
+chmod +x deploy.sh setup-https.sh
+sudo ./setup-https.sh example.com admin@example.com
+```
+
+第一个参数是域名，第二个参数是证书到期通知邮箱。脚本会：
+
+1. 把 `.env` 的容器入口改为 `127.0.0.1:8088` 并更新容器。
+2. 安装宿主机 Nginx、Certbot 和 Nginx 插件。
+3. 从 `deploy/nginx/host-https.conf.template` 生成反向代理配置。
+4. 申请 Let's Encrypt 证书并将 HTTP 自动跳转到 HTTPS。
+5. 启用证书续期定时器并检查 HTTPS 健康接口。
+
+如果容器本机入口使用其他端口，例如 `8090`：
+
+```bash
+sudo HTTPS_UPSTREAM_PORT=8090 ./setup-https.sh example.com admin@example.com
+```
+
+最终访问：
+
+```text
+https://example.com
+```
+
+验证配置、入口和自动续期：
+
+```bash
+sudo nginx -t
+curl -I http://example.com
+curl -fsS https://example.com/healthz
+sudo certbot certificates
+sudo certbot renew --dry-run
+systemctl status certbot.timer --no-pager
+```
+
+`curl -I http://example.com` 应返回跳转到 `https://example.com`。
+
+### 12.4 手动配置
+
+如果不是 Ubuntu/Debian，先用发行版的软件包管理器安装 Nginx、Certbot 和 Certbot Nginx 插件。然后让 Docker 前端只监听本机端口，编辑 `.env`：
 
 ```dotenv
 HTTP_BIND_ADDRESS=127.0.0.1
@@ -388,34 +444,21 @@ cd /opt/zhihui
 curl -fsS http://127.0.0.1:8088/healthz
 ```
 
-安装宿主机 Nginx 和 Certbot：
+安装宿主机 Nginx 和 Certbot（Ubuntu/Debian 示例）：
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y nginx certbot python3-certbot-nginx
 ```
 
-创建 `/etc/nginx/sites-available/zhihui.conf`：
+复制模板并替换域名、端口：
 
-```nginx
-server {
-    listen 80;
-    listen [::]:80;
-    server_name example.com;
-
-    client_max_body_size 100m;
-
-    location / {
-        proxy_pass http://127.0.0.1:8088;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 5s;
-        proxy_read_timeout 60s;
-    }
-}
+```bash
+sudo sed \
+  -e 's/__DOMAIN__/example.com/g' \
+  -e 's/__UPSTREAM_PORT__/8088/g' \
+  deploy/nginx/host-https.conf.template \
+  | sudo tee /etc/nginx/sites-available/zhihui.conf >/dev/null
 ```
 
 将 `example.com` 替换为真实域名，然后启用站点：
@@ -429,14 +472,8 @@ sudo systemctl reload nginx
 申请 HTTPS 证书：
 
 ```bash
-sudo certbot --nginx -d example.com
+sudo certbot --nginx --redirect -d example.com
 sudo certbot renew --dry-run
-```
-
-最终访问：
-
-```text
-https://example.com
 ```
 
 ## 13. 日常管理命令
@@ -763,8 +800,8 @@ docker compose --env-file .env logs --tail=200 user-service knowledge-service co
 ### 页面可以打开但接口失败
 
 ```bash
-curl -i http://127.0.0.1:${HTTP_PORT:-80}/api/gateway/status
-curl -i http://127.0.0.1:${HTTP_PORT:-80}/api/user/health
+curl -i http://127.0.0.1:${HTTP_PORT:-8088}/api/gateway/status
+curl -i http://127.0.0.1:${HTTP_PORT:-8088}/api/user/health
 ```
 
 修改 `.env` 后必须执行 `./deploy.sh update`，仅重启容器可能不会应用 Compose 配置变化。

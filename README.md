@@ -13,6 +13,7 @@
 - AI 服务使用 SQLite、本地向量索引和单 Worker。
 - Java、Python、Node 构建环境封装在多阶段镜像中。
 - 生产前端由 Nginx 容器托管，后端统一通过 `/api` 访问。
+- 公网入口使用宿主机 Nginx 和 Certbot，容器入口仅监听 `127.0.0.1:8088`。
 - MySQL、上传文件和 AI SQLite 使用 Docker 持久卷。
 
 完整版（Nacos + MinIO）位于 `master` 分支。
@@ -74,8 +75,9 @@
 - Docker Engine 24+
 - Docker Compose v2（使用 `docker compose` 命令）
 - `curl`、Git 和可访问的软件镜像仓库
+- 正式启用 HTTPS 时需要一个已解析到服务器公网 IP 的域名，并开放 TCP `80/443`
 
-宿主机不需要安装 Java、Maven、Node.js、Python、MySQL 或 Nginx。
+宿主机不需要安装 Java、Maven、Node.js、Python 或 MySQL。正式公网部署时，`setup-https.sh` 会在宿主机安装 Nginx 和 Certbot。
 
 ## 一键部署
 
@@ -86,7 +88,7 @@ git switch docker-linux
 
 cp .env.example .env
 nano .env
-chmod +x deploy.sh backup.sh restore.sh
+chmod +x deploy.sh setup-https.sh backup.sh restore.sh
 ./deploy.sh
 ```
 
@@ -94,7 +96,13 @@ chmod +x deploy.sh backup.sh restore.sh
 
 Docker 构建默认使用阿里云 Maven 公共仓库和阿里云 PyPI 镜像，可通过 `.env` 中的 `MAVEN_MIRROR_URL`、`PIP_INDEX_URL` 覆盖。
 
-默认访问地址为 `http://服务器IP`。端口被占用时可在 `.env` 中修改 `HTTP_PORT`。
+默认容器入口为 `http://127.0.0.1:8088`，不会直接暴露公网。首次部署通过本机健康检查后，执行以下命令启用公网 HTTPS：
+
+```bash
+sudo ./setup-https.sh example.com admin@example.com
+```
+
+将域名和邮箱替换为真实值。脚本会安装宿主机 Nginx/Certbot、配置反向代理、申请证书并启用自动续期。详细前置条件和手动方案见 [Linux 部署文档](docs/docker-linux.md#12-配置域名和-https)。
 
 ## 默认测试账号
 
@@ -122,9 +130,9 @@ Docker 构建默认使用阿里云 Maven 公共仓库和阿里云 PyPI 镜像，
 
 ```bash
 ./deploy.sh status
-curl -fsS http://127.0.0.1/healthz
-curl -fsS http://127.0.0.1/api/user/health
-curl -fsS http://127.0.0.1/api/ai/health
+curl -fsS http://127.0.0.1:8088/healthz
+curl -fsS http://127.0.0.1:8088/api/user/health
+curl -fsS http://127.0.0.1:8088/api/ai/health
 ```
 
 以下命令用于不经过容器的 Windows 源码开发验收：
