@@ -340,7 +340,7 @@ const governanceKeyword = ref('');
 const profileToolTab = ref('activity');
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false); const knowledgeMetadataDialog = ref(false); const userGovernanceDialog = ref(false);
 
-const loginForm = ref({ username:'demo', password:'demo', captchaId:'', captchaAnswer:'' });
+const loginForm = ref({ username:'', password:'', captchaId:'', captchaAnswer:'' });
 const registerForm = ref({ username:'', nickname:'', password:'', captchaId:'', captchaAnswer:'' });
 const captchaImage = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaRefreshPending = false;
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
