@@ -627,13 +627,28 @@ public class KnowledgeController {
         Long fileId = number(request.get("fileId"), 0L);
         String auditStatus = String.valueOf(request.getOrDefault("auditStatus", "APPROVED"));
         String reason = String.valueOf(request.getOrDefault("reason", ""));
+        if (!List.of("APPROVED", "REJECTED").contains(auditStatus)) {
+            return ApiResponse.fail("审核结果无效");
+        }
+        KnowledgeFileEntity existing = knowledgeStore.find(fileId).orElse(null);
+        if (existing == null) {
+            return ApiResponse.fail("知识资源不存在");
+        }
+        if (auditStatus.equals(existing.getAuditStatus())) {
+            return ApiResponse.fail("APPROVED".equals(auditStatus) ? "该知识资源已经通过审核" : "该知识资源已经被驳回");
+        }
+        boolean validTransition = "PENDING".equals(existing.getAuditStatus())
+                || ("REJECTED".equals(existing.getAuditStatus()) && "APPROVED".equals(auditStatus));
+        if (!validTransition) {
+            return ApiResponse.fail("当前状态不支持此审核操作");
+        }
         return knowledgeStore.auditFile(fileId, auditStatus, reason)
                 .map(file -> ApiResponse.ok(Map.of(
                         "file", toView(file),
                         "reason", reason,
                         "updated", true
                 )))
-                .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+                .orElseGet(() -> ApiResponse.fail("知识资源不存在"));
     }
 
     @PutMapping("/admin/file")

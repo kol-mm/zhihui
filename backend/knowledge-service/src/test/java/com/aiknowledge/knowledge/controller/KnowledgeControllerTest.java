@@ -73,6 +73,23 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void approvedKnowledgeCannotBeApprovedAgain() {
+        var uploaded = controller.upload(userAuth, Map.of(
+                "title", "Review once",
+                "fileType", "txt",
+                "content", "review state"
+        ));
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin");
+
+        assertEquals(0, controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED")).code());
+        var repeated = controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+
+        assertTrue(repeated.code() != 0);
+        assertEquals("该知识资源已经通过审核", repeated.message());
+    }
+
+    @Test
     void pendingKnowledgeDoesNotIncreaseContributionUploads() {
         int before = controller.ranking().data().stream()
                 .filter(item -> Long.valueOf(1L).equals(((Number) item.get("userId")).longValue()))
