@@ -73,7 +73,13 @@ public class KnowledgeController {
 
     public KnowledgeController(KnowledgeStore knowledgeStore, LocalFileStorageService fileStorage,
                                LocalFullTextSearchService fullTextSearch, DocumentTextExtractor textExtractor) {
-        this(knowledgeStore, fileStorage, fullTextSearch, textExtractor, null,
+        this(knowledgeStore, fileStorage, fullTextSearch, textExtractor, null);
+    }
+
+    public KnowledgeController(KnowledgeStore knowledgeStore, LocalFileStorageService fileStorage,
+                               LocalFullTextSearchService fullTextSearch, DocumentTextExtractor textExtractor,
+                               PlatformConfigClient platformConfig) {
+        this(knowledgeStore, fileStorage, fullTextSearch, textExtractor, platformConfig,
                 new KnowledgeMediaStorageService("local", "target/test-knowledge-media",
                         "http://127.0.0.1:9000", "ai-knowledge", "aiknowledge", "test-secret"));
     }
@@ -88,6 +94,7 @@ public class KnowledgeController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!LocalAuth.isAdmin(authorization) && !knowledgeUploadEnabled()) return ApiResponse.fail("平台当前未开放用户上传知识资料");
         if (multipartFile.isEmpty()) return ApiResponse.fail("file is required");
         int maxUploadMb = platformConfig == null ? 25 : platformConfig.maxUploadMb();
         if (multipartFile.getSize() > maxUploadMb * 1024L * 1024L) return ApiResponse.fail("file size must not exceed " + maxUploadMb + " MB");
@@ -239,6 +246,7 @@ public class KnowledgeController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!LocalAuth.isAdmin(authorization) && !knowledgeUploadEnabled()) return ApiResponse.fail("平台当前未开放用户上传知识资料");
         String fileType = String.valueOf(request.getOrDefault("fileType", "txt"));
         String content = String.valueOf(request.getOrDefault("content", ""));
         List<String> imageUrls = stringList(request.get("imageUrls"));
@@ -442,6 +450,9 @@ public class KnowledgeController {
 
     @GetMapping("/ranking")
     public ApiResponse<List<Map<String, Object>>> ranking() {
+        if (platformConfig != null && !platformConfig.enabled("user_ranking_enabled", true)) {
+            return ApiResponse.ok(List.of());
+        }
         List<KnowledgeFileEntity> allFiles = knowledgeStore.listFiles();
         Map<Long, Long> ownerByFile = allFiles.stream().filter(file -> file.getId() != null && file.getUserId() != null)
                 .collect(java.util.stream.Collectors.toMap(KnowledgeFileEntity::getId, KnowledgeFileEntity::getUserId, (left, right) -> left));
@@ -477,6 +488,10 @@ public class KnowledgeController {
                 .toList();
         for (int index = 0; index < ranking.size(); index++) ranking.get(index).put("rank", index + 1);
         return ApiResponse.ok(ranking);
+    }
+
+    private boolean knowledgeUploadEnabled() {
+        return platformConfig == null || platformConfig.enabled("knowledge_upload_enabled", true);
     }
 
     @PostMapping("/collect")

@@ -75,6 +75,7 @@ public class MessageController {
         Long recipientId = session.getUserAId().equals(senderId) ? session.getUserBId() : session.getUserAId();
         if (!messagingAllowed(senderId, recipientId)) return ApiResponse.fail("private messaging is unavailable for this conversation");
         if (content.isBlank()) return ApiResponse.fail("message content is required");
+        if (content.length() > maxMessageLength()) return ApiResponse.fail("私信内容不能超过 " + maxMessageLength() + " 个字符");
         ChatMessageEntity message = new ChatMessageEntity();
         message.setSessionId(sessionId);
         message.setSenderId(senderId);
@@ -300,6 +301,7 @@ public class MessageController {
     ) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!feedbackEnabled()) return ApiResponse.fail("平台当前未开放反馈提交");
         FeedbackTicketEntity ticket = new FeedbackTicketEntity();
         ticket.setUserId(userId);
         ticket.setType(String.valueOf(request.getOrDefault("type", "BUG")));
@@ -498,7 +500,7 @@ public class MessageController {
     }
 
     private boolean messagingAllowed(Long userId, Long targetUserId) {
-        return interactionAllowed(userId, targetUserId)
+        return privateMessagesEnabled() && interactionAllowed(userId, targetUserId)
                 && (userRelationClient == null || userRelationClient.messagingAllowed(userId, targetUserId));
     }
 
@@ -592,6 +594,18 @@ public class MessageController {
 
     private boolean notificationsEnabled() {
         return platformConfig == null || platformConfig.enabled("notifications_enabled", true);
+    }
+
+    private boolean privateMessagesEnabled() {
+        return platformConfig == null || platformConfig.enabled("private_messages_enabled", true);
+    }
+
+    private boolean feedbackEnabled() {
+        return platformConfig == null || platformConfig.enabled("feedback_enabled", true);
+    }
+
+    private int maxMessageLength() {
+        return platformConfig == null ? 2000 : Math.max(100, Math.min(5000, platformConfig.integer("max_message_length", 2000)));
     }
 
     private Long number(Object value, Long fallback) {

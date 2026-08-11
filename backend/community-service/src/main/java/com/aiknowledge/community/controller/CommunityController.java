@@ -73,7 +73,9 @@ public class CommunityController {
     ) {
         if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
-        if (files.isEmpty() || files.size() > 9) return ApiResponse.fail("select between 1 and 9 images");
+        int imageLimit = maxPostImages();
+        if (imageLimit == 0) return ApiResponse.fail("平台当前未开放帖子配图");
+        if (files.isEmpty() || files.size() > imageLimit) return ApiResponse.fail("帖子配图数量不能超过 " + imageLimit + " 张");
         try {
             List<byte[]> contents = new java.util.ArrayList<>();
             for (MultipartFile file : files) {
@@ -119,13 +121,15 @@ public class CommunityController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         if (!publishingAllowed(userId)) return ApiResponse.fail("posting is disabled for this account");
+        List<String> imageUrls = stringList(request.get("imageUrls"));
+        if (imageUrls.size() > maxPostImages()) return ApiResponse.fail("帖子配图数量不能超过 " + maxPostImages() + " 张");
         PostEntity post = new PostEntity();
         post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus("PENDING");
+        post.setStatus(initialPostStatus());
         PostEntity saved = communityStore.savePost(post);
-        communityStore.savePostImages(saved.getId(), stringList(request.get("imageUrls")));
+        communityStore.savePostImages(saved.getId(), imageUrls);
         return ApiResponse.ok(toPostView(saved));
     }
 
@@ -139,13 +143,15 @@ public class CommunityController {
         PostEntity existing = communityStore.findPost(postId).orElse(null);
         if (existing == null) return ApiResponse.fail("post not found");
         if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this post is denied");
+        List<String> imageUrls = request.containsKey("imageUrls") ? stringList(request.get("imageUrls")) : List.of();
+        if (imageUrls.size() > maxPostImages()) return ApiResponse.fail("帖子配图数量不能超过 " + maxPostImages() + " 张");
         PostEntity post = new PostEntity();
         post.setId(postId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus("PENDING");
+        post.setStatus(initialPostStatus());
         PostEntity updated = communityStore.updatePost(post);
-        if (request.containsKey("imageUrls")) communityStore.savePostImages(updated.getId(), stringList(request.get("imageUrls")));
+        if (request.containsKey("imageUrls")) communityStore.savePostImages(updated.getId(), imageUrls);
         return ApiResponse.ok(toPostView(updated));
     }
 
@@ -171,8 +177,10 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
+        if (!commentsEnabled()) return ApiResponse.fail("平台当前未开放评论功能");
         CommentEntity comment = buildComment(request, "POST", userId);
         if (comment.getPostId() <= 0 || comment.getContent().isBlank()) return ApiResponse.fail("post and comment content are required");
+        if (comment.getContent().trim().length() > maxCommentLength()) return ApiResponse.fail("评论内容不能超过 " + maxCommentLength() + " 个字符");
         var post = communityStore.findPost(comment.getPostId());
         if (post.isEmpty() || !canViewPost(post.get(), authorization)) return ApiResponse.fail("post not found");
         if (!interactionAllowed(userId, post.get().getUserId())) return ApiResponse.fail("interaction with this user is blocked");
@@ -199,6 +207,7 @@ public class CommunityController {
             @RequestParam(name = "postId", required = false) Long postId
     ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
+        if (!commentsEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.ok(List.of());
         if (postId == null && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         if (postId != null) {
             PostEntity post = communityStore.findPost(postId).orElse(null);
@@ -252,7 +261,7 @@ public class CommunityController {
         post.setUserId(draft.getUserId());
         post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
         post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
-        post.setStatus("PENDING");
+        post.setStatus(initialPostStatus());
         PostEntity saved = communityStore.savePost(post);
         List<String> imageUrls = request.containsKey("imageUrls")
                 ? stringList(request.get("imageUrls")) : decodeImageUrls(draft.getImageUrlsJson());
@@ -318,11 +327,13 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
+        if (!commentsEnabled()) return ApiResponse.fail("平台当前未开放评论功能");
         CommentEntity comment = buildComment(request, "SQUARE", userId);
         PostEntity post = communityStore.findPost(comment.getPostId()).orElse(null);
         if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         if (!interactionAllowed(userId, post.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         if (comment.getContent().isBlank()) return ApiResponse.fail("comment content is required");
+        if (comment.getContent().trim().length() > maxCommentLength()) return ApiResponse.fail("评论内容不能超过 " + maxCommentLength() + " 个字符");
         CommentEntity saved = communityStore.saveComment(comment);
         if (!userId.equals(post.getUserId())) {
             notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
@@ -413,14 +424,23 @@ public class CommunityController {
         Long postId = number(request.get("postId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "PUBLISHED"));
         String reason = String.valueOf(request.getOrDefault("reason", ""));
-        if (!List.of("PUBLISHED", "HIDDEN").contains(status)) return ApiResponse.fail("invalid post status");
+        if (!List.of("PUBLISHED", "HIDDEN").contains(status)) return ApiResponse.fail("审核结果无效");
+        PostEntity existing = communityStore.findPost(postId).orElse(null);
+        if (existing == null) return ApiResponse.fail("帖子不存在");
+        if (status.equals(existing.getStatus())) {
+            return ApiResponse.fail("PUBLISHED".equals(status) ? "该帖子已经发布" : "该帖子已经隐藏");
+        }
+        boolean validTransition = ("PENDING".equals(existing.getStatus()) && List.of("PUBLISHED", "HIDDEN").contains(status))
+                || ("PUBLISHED".equals(existing.getStatus()) && "HIDDEN".equals(status))
+                || ("HIDDEN".equals(existing.getStatus()) && "PUBLISHED".equals(status));
+        if (!validTransition) return ApiResponse.fail("当前状态不支持此审核操作");
         return communityStore.auditPost(postId, status, reason)
                 .map(post -> ApiResponse.ok(Map.of(
                         "post", toPostView(post),
                         "reason", reason,
                         "updated", true
                 )))
-                .orElseGet(() -> ApiResponse.fail("post not found"));
+                .orElseGet(() -> ApiResponse.fail("帖子不存在"));
     }
 
     @DeleteMapping("/post")
@@ -575,7 +595,7 @@ public class CommunityController {
 
     private String encodeImageUrls(Object value) {
         List<String> imageUrls = stringList(value);
-        if (imageUrls.size() > 9) throw new IllegalArgumentException("a draft can contain at most 9 images");
+        if (imageUrls.size() > maxPostImages()) throw new IllegalArgumentException("草稿配图数量不能超过 " + maxPostImages() + " 张");
         try {
             return JSON.writeValueAsString(imageUrls);
         } catch (Exception error) {
@@ -594,6 +614,26 @@ public class CommunityController {
 
     private boolean communityEnabled() {
         return platformConfig == null || platformConfig.enabled("community_enabled", true);
+    }
+
+    private boolean commentsEnabled() {
+        return platformConfig == null || platformConfig.enabled("comments_enabled", true);
+    }
+
+    private boolean postAuditRequired() {
+        return platformConfig == null || platformConfig.enabled("post_audit_required", true);
+    }
+
+    private String initialPostStatus() {
+        return postAuditRequired() ? "PENDING" : "PUBLISHED";
+    }
+
+    private int maxPostImages() {
+        return platformConfig == null ? 9 : Math.max(0, Math.min(9, platformConfig.integer("max_post_images", 9)));
+    }
+
+    private int maxCommentLength() {
+        return platformConfig == null ? 2000 : Math.max(100, Math.min(5000, platformConfig.integer("max_comment_length", 2000)));
     }
 
     private String storeMode(Object store) {

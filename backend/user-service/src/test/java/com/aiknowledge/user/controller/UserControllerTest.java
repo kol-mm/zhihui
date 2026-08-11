@@ -2,6 +2,7 @@ package com.aiknowledge.user.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.user.store.InMemoryUserStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -14,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class UserControllerTest {
     static {
@@ -23,6 +26,20 @@ class UserControllerTest {
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final UserController controller =
             new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder);
+
+    @Test
+    void registrationCanBeDisabledByPlatformConfiguration() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("registration_enabled", true)).thenReturn(false);
+        UserController disabled = new UserController(
+                new InMemoryUserStore(passwordEncoder), passwordEncoder,
+                new com.aiknowledge.user.storage.UserAvatarStorageService("local", "target/test-user-avatars",
+                        "http://127.0.0.1:9000", "test", "test", "test"),
+                new com.aiknowledge.user.security.CaptchaService(), config
+        );
+
+        assertEquals(500, disabled.register(Map.of("username", "new-user", "password", "password123")).code());
+    }
 
     @Test
     void demoUserCanLogin() {

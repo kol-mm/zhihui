@@ -4,6 +4,7 @@ import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
 import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.store.InMemoryKnowledgeStore;
+import com.aiknowledge.common.PlatformConfigClient;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -17,6 +18,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class KnowledgeControllerTest {
     static {
@@ -103,6 +106,22 @@ class KnowledgeControllerTest {
                 .map(item -> ((Number) item.get("uploads")).intValue())
                 .findFirst().orElse(0);
         assertEquals(before, after);
+    }
+
+    @Test
+    void userKnowledgeUploadAndRankingCanBeDisabled() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("knowledge_upload_enabled", true)).thenReturn(false);
+        when(config.enabled("user_ranking_enabled", true)).thenReturn(false);
+        KnowledgeController restricted = new KnowledgeController(
+                new InMemoryKnowledgeStore(),
+                new LocalFileStorageService("target/test-uploads", "local", "http://127.0.0.1:9000", "ai-knowledge"),
+                new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge"),
+                new com.aiknowledge.knowledge.storage.DocumentTextExtractor(), config
+        );
+
+        assertEquals(500, restricted.upload(userAuth, Map.of("title", "Blocked", "fileType", "txt")).code());
+        assertTrue(restricted.ranking().data().isEmpty());
     }
 
     @Test

@@ -121,12 +121,35 @@ class AiServicePersistenceTest(unittest.TestCase):
         auth = self.issue_token("admin", 2, "ADMIN")
 
         saved = self.main.save_ai_config(self.main.AiConfigRequest(
+            platform_name="测试知识社区", registration_enabled=False, max_post_images=5,
             match_limit=3, request_url="https://example.test/v1/chat/completions"
         ), authorization=auth)
         self.assertEqual(saved.data["configuration"]["match_limit"], 3)
         self.assertEqual(saved.data["configuration"]["request_url"], "https://example.test/v1/chat/completions")
+        self.assertEqual(saved.data["configuration"]["platform_name"], "测试知识社区")
+        self.assertFalse(saved.data["configuration"]["registration_enabled"])
+        self.assertEqual(self.main.public_config().data["max_post_images"], 5)
+        self.assertNotIn("request_url", self.main.public_config().data)
         overview = self.main.ai_admin_overview(authorization=auth)
         self.assertIn("configuration", overview.data)
+
+    def test_disabled_ai_chat_rejects_requests_without_creating_history(self) -> None:
+        admin_auth = self.issue_token("admin", 2, "ADMIN")
+        self.main.save_ai_config(
+            self.main.AiConfigRequest(ai_chat_enabled=False),
+            authorization=admin_auth,
+        )
+
+        with self.assertRaises(self.main.HTTPException) as denied:
+            self.main.chat(
+                self.main.ChatRequest(question="测试关闭后的问答"),
+                authorization=self.user_auth,
+            )
+
+        self.assertEqual(denied.exception.status_code, 403)
+        history = self.main.chat_history(user_id=1, authorization=self.user_auth)
+        self.assertEqual(history.data["sessions"], [])
+        self.assertEqual(history.data["messages"], [])
 
     def test_temperature_is_limited_to_one(self) -> None:
         with self.assertRaises(ValueError):

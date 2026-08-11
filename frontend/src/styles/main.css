@@ -258,6 +258,14 @@ button { letter-spacing: 0; }
 .post-author-link:hover strong { color:#176b4d; }
 .relation-lists { margin-top:16px; }
 .runtime-mode-panel .el-alert { margin-bottom:14px; }
+.platform-settings .el-divider { margin: 18px 0; }
+.config-field-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0 18px; }
+.config-field-grid .el-input-number,.config-field-grid .el-select { width:100%; }
+.config-switch-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.config-switch-grid label { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 14px; border:1px solid #e4e9e6; border-radius:6px; background:#fafbfa; }
+.config-switch-grid label>span { min-width:0; }
+.config-switch-grid strong,.config-switch-grid small { display:block; }
+.config-switch-grid small { margin-top:4px; color:#7d8983; font-size:11px; line-height:1.45; }
 .runtime-mode-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid #edf0ef; border-left:1px solid #edf0ef; }
 .runtime-mode-grid article { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px; border-right:1px solid #edf0ef; border-bottom:1px solid #edf0ef; }
 .runtime-mode-grid article>div { min-width:0; }
@@ -265,7 +273,8 @@ button { letter-spacing: 0; }
 .runtime-mode-grid p { margin-top:4px; color:#7d8983; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .runtime-mode-grid .el-tag { flex:none; }
 @media (max-width:1100px) { .runtime-mode-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:620px) { .runtime-mode-grid { grid-template-columns:1fr; } .runtime-mode-grid article { align-items:flex-start; } }
+@media (max-width:900px) { .config-field-grid,.config-switch-grid { grid-template-columns:1fr; } }
+@media (max-width:620px) { .runtime-mode-grid { grid-template-columns:1fr; } .runtime-mode-grid article { align-items:flex-start; } .config-switch-grid label { align-items:flex-start; } }
 @media (max-width:520px) {
   .ranking-list article { align-items:flex-start; }
   .ranking-list em { display:none; }

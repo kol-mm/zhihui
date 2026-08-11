@@ -44,6 +44,21 @@ class MessageControllerTest {
     }
 
     @Test
+    void privateMessagesAndFeedbackCanBeDisabled() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("private_messages_enabled", true)).thenReturn(false);
+        when(config.enabled("feedback_enabled", true)).thenReturn(false);
+        MessageController disabled = new MessageController(
+                new InMemoryMessageStore(),
+                new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events"),
+                config
+        );
+
+        assertEquals(500, disabled.createSession(userAuth, Map.of("targetUserId", 7L)).code());
+        assertEquals(500, disabled.createTicket(userAuth, Map.of("type", "BUG", "content", "disabled")).code());
+    }
+
+    @Test
     void sentMessageCanBeListedAndCleared() {
         ApiResponse<Map<String, Object>> session = controller.createSession(userAuth, Map.of(
                 "userId", 1L,

@@ -24,7 +24,7 @@ public class PlatformConfigClient {
     }
 
     public int maxUploadMb() {
-        return integer("max_upload_mb", 25);
+        return Math.max(1, integer("max_upload_mb", 25));
     }
 
     public boolean enabled(String key, boolean fallback) {
@@ -32,9 +32,16 @@ public class PlatformConfigClient {
         return data == null ? fallback : data.path(key).asBoolean(fallback);
     }
 
-    private int integer(String key, int fallback) {
+    public int integer(String key, int fallback) {
         JsonNode data = read();
-        return data == null ? fallback : Math.max(1, data.path(key).asInt(fallback));
+        return data == null ? fallback : data.path(key).asInt(fallback);
+    }
+
+    public String text(String key, String fallback) {
+        JsonNode data = read();
+        if (data == null || !data.hasNonNull(key)) return fallback;
+        String value = data.path(key).asText(fallback).trim();
+        return value.isBlank() ? fallback : value;
     }
 
     private JsonNode read() {

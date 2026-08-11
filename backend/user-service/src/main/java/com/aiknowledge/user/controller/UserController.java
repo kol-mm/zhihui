@@ -2,6 +2,7 @@ package com.aiknowledge.user.controller;
 
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
+import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.store.UserStore;
 import com.aiknowledge.user.storage.UserAvatarStorageService;
@@ -34,22 +35,30 @@ public class UserController {
     private final PasswordEncoder passwordEncoder;
     private final UserAvatarStorageService avatarStorage;
     private final CaptchaService captchaService;
+    private final PlatformConfigClient platformConfig;
 
     @Autowired
-    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage, CaptchaService captchaService) {
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage,
+                          CaptchaService captchaService, PlatformConfigClient platformConfig) {
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
         this.avatarStorage = avatarStorage;
         this.captchaService = captchaService;
+        this.platformConfig = platformConfig;
     }
 
     public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage) {
-        this(userStore, passwordEncoder, avatarStorage, new CaptchaService());
+        this(userStore, passwordEncoder, avatarStorage, new CaptchaService(), null);
     }
 
     public UserController(UserStore userStore, PasswordEncoder passwordEncoder) {
         this(userStore, passwordEncoder, new UserAvatarStorageService("local", "../data/user-avatars",
-                "http://127.0.0.1:9000", "ai-user-avatar", "aiknowledge", "ai-knowledge-local-change-me"), new CaptchaService());
+                "http://127.0.0.1:9000", "ai-user-avatar", "aiknowledge", "ai-knowledge-local-change-me"));
+    }
+
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage,
+                          CaptchaService captchaService) {
+        this(userStore, passwordEncoder, avatarStorage, captchaService, null);
     }
 
     @GetMapping("/health")
@@ -103,6 +112,9 @@ public class UserController {
 
     @PostMapping("/register")
     public ApiResponse<Map<String, Object>> register(@RequestBody Map<String, String> request) {
+        if (platformConfig != null && !platformConfig.enabled("registration_enabled", true)) {
+            return ApiResponse.fail("平台当前未开放新用户注册");
+        }
         if (!verifyCaptcha(request)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
@@ -126,7 +138,8 @@ public class UserController {
         user.setNickname(nickname.isBlank() ? username : nickname.substring(0, Math.min(nickname.length(), 64)));
         user.setStatus("ACTIVE");
         user.setRole("USER");
-        user.setPublishPolicy("STANDARD");
+        String publishPolicy = platformConfig == null ? "STANDARD" : platformConfig.text("default_publish_policy", "STANDARD");
+        user.setPublishPolicy(List.of("STANDARD", "PRE_REVIEW", "BLOCKED").contains(publishPolicy) ? publishPolicy : "STANDARD");
         user.setMessagingEnabled(true);
         UserEntity saved = userStore.save(user);
         return ApiResponse.ok(authResult(saved));

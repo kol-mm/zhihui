@@ -51,6 +51,29 @@ class CommunityControllerTest {
     }
 
     @Test
+    void platformConfigurationControlsCommentsImagesAndPostAudit() {
+        PlatformConfigClient config = mock(PlatformConfigClient.class);
+        when(config.enabled("community_enabled", true)).thenReturn(true);
+        when(config.enabled("comments_enabled", true)).thenReturn(false);
+        when(config.enabled("post_audit_required", true)).thenReturn(false);
+        when(config.integer("max_post_images", 9)).thenReturn(1);
+        CommunityController configured = new CommunityController(
+                new InMemoryCommunityStore(),
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password"),
+                new com.aiknowledge.community.notification.CommunityNotificationClient(false, "", ""), config
+        );
+
+        var created = configured.createPost(userAuth, Map.of("title", "Direct publish", "content", "body"));
+        assertEquals("PUBLISHED", created.data().get("status"));
+        assertEquals(500, configured.createPost(userAuth, Map.of(
+                "title", "Too many images", "content", "body", "imageUrls", List.of("one", "two"))).code());
+        assertEquals(500, configured.createComment(userAuth, Map.of(
+                "postId", created.data().get("id"), "content", "disabled comment")).code());
+    }
+
+    @Test
     void createdPostAppearsInFeed() {
         ApiResponse<Map<String, Object>> created = controller.createPost(userAuth, Map.of(
                 "userId", 1L,
@@ -93,6 +116,9 @@ class CommunityControllerTest {
         assertEquals(0, controller.detail(userAuth, postId).code());
         assertEquals(true, controller.feed(userAuth, null).data().stream()
                 .anyMatch(post -> postId.equals(post.get("id"))));
+        var repeated = controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+        assertEquals(500, repeated.code());
+        assertEquals("该帖子已经发布", repeated.message());
     }
 
     @Test

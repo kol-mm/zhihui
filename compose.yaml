@@ -16,6 +16,7 @@ x-java-common: &java-common
   INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
   PLATFORM_USER_RELATION_URL: http://user-service:8101/user/internal/relation
   PLATFORM_INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
+  PLATFORM_AI_CONFIG_URL: http://ai:8200/ai/config/public
   JAVA_TOOL_OPTIONS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
 
 x-java-build: &java-build

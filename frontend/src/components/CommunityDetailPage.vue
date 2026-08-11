@@ -25,20 +25,20 @@
           <section v-for="comment in rootComments" :key="comment.id" class="detail-comment-thread">
             <article class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === comment.id }">
               <div class="mini-avatar"><img v-if="userFor(comment.userId).avatarUrl" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
-              <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(comment.userId).nickname }}</strong></div><div><el-button text type="primary" size="small" @click="startReply(comment)">回复</el-button><el-button v-if="comment.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', comment)">删除</el-button></div></div><p>{{ comment.content }}</p></div>
+              <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(comment.userId).nickname }}</strong></div><div><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(comment)">回复</el-button><el-button v-if="comment.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', comment)">删除</el-button></div></div><p>{{ comment.content }}</p></div>
             </article>
             <div v-if="threadReplies(comment.id).length" class="detail-comment-replies">
               <article v-for="reply in threadReplies(comment.id)" :key="reply.id" class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === reply.id }">
                 <div class="mini-avatar"><img v-if="userFor(reply.userId).avatarUrl" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
-                <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(reply.userId).nickname }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><div><el-button text type="primary" size="small" @click="startReply(reply)">回复</el-button><el-button v-if="reply.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', reply)">删除</el-button></div></div><p>{{ reply.content }}</p></div>
+                <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(reply.userId).nickname }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><div><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(reply)">回复</el-button><el-button v-if="reply.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', reply)">删除</el-button></div></div><p>{{ reply.content }}</p></div>
               </article>
             </div>
           </section>
           <el-empty v-if="!comments.length" description="暂无评论，发表第一条讨论" />
         </div>
-        <div ref="commentComposer" class="detail-comment-compose">
+        <div v-if="commentsEnabled" ref="commentComposer" class="detail-comment-compose">
           <div v-if="replyTarget" class="detail-reply-context"><span>回复 {{ userFor(replyTarget.userId).nickname }}：{{ replyTarget.content }}</span><el-button text size="small" @click="cancelReply">取消回复</el-button></div>
-          <el-input ref="commentInput" v-model="commentText" type="textarea" :rows="3" resize="none" :placeholder="replyTarget ? `回复 ${userFor(replyTarget.userId).nickname}` : '发表公开评论'" />
+          <el-input ref="commentInput" v-model="commentText" type="textarea" :rows="3" resize="none" :maxlength="maxCommentLength" show-word-limit :placeholder="replyTarget ? `回复 ${userFor(replyTarget.userId).nickname}` : '发表公开评论'" />
           <el-button type="primary" :icon="Promotion" :disabled="!commentText.trim()" @click="submitComment">{{ replyTarget ? '发表回复' : '发表评论' }}</el-button>
         </div>
       </aside>
@@ -55,7 +55,7 @@ type Post = { id:number; userId:number; title:string; content:string; status:str
 type Comment = { id:number; userId:number; parentId?:number; content:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string };
 
-const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean }>();
+const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean; commentsEnabled:boolean; maxCommentLength:number }>();
 const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; 'delete-post':[post:Post]; 'delete-comment':[comment:Comment]; comment:[payload:{content:string;parentId:number}]; follow:[userId:number] }>();
 const commentText = ref('');
 const replyTarget = ref<Comment>();

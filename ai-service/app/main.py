@@ -66,6 +66,21 @@ class SessionTitleRequest(BaseModel):
 
 
 class AiConfigRequest(BaseModel):
+    platform_name: str = Field(default="知汇", min_length=1, max_length=60)
+    platform_notice: str = Field(default="", max_length=500)
+    registration_enabled: bool = True
+    ai_chat_enabled: bool = True
+    knowledge_upload_enabled: bool = True
+    user_ranking_enabled: bool = True
+    comments_enabled: bool = True
+    private_messages_enabled: bool = True
+    feedback_enabled: bool = True
+    post_audit_required: bool = True
+    default_publish_policy: str = Field(default="STANDARD", pattern="^(STANDARD|PRE_REVIEW|BLOCKED)$")
+    max_post_images: int = Field(default=9, ge=0, le=9)
+    max_comment_length: int = Field(default=2000, ge=100, le=5000)
+    max_message_length: int = Field(default=2000, ge=100, le=5000)
+    draft_retention_days: int = Field(default=30, ge=1, le=3650)
     data_source_scope: str = "all-approved"
     match_limit: int = Field(default=5, ge=1, le=20)
     compliance_rule: str = "answer-with-references"
@@ -257,6 +272,21 @@ def require_admin(authorization: str | None) -> None:
 
 def read_ai_config() -> dict[str, Any]:
     defaults: dict[str, Any] = {
+        "platform_name": "知汇",
+        "platform_notice": "",
+        "registration_enabled": True,
+        "ai_chat_enabled": True,
+        "knowledge_upload_enabled": True,
+        "user_ranking_enabled": True,
+        "comments_enabled": True,
+        "private_messages_enabled": True,
+        "feedback_enabled": True,
+        "post_audit_required": True,
+        "default_publish_policy": "STANDARD",
+        "max_post_images": 9,
+        "max_comment_length": 2000,
+        "max_message_length": 2000,
+        "draft_retention_days": 30,
         "data_source_scope": "all-approved",
         "match_limit": 5,
         "compliance_rule": "answer-with-references",
@@ -278,9 +308,15 @@ def read_ai_config() -> dict[str, Any]:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] == "temperature":
             defaults[row["config_key"]] = max(0.0, min(1.0, float(value)))
-        elif row["config_key"] in {"max_upload_mb"}:
+        elif row["config_key"] in {
+            "max_upload_mb", "max_post_images", "max_comment_length", "max_message_length", "draft_retention_days"
+        }:
             defaults[row["config_key"]] = int(value)
-        elif row["config_key"] in {"notifications_enabled", "community_enabled"}:
+        elif row["config_key"] in {
+            "registration_enabled", "ai_chat_enabled", "knowledge_upload_enabled", "user_ranking_enabled",
+            "comments_enabled", "private_messages_enabled", "feedback_enabled", "post_audit_required",
+            "notifications_enabled", "community_enabled"
+        }:
             defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
         elif row["config_key"] == "selected_file_ids":
             try:
@@ -535,6 +571,21 @@ def health() -> ApiResponse:
 def public_config() -> ApiResponse:
     config = read_ai_config()
     return ApiResponse(data={
+        "platform_name": str(config.get("platform_name", "知汇")),
+        "platform_notice": str(config.get("platform_notice", "")),
+        "registration_enabled": bool(config.get("registration_enabled", True)),
+        "ai_chat_enabled": bool(config.get("ai_chat_enabled", True)),
+        "knowledge_upload_enabled": bool(config.get("knowledge_upload_enabled", True)),
+        "user_ranking_enabled": bool(config.get("user_ranking_enabled", True)),
+        "comments_enabled": bool(config.get("comments_enabled", True)),
+        "private_messages_enabled": bool(config.get("private_messages_enabled", True)),
+        "feedback_enabled": bool(config.get("feedback_enabled", True)),
+        "post_audit_required": bool(config.get("post_audit_required", True)),
+        "default_publish_policy": str(config.get("default_publish_policy", "STANDARD")),
+        "max_post_images": int(config.get("max_post_images", 9)),
+        "max_comment_length": int(config.get("max_comment_length", 2000)),
+        "max_message_length": int(config.get("max_message_length", 2000)),
+        "draft_retention_days": int(config.get("draft_retention_days", 30)),
         "max_upload_mb": int(config.get("max_upload_mb", 25)),
         "notifications_enabled": bool(config.get("notifications_enabled", True)),
         "community_enabled": bool(config.get("community_enabled", True)),
@@ -760,9 +811,11 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
     claims = require_user(authorization)
     user_id = int(claims["uid"])
     init_db()
+    config = read_ai_config()
+    if not config.get("ai_chat_enabled", True):
+        raise HTTPException(status_code=403, detail="AI 问答功能当前未开放")
     session_id = ensure_session(request, user_id)
     user_message = save_message(session_id, "user", request.question)
-    config = read_ai_config()
     public_answer = public_platform_answer(request.question)
     allowed_file_ids = None
     if config.get("data_source_scope") == "admin-selected":
