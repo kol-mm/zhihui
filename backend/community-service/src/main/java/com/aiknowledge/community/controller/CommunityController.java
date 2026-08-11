@@ -440,7 +440,7 @@ public class CommunityController {
                         "reason", reason,
                         "updated", true
                 )))
-                .orElseGet(() -> ApiResponse.fail("帖子不存在"));
+                .orElseGet(() -> ApiResponse.fail("帖子状态已发生变化，请刷新后重试"));
     }
 
     @DeleteMapping("/post")

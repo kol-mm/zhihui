@@ -194,8 +194,9 @@ public class InMemoryCommunityStore implements CommunityStore {
     }
 
     @Override
-    public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
+    public synchronized Optional<PostEntity> auditPost(Long postId, String status, String reason) {
         Optional<PostEntity> found = findPost(postId);
+        if (found.isPresent() && status.equals(found.get().getStatus())) return Optional.empty();
         found.ifPresent(post -> {
             post.setStatus(status);
             post.setUpdatedAt(LocalDateTime.now());

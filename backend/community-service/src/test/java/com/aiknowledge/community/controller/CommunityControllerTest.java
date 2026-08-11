@@ -122,6 +122,29 @@ class CommunityControllerTest {
     }
 
     @Test
+    void storeRejectsRepeatedPostStatusWrite() {
+        InMemoryCommunityStore store = new InMemoryCommunityStore();
+        CommunityController isolated = new CommunityController(
+                store,
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password")
+        );
+        var created = isolated.createPost(secondUserAuth, Map.of(
+                "title", "Atomic audit " + System.nanoTime(),
+                "content", "only one status update is allowed"
+        ));
+        Long postId = ((Number) created.data().get("id")).longValue();
+
+        try {
+            assertTrue(store.auditPost(postId, "PUBLISHED", "first").isPresent());
+            assertTrue(store.auditPost(postId, "PUBLISHED", "repeated").isEmpty());
+        } finally {
+            store.removePost(postId);
+        }
+    }
+
+    @Test
     void editingPublishedPostReturnsItToPendingReview() {
         var created = controller.createPost(secondUserAuth, Map.of("title", "Before edit", "content", "approved body"));
         Long postId = ((Number) created.data().get("id")).longValue();

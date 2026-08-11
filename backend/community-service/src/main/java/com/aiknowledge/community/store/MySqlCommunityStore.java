@@ -157,12 +157,15 @@ public class MySqlCommunityStore implements CommunityStore {
     @Override
     public Optional<PostEntity> auditPost(Long postId, String status, String reason) {
         PostEntity post = postMapper.selectById(postId);
-        if (post == null) {
+        if (post == null || status.equals(post.getStatus())) {
             return Optional.empty();
         }
-        post.setStatus(status);
-        postMapper.updateById(post);
-        return Optional.of(post);
+        int updated = postMapper.update(null, Wrappers.<PostEntity>lambdaUpdate()
+                .eq(PostEntity::getId, postId)
+                .eq(PostEntity::getStatus, post.getStatus())
+                .set(PostEntity::getStatus, status)
+                .set(PostEntity::getUpdatedAt, LocalDateTime.now()));
+        return updated == 1 ? Optional.ofNullable(postMapper.selectById(postId)) : Optional.empty();
     }
 
     @Override
