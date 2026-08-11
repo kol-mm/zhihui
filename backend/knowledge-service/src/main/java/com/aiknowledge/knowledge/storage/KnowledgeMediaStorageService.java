@@ -5,6 +5,7 @@ import io.minio.GetObjectArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -71,10 +72,7 @@ public class KnowledgeMediaStorageService {
 
     public StoredMedia read(String token) {
         try {
-            String objectName = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
-            if (!objectName.matches("media/\\d{4}/\\d{2}/\\d{2}/[a-f0-9-]+\\.(jpg|png|gif|webp)")) {
-                throw new IllegalArgumentException("invalid media reference");
-            }
+            String objectName = objectName(token);
             byte[] bytes;
             if ("minio".equalsIgnoreCase(storageMode)) {
                 try (var stream = minioClient.getObject(GetObjectArgs.builder().bucket(bucket).object(objectName).build())) {
@@ -91,10 +89,38 @@ public class KnowledgeMediaStorageService {
         }
     }
 
+    public boolean delete(String mediaUrl) {
+        if (mediaUrl == null || mediaUrl.isBlank()) return false;
+        String token = mediaUrl.substring(mediaUrl.lastIndexOf('/') + 1);
+        String objectName = objectName(token);
+        try {
+            if ("minio".equalsIgnoreCase(storageMode)) {
+                ensureBucket();
+                minioClient.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectName).build());
+                return true;
+            }
+            return Files.deleteIfExists(localPath(objectName));
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to delete knowledge image", error);
+        }
+    }
+
     private Path localPath(String objectName) {
         Path target = localRoot.resolve(objectName).normalize();
         if (!target.startsWith(localRoot)) throw new IllegalArgumentException("invalid media path");
         return target;
+    }
+
+    private String objectName(String token) {
+        try {
+            String objectName = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            if (!objectName.matches("media/\\d{4}/\\d{2}/\\d{2}/[a-f0-9-]+\\.(jpg|png|gif|webp)")) {
+                throw new IllegalArgumentException("invalid media reference");
+            }
+            return objectName;
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("invalid media reference");
+        }
     }
 
     private void ensureBucket() throws Exception {

@@ -54,12 +54,17 @@ public class LocalFullTextSearchService {
     }
 
     public SearchDocument index(Long fileId, String title, String content, String fileUrl) {
+        return index(fileId, title, content, fileUrl, List.of());
+    }
+
+    public SearchDocument index(Long fileId, String title, String content, String fileUrl, List<ContentBlock> contentBlocks) {
         documents.removeIf(document -> fileId != null && fileId.equals(document.getFileId()));
         SearchDocument document = new SearchDocument();
         document.setFileId(fileId);
         document.setTitle(title == null ? "" : title);
         document.setContent(content == null ? "" : content);
         document.setFileUrl(fileUrl == null ? "" : fileUrl);
+        document.setContentBlocks(contentBlocks);
         document.setIndexedAt(LocalDateTime.now());
         documents.add(document);
         persist();
@@ -140,6 +145,7 @@ public class LocalFullTextSearchService {
         private String title;
         private String content;
         private String fileUrl;
+        private List<ContentBlock> contentBlocks = new ArrayList<>();
         private LocalDateTime indexedAt;
 
         public Long getFileId() { return fileId; }
@@ -150,7 +156,42 @@ public class LocalFullTextSearchService {
         public void setContent(String content) { this.content = content; }
         public String getFileUrl() { return fileUrl; }
         public void setFileUrl(String fileUrl) { this.fileUrl = fileUrl; }
+        public List<ContentBlock> getContentBlocks() {
+            return contentBlocks == null ? List.of() : List.copyOf(contentBlocks);
+        }
+        public void setContentBlocks(List<ContentBlock> contentBlocks) {
+            this.contentBlocks = contentBlocks == null ? new ArrayList<>() : new ArrayList<>(contentBlocks);
+        }
         public LocalDateTime getIndexedAt() { return indexedAt; }
         public void setIndexedAt(LocalDateTime indexedAt) { this.indexedAt = indexedAt; }
+    }
+
+    public static class ContentBlock {
+        private String type;
+        private String text;
+        private String url;
+
+        public ContentBlock() {}
+
+        public ContentBlock(String type, String text, String url) {
+            this.type = type;
+            this.text = text;
+            this.url = url;
+        }
+
+        public static ContentBlock text(String type, String text) {
+            return new ContentBlock(type, text, null);
+        }
+
+        public static ContentBlock image(String text, String url) {
+            return new ContentBlock("image", text, url);
+        }
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getText() { return text; }
+        public void setText(String text) { this.text = text; }
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
     }
 }

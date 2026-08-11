@@ -30,6 +30,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -87,10 +92,14 @@ public class KnowledgeController {
         int maxUploadMb = platformConfig == null ? 25 : platformConfig.maxUploadMb();
         if (multipartFile.getSize() > maxUploadMb * 1024L * 1024L) return ApiResponse.fail("file size must not exceed " + maxUploadMb + " MB");
         String filename = multipartFile.getOriginalFilename() == null ? "knowledge.txt" : multipartFile.getOriginalFilename();
+        String storedFileUrl = null;
+        List<String> storedMediaUrls = new ArrayList<>();
+        Long savedFileId = null;
         try {
             byte[] bytes = multipartFile.getBytes();
             String fileType = textExtractor.extension(filename);
-            String extractedContent = textExtractor.extract(filename, bytes).trim();
+            DocumentTextExtractor.ParsedDocument parsed = textExtractor.parse(filename, bytes);
+            String extractedContent = parsed.text().trim();
             if (imageUrls != null && !imageUrls.isEmpty()) {
                 return ApiResponse.fail("正文图片必须包含在原始文件中，不能单独上传");
             }
@@ -99,25 +108,33 @@ public class KnowledgeController {
             }
             String content = extractedContent;
             Map<String, Object> stored = fileStorage.saveFile(filename, bytes, multipartFile.getContentType(), fileType);
+            storedFileUrl = String.valueOf(stored.get("fileUrl"));
+            List<LocalFullTextSearchService.ContentBlock> contentBlocks =
+                    storeParsedBlocks(parsed.blocks(), storedMediaUrls);
             KnowledgeFileEntity file = new KnowledgeFileEntity();
             file.setUserId(userId);
             file.setCategoryId(categoryId);
             file.setTitle(title == null || title.isBlank() ? filename : title.trim());
-            file.setFileUrl(String.valueOf(stored.get("fileUrl")));
+            file.setFileUrl(storedFileUrl);
             file.setFileType(fileType);
             file.setParseStatus(content.isBlank() ? "EMPTY" : "INDEXED");
             file.setAuditStatus("PENDING");
             file.setViews(0);
             file.setDownloads(0);
             KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
-            if (!content.isBlank()) fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
+            savedFileId = saved.getId();
+            if (!content.isBlank() || !contentBlocks.isEmpty()) {
+                fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl(), contentBlocks);
+            }
             Map<String, Object> view = toView(saved);
             view.put("size", bytes.length);
             view.put("storageMode", stored.get("storageMode"));
             return ApiResponse.ok(view);
         } catch (IllegalArgumentException error) {
+            rollbackUploadedKnowledge(savedFileId, storedFileUrl, storedMediaUrls);
             return ApiResponse.fail(error.getMessage());
         } catch (Exception error) {
+            rollbackUploadedKnowledge(savedFileId, storedFileUrl, storedMediaUrls);
             return ApiResponse.fail("file upload failed: " + error.getMessage());
         }
     }
@@ -338,9 +355,7 @@ public class KnowledgeController {
                 .filter(file -> canView(file, authorization))
                 .map(file -> {
                     Map<String, Object> detail = toView(file, LocalAuth.userId(authorization));
-                    detail.put("content", fullTextSearch.find(fileId)
-                            .map(LocalFullTextSearchService.SearchDocument::getContent)
-                            .orElse("该资源尚未保存可预览的正文。"));
+                    addPreviewContent(detail, file);
                     return ApiResponse.ok(detail);
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
@@ -397,6 +412,7 @@ public class KnowledgeController {
         if (!LocalAuth.isAdmin(authorization) && !userId.equals(file.getUserId())) {
             return ApiResponse.fail("access to this knowledge file is denied");
         }
+        List<String> mediaUrls = imageUrls(fileId);
         boolean removed = knowledgeStore.deleteFile(fileId);
         if (!removed) return ApiResponse.fail("knowledge file not found");
         boolean indexRemoved = fullTextSearch.remove(fileId);
@@ -406,11 +422,21 @@ public class KnowledgeController {
         } catch (RuntimeException ignored) {
             // The business record is deleted even if an external object store is temporarily unavailable.
         }
+        int mediaRemoved = 0;
+        for (String mediaUrl : mediaUrls) {
+            if (!mediaUrl.startsWith("/knowledge/media/")) continue;
+            try {
+                if (mediaStorage.delete(mediaUrl)) mediaRemoved++;
+            } catch (RuntimeException ignored) {
+                // The knowledge record remains deleted even if media cleanup must be retried later.
+            }
+        }
         return ApiResponse.ok(Map.of(
                 "fileId", fileId,
                 "removed", true,
                 "indexRemoved", indexRemoved,
-                "storageRemoved", storageRemoved
+                "storageRemoved", storageRemoved,
+                "mediaRemoved", mediaRemoved
         ));
     }
 
@@ -571,9 +597,7 @@ public class KnowledgeController {
         return knowledgeStore.find(fileId)
                 .map(file -> {
                     Map<String, Object> detail = toView(file);
-                    detail.put("content", fullTextSearch.find(fileId)
-                            .map(LocalFullTextSearchService.SearchDocument::getContent)
-                            .orElse("该资源尚未保存可预览的正文。"));
+                    addPreviewContent(detail, file);
                     return ApiResponse.ok(detail);
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
@@ -634,7 +658,8 @@ public class KnowledgeController {
         return knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus)
                 .map(file -> {
                     fullTextSearch.find(fileId).ifPresent(document ->
-                            fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl()));
+                            fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl(),
+                                    document.getContentBlocks()));
                     return ApiResponse.ok(toView(file));
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
@@ -669,10 +694,99 @@ public class KnowledgeController {
     private List<String> imageUrls(Long fileId) {
         return fullTextSearch.find(fileId).map(document -> {
             List<String> urls = new java.util.ArrayList<>();
+            document.getContentBlocks().stream()
+                    .filter(block -> "image".equals(block.getType()))
+                    .map(LocalFullTextSearchService.ContentBlock::getUrl)
+                    .filter(url -> url != null && !url.isBlank())
+                    .forEach(urls::add);
+            if (!urls.isEmpty()) return List.copyOf(urls);
             Matcher matcher = IMAGE_MARKUP.matcher(document.getContent());
             while (matcher.find() && urls.size() < 12) urls.add(matcher.group(2));
             return List.copyOf(urls);
         }).orElse(List.of());
+    }
+
+    private void addPreviewContent(Map<String, Object> detail, KnowledgeFileEntity file) {
+        LocalFullTextSearchService.SearchDocument document = ensurePreviewDocument(file);
+        detail.put("content", document == null || document.getContent().isBlank()
+                ? "该资源尚未保存可预览的正文。" : document.getContent());
+        detail.put("contentBlocks", document == null ? List.of() : document.getContentBlocks());
+        List<String> urls = imageUrls(file.getId());
+        detail.put("imageUrls", urls);
+        detail.put("coverUrl", urls.isEmpty() ? "" : urls.get(0));
+    }
+
+    private synchronized LocalFullTextSearchService.SearchDocument ensurePreviewDocument(KnowledgeFileEntity file) {
+        LocalFullTextSearchService.SearchDocument existing = fullTextSearch.find(file.getId()).orElse(null);
+        if (!"docx".equalsIgnoreCase(file.getFileType()) || file.getFileUrl() == null || file.getFileUrl().isBlank()) {
+            return existing;
+        }
+        if (existing != null && !existing.getContentBlocks().isEmpty()) return existing;
+
+        List<String> storedMediaUrls = new ArrayList<>();
+        try {
+            LocalFileStorageService.StoredContent stored = fileStorage.read(file.getFileUrl());
+            DocumentTextExtractor.ParsedDocument parsed = textExtractor.parse(stored.objectName(), stored.bytes());
+            List<LocalFullTextSearchService.ContentBlock> blocks = storeParsedBlocks(parsed.blocks(), storedMediaUrls);
+            return fullTextSearch.index(file.getId(), file.getTitle(), parsed.text().trim(), file.getFileUrl(), blocks);
+        } catch (RuntimeException error) {
+            storedMediaUrls.forEach(url -> {
+                try { mediaStorage.delete(url); } catch (RuntimeException ignored) {}
+            });
+            return existing;
+        }
+    }
+
+    private List<LocalFullTextSearchService.ContentBlock> storeParsedBlocks(
+            List<DocumentTextExtractor.ParsedBlock> parsedBlocks, List<String> storedMediaUrls
+    ) {
+        List<LocalFullTextSearchService.ContentBlock> blocks = new ArrayList<>();
+        Map<String, String> imageUrlsByDigest = new HashMap<>();
+        for (DocumentTextExtractor.ParsedBlock block : parsedBlocks) {
+            if (!"image".equals(block.type())) {
+                if (block.text() != null && !block.text().isBlank()) {
+                    blocks.add(LocalFullTextSearchService.ContentBlock.text(block.type(), block.text()));
+                }
+                continue;
+            }
+            byte[] bytes = block.imageBytes();
+            if (bytes == null || bytes.length == 0) continue;
+            try {
+                String digest = imageDigest(bytes);
+                String mediaUrl = imageUrlsByDigest.get(digest);
+                if (mediaUrl == null) {
+                    mediaUrl = mediaStorage.save(bytes);
+                    imageUrlsByDigest.put(digest, mediaUrl);
+                    storedMediaUrls.add(mediaUrl);
+                }
+                blocks.add(LocalFullTextSearchService.ContentBlock.image(block.text(), mediaUrl));
+            } catch (IllegalArgumentException unsupportedImage) {
+                blocks.add(LocalFullTextSearchService.ContentBlock.text("paragraph",
+                        "此处图片格式暂不支持在线预览，请下载原文件查看。"));
+            }
+        }
+        return List.copyOf(blocks);
+    }
+
+    private String imageDigest(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is unavailable", error);
+        }
+    }
+
+    private void rollbackUploadedKnowledge(Long fileId, String fileUrl, List<String> mediaUrls) {
+        if (fileId != null) {
+            try { knowledgeStore.deleteFile(fileId); } catch (RuntimeException ignored) {}
+            try { fullTextSearch.remove(fileId); } catch (RuntimeException ignored) {}
+        }
+        if (fileUrl != null && !fileUrl.isBlank()) {
+            try { fileStorage.delete(fileUrl); } catch (RuntimeException ignored) {}
+        }
+        for (String mediaUrl : mediaUrls) {
+            try { mediaStorage.delete(mediaUrl); } catch (RuntimeException ignored) {}
+        }
     }
 
     private List<String> stringList(Object value) {

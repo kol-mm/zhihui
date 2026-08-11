@@ -6,8 +6,11 @@ import com.aiknowledge.knowledge.storage.LocalFileStorageService;
 import com.aiknowledge.knowledge.store.InMemoryKnowledgeStore;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -136,6 +139,47 @@ class KnowledgeControllerTest {
         var download = controller.fileContent(userAuth, fileId);
         assertEquals(200, download.getStatusCode().value());
         assertTrue(new String(download.getBody()).contains("signed identities"));
+    }
+
+    @Test
+    void docxEmbeddedImageIsRenderedInDocumentOrderAndDeletedWithKnowledge() throws Exception {
+        byte[] png = Base64.getDecoder().decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (var document = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            var paragraph = document.createParagraph();
+            paragraph.createRun().setText("图片之前");
+            paragraph.createRun().addPicture(new ByteArrayInputStream(png),
+                    org.apache.poi.xwpf.usermodel.Document.PICTURE_TYPE_PNG,
+                    "preview.png", org.apache.poi.util.Units.toEMU(80), org.apache.poi.util.Units.toEMU(80));
+            paragraph.createRun().setText("图片之后");
+            document.write(output);
+        }
+
+        var multipart = new org.springframework.mock.web.MockMultipartFile(
+                "file", "illustrated.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", output.toByteArray());
+        var uploaded = controller.uploadFile(userAuth, multipart, "图文知识", null);
+
+        assertEquals(0, uploaded.code());
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        var preview = controller.adminPreview(adminAuth, fileId);
+        assertEquals(0, preview.code());
+
+        @SuppressWarnings("unchecked")
+        List<LocalFullTextSearchService.ContentBlock> blocks =
+                (List<LocalFullTextSearchService.ContentBlock>) preview.data().get("contentBlocks");
+        assertEquals(3, blocks.size());
+        assertEquals("图片之前", blocks.get(0).getText());
+        assertEquals("image", blocks.get(1).getType());
+        assertEquals("图片之后", blocks.get(2).getText());
+        String imageUrl = blocks.get(1).getUrl();
+        assertEquals(200, controller.media(imageUrl.substring(imageUrl.lastIndexOf('/') + 1)).getStatusCode().value());
+
+        var deleted = controller.deleteFile(userAuth, Map.of("fileId", fileId));
+        assertEquals(0, deleted.code());
+        assertEquals(1, ((Number) deleted.data().get("mediaRemoved")).intValue());
     }
 
     @Test

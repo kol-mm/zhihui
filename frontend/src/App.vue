@@ -240,7 +240,7 @@
         <el-form-item label="标题"><el-input v-model="knowledgeForm.title" placeholder="留空时使用文件名或首张图片名" /></el-form-item>
         <el-form-item label="知识分类"><el-select v-model="knowledgeForm.categoryId" clearable placeholder="选择分类"><el-option v-for="category in knowledgeCategories" :key="category.id" :label="category.name" :value="category.id" /></el-select></el-form-item>
         <el-form-item label="资料文件">
-          <el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="handleKnowledgeFile" :on-remove="clearKnowledgeFile"><UploadFilled /><div class="el-upload__text">拖放文件到这里，或<em>点击选择</em></div><template #tip><div class="el-upload__tip">支持 TXT、Markdown、PDF、DOCX，单个文件不超过 25 MB</div></template></el-upload>
+          <el-upload drag :auto-upload="false" :limit="1" accept=".txt,.md,.pdf,.docx" :on-change="handleKnowledgeFile" :on-remove="clearKnowledgeFile"><UploadFilled /><div class="el-upload__text">拖放文件到这里，或<em>点击选择</em></div><template #tip><div class="el-upload__tip">支持 TXT、Markdown、PDF、DOCX，单个文件不超过 25 MB；DOCX 正文图片可在线预览</div></template></el-upload>
         </el-form-item>
         <el-divider>或直接录入文本</el-divider>
         <div class="form-pair"><el-form-item label="文件名"><el-input v-model="knowledgeForm.filename" /></el-form-item><el-form-item label="格式"><el-select v-model="knowledgeForm.fileType"><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select></el-form-item></div>
@@ -296,7 +296,7 @@ import { deleteData, downloadData, getAuthToken, getData, postData, postFormData
 import CommunityDetailPage from './components/CommunityDetailPage.vue';
 import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
 
-type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean; createdAt?:string };
+type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; contentBlocks?:KnowledgeContentBlock[]; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean; createdAt?:string };
 type KnowledgeLikeResult = { fileId:number; liked:boolean; likes:number };
 type KnowledgeCollectResult = { userId:number; fileId:number; collected:boolean };
 type KnowledgeRanking = { rank:number; userId:number; uploads:number; views:number; downloads:number; violations:number; score:number };
@@ -430,6 +430,9 @@ const analyticsTrend = computed(() => Array.from({length:Math.min(analyticsDays.
 const analyticsTrendMax = computed(() => Math.max(1,...analyticsTrend.value.flatMap(item=>[item.knowledge,item.posts,item.tickets])));
 
 function parseKnowledgeContent(file?:KnowledgeFile):KnowledgeContentBlock[] {
+  if (file?.contentBlocks?.length) {
+    return file.contentBlocks.filter(block => ['image','heading','list','paragraph'].includes(block.type));
+  }
   const content = file?.content || '';
   if (!content.trim()) return [];
   const blocks: KnowledgeContentBlock[] = [];
