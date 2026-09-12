@@ -127,7 +127,6 @@ public class UserController {
         if (platformConfig != null && !platformConfig.enabled("registration_enabled", true)) {
             return ApiResponse.fail("平台当前未开放新用户注册");
         }
-        if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
             return ApiResponse.fail("username must contain 3-32 letters, numbers, underscores or hyphens");
@@ -139,6 +138,20 @@ public class UserController {
         if (password.length() < 8 || password.length() > 128) {
             return ApiResponse.fail("password must contain between 8 and 128 characters");
         }
+        if (!password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
+            return ApiResponse.fail("password must contain letters and numbers");
+        }
+        if (password.chars().anyMatch(Character::isWhitespace)) {
+            return ApiResponse.fail("password must not contain whitespace");
+        }
+        if (password.equalsIgnoreCase(username)) {
+            return ApiResponse.fail("password must differ from username");
+        }
+        String nickname = request.getOrDefault("nickname", username).trim();
+        if (nickname.length() > 64) {
+            return ApiResponse.fail("nickname must not exceed 64 characters");
+        }
+        if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         if (userStore.findByUsername(username).isPresent()) {
             return ApiResponse.fail("username already exists");
         }
@@ -146,8 +159,7 @@ public class UserController {
         UserEntity user = new UserEntity();
         user.setUsername(username);
         user.setPasswordHash(passwordEncoder.encode(password));
-        String nickname = request.getOrDefault("nickname", username).trim();
-        user.setNickname(nickname.isBlank() ? username : nickname.substring(0, Math.min(nickname.length(), 64)));
+        user.setNickname(nickname.isBlank() ? username : nickname);
         user.setStatus("ACTIVE");
         user.setRole("USER");
         String publishPolicy = platformConfig == null ? "STANDARD" : platformConfig.text("default_publish_policy", "STANDARD");

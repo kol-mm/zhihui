@@ -93,6 +93,25 @@ class UserControllerTest {
     }
 
     @Test
+    void invalidRegistrationFieldsDoNotConsumeTheCaptcha() {
+        Map<String, String> registrationRequest = credentials("field-check-user", "onlyletters");
+
+        assertEquals(500, controller.register(registrationRequest).code());
+        registrationRequest.put("password", "letters123");
+        assertEquals(0, controller.register(registrationRequest).code());
+    }
+
+    @Test
+    void registrationRejectsUnsafeOrOverlongFields() {
+        assertEquals(500, controller.register(credentials("same123", "same123")).code());
+        assertEquals(500, controller.register(credentials("space-user", "secret 123")).code());
+
+        Map<String, String> longNickname = credentials("nickname-user", "secret123");
+        longNickname.put("nickname", "名".repeat(65));
+        assertEquals(500, controller.register(longNickname).code());
+    }
+
+    @Test
     void authenticatedUserCanChangePassword() {
         String auth = "Bearer " + LocalAuth.issueToken("demo");
         var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass"));

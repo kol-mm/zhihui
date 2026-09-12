@@ -27,6 +27,10 @@ public record ApiResponse<T>(int code, String message, T data) {
             case "username must contain 3-32 letters, numbers, underscores or hyphens" -> "用户名须由 3-32 个字母、数字、下划线或连字符组成";
             case "invalid username or password" -> "用户名或密码错误";
             case "password must contain between 8 and 128 characters" -> "密码长度须为 8-128 个字符";
+            case "password must contain letters and numbers" -> "密码须同时包含字母和数字";
+            case "password must not contain whitespace" -> "密码不能包含空格";
+            case "password must differ from username" -> "密码不能与用户名相同";
+            case "nickname must not exceed 64 characters" -> "昵称不能超过 64 个字符";
             case "new password must contain between 8 and 128 characters" -> "新密码长度须为 8-128 个字符";
             case "current password is incorrect" -> "当前密码不正确";
             case "profile fields exceed the allowed length" -> "个人资料内容超过允许长度";

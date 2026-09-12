@@ -10,17 +10,35 @@
         <el-form-item label="密码"><el-input v-model="loginForm.password" size="large" type="password" show-password autocomplete="current-password" /></el-form-item>
         <el-form-item label="人机验证"><div class="captcha-control"><div class="captcha-challenge" aria-live="polite"><img v-if="captchaImage" :src="captchaImage" alt="图片计算验证码" /><span v-else>{{ captchaLoading ? '正在获取验证码…' : '验证码暂不可用' }}</span></div><div class="captcha-row"><el-input v-model="loginForm.captchaAnswer" size="large" inputmode="numeric" autocomplete="off" maxlength="3" placeholder="请输入图片中的计算结果" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining} 秒后可换` : '换一张' }}</el-button></div><p class="captcha-hint">验证码 3 分钟内有效，验证失败后会自动更换。</p></div></el-form-item>
         <el-button class="login-button" type="primary" size="large" :loading="busy" native-type="submit">登录</el-button>
-        <el-button v-if="platformConfig.registration_enabled" class="register-entry" text type="primary" @click="registerDialog = true">没有账号？立即注册</el-button>
+        <el-button v-if="platformConfig.registration_enabled" class="register-entry" text type="primary" @click="openRegisterDialog">没有账号？立即注册</el-button>
       </el-form>
     </section>
-    <el-dialog v-model="registerDialog" title="注册社区账号" width="min(460px, 92vw)">
-      <el-form label-position="top">
-        <el-form-item label="用户名"><el-input v-model="registerForm.username" autocomplete="username" /></el-form-item>
-        <el-form-item label="昵称"><el-input v-model="registerForm.nickname" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="registerForm.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+    <el-dialog v-model="registerDialog" class="register-dialog" title="注册社区账号" width="min(480px, 92vw)" destroy-on-close :close-on-click-modal="!busy" :close-on-press-escape="!busy" @closed="resetRegistrationForm">
+      <el-form label-position="top" @submit.prevent="registerAccount">
+        <el-form-item label="用户名">
+          <el-input v-model.trim="registerForm.username" autocomplete="username" autocapitalize="none" :spellcheck="false" maxlength="32" clearable enterkeyhint="next" placeholder="3-32 位字母、数字、_ 或 -" />
+          <p class="registration-field-hint" :class="{ valid: registrationUsernameValid }" aria-live="polite">{{ registrationUsernameHint }}</p>
+        </el-form-item>
+        <el-form-item label="昵称（选填）"><el-input v-model="registerForm.nickname" autocomplete="nickname" maxlength="64" show-word-limit clearable enterkeyhint="next" placeholder="用于社区展示，留空时使用用户名" /></el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="registerForm.password" type="password" show-password autocomplete="new-password" maxlength="128" enterkeyhint="next" placeholder="请设置登录密码" />
+          <div v-if="registerForm.password" class="password-strength" :class="`is-${registrationPasswordStrength.level}`" aria-live="polite"><span><i :style="{ width: `${registrationPasswordStrength.percent}%` }"></i></span><small>密码强度：{{ registrationPasswordStrength.label }}</small></div>
+          <div class="registration-rules">
+            <span :class="{ valid: registrationPasswordChecks.length }">8-128 位</span>
+            <span :class="{ valid: registrationPasswordChecks.letter }">包含字母</span>
+            <span :class="{ valid: registrationPasswordChecks.number }">包含数字</span>
+            <span :class="{ valid: registrationPasswordChecks.noWhitespace }">不含空格</span>
+            <span :class="{ valid: registrationPasswordChecks.differsFromUsername }">不同于用户名</span>
+          </div>
+        </el-form-item>
+        <el-form-item label="确认密码">
+          <el-input v-model="registerForm.confirmPassword" type="password" show-password autocomplete="new-password" maxlength="128" enterkeyhint="next" placeholder="请再次输入密码" />
+          <p v-if="registerForm.confirmPassword" class="registration-field-hint" :class="{ valid: registrationPasswordsMatch }" aria-live="polite">{{ registrationPasswordsMatch ? '两次输入的密码一致' : '两次输入的密码不一致' }}</p>
+        </el-form-item>
         <el-form-item label="人机验证"><div class="captcha-control"><div class="captcha-challenge" aria-live="polite"><img v-if="captchaImage" :src="captchaImage" alt="图片计算验证码" /><span v-else>{{ captchaLoading ? '正在获取验证码…' : '验证码暂不可用' }}</span></div><div class="captcha-row"><el-input v-model="registerForm.captchaAnswer" inputmode="numeric" autocomplete="off" maxlength="3" placeholder="请输入图片中的计算结果" /><el-button type="info" plain :loading="captchaLoading" :disabled="captchaCooldownRemaining > 0" @click="loadCaptcha">{{ captchaCooldownRemaining > 0 ? `${captchaCooldownRemaining} 秒后可换` : '换一张' }}</el-button></div><p class="captcha-hint">验证码 3 分钟内有效，验证失败后会自动更换。</p></div></el-form-item>
+        <button class="form-submit-proxy" type="submit" tabindex="-1" aria-hidden="true"></button>
       </el-form>
-      <template #footer><el-button @click="registerDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="registerAccount">注册并登录</el-button></template>
+      <template #footer><el-button :disabled="busy" @click="registerDialog = false">取消</el-button><el-button type="primary" :loading="busy" @click="registerAccount">创建账号并登录</el-button></template>
     </el-dialog>
   </div>
 
@@ -357,7 +375,7 @@ const profileToolTab = ref('activity');
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false); const knowledgeMetadataDialog = ref(false); const userGovernanceDialog = ref(false);
 
 const loginForm = ref({ username:'', password:'', captchaId:'', captchaAnswer:'' });
-const registerForm = ref({ username:'', nickname:'', password:'', captchaId:'', captchaAnswer:'' });
+const registerForm = ref({ username:'', nickname:'', password:'', confirmPassword:'', captchaId:'', captchaAnswer:'' });
 const captchaImage = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); const captchaExpiresAt = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaExpiryTimer: ReturnType<typeof setTimeout> | undefined; let captchaRefreshPending = false;
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
 const passwordForm = ref({ currentPassword:'', newPassword:'' });
@@ -408,6 +426,18 @@ const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索
 
 const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'forum',label:'社区论坛',icon:markRaw(ChatDotRound)},{key:'square',label:'关注广场',icon:markRaw(CollectionTag)},{key:'messages',label:'消息中心',icon:markRaw(Message)},{key:'notifications',label:'通知中心',icon:markRaw(Bell),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
 const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'analytics',label:'平台数据统计',icon:markRaw(DataAnalysis)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与常见问题',icon:markRaw(Tickets)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
+const registrationUsernameValid = computed(()=>/^[A-Za-z0-9_-]{3,32}$/.test(registerForm.value.username.trim()));
+const registrationUsernameHint = computed(()=>!registerForm.value.username?'用户名用于登录，注册后不可修改':registrationUsernameValid.value?'用户名格式正确':'仅支持 3-32 位字母、数字、下划线或连字符');
+const registrationPasswordChecks = computed(()=>{
+  const password=registerForm.value.password;
+  return {length:password.length>=8&&password.length<=128,letter:/[A-Za-z]/.test(password),number:/\d/.test(password),noWhitespace:password.length>0&&!/\s/.test(password),differsFromUsername:password.length>0&&password.toLowerCase()!==registerForm.value.username.trim().toLowerCase()};
+});
+const registrationPasswordsMatch = computed(()=>Boolean(registerForm.value.confirmPassword)&&registerForm.value.password===registerForm.value.confirmPassword);
+const registrationPasswordStrength = computed(()=>{
+  const password=registerForm.value.password;let score=0;
+  if(password.length>=8)score++;if(password.length>=12)score++;if(/[A-Z]/.test(password)&&/[a-z]/.test(password))score++;if(/\d/.test(password))score++;if(/[^A-Za-z0-9\s]/.test(password))score++;
+  if(score>=4)return{label:'强',level:'strong',percent:100};if(score>=3)return{label:'中',level:'medium',percent:66};return{label:'弱',level:'weak',percent:33};
+});
 const currentNavigation = computed(() => portal.value === 'admin' ? adminNavigation : clientNavigation
   .filter(item => platformConfig.value.community_enabled || !['forum','square'].includes(item.key))
   .filter(item => platformConfig.value.private_messages_enabled || item.key !== 'messages')
@@ -527,13 +557,34 @@ async function completeAuthentication(result:AuthResult){
   authenticated.value=true;portal.value=result.role==='ADMIN'?'admin':'client';activeView.value=result.role==='ADMIN'?'dashboard':'home';syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();
 }
 
+function openRegisterDialog(){
+  registerDialog.value=true;
+  registerForm.value.captchaId=loginForm.value.captchaId;
+  registerForm.value.captchaAnswer='';
+  if(!captchaImage.value||captchaExpiresAt.value<=Date.now()){invalidateCaptcha(true);void loadCaptcha({silent:true});}
+}
+function resetRegistrationForm(){registerForm.value={username:'',nickname:'',password:'',confirmPassword:'',captchaId:loginForm.value.captchaId,captchaAnswer:''};}
+function registrationValidationMessage(){
+  const username=registerForm.value.username.trim();const checks=registrationPasswordChecks.value;
+  if(!username)return '请输入用户名';
+  if(!registrationUsernameValid.value)return '用户名须由 3-32 位字母、数字、下划线或连字符组成';
+  if(username.toLowerCase()==='admin')return '该用户名为系统保留名称，请更换';
+  if(!checks.length)return '密码长度须为 8-128 位';
+  if(!checks.letter||!checks.number)return '密码须同时包含字母和数字';
+  if(!checks.noWhitespace)return '密码不能包含空格';
+  if(!checks.differsFromUsername)return '密码不能与用户名相同';
+  if(!registerForm.value.confirmPassword)return '请再次输入密码';
+  if(!registrationPasswordsMatch.value)return '两次输入的密码不一致';
+  if(!registerForm.value.captchaAnswer.trim())return '请输入验证码';
+  return '';
+}
 async function registerAccount(){
   if(busy.value)return;
-  if(!registerForm.value.username.trim() || registerForm.value.password.length < 8){ ElMessage.warning('请输入用户名，密码至少 8 位'); return; }
-  if(!registerForm.value.captchaAnswer.trim()){ ElMessage.warning('请输入验证码'); return; }
+  const validationMessage=registrationValidationMessage();if(validationMessage){ElMessage.warning(validationMessage);return;}
   busy.value=true;
   try{
-    const result=await postData<AuthResult>('/user/register',registerForm.value);
+    const registrationRequest={username:registerForm.value.username.trim(),nickname:registerForm.value.nickname.trim(),password:registerForm.value.password,captchaId:registerForm.value.captchaId,captchaAnswer:registerForm.value.captchaAnswer.trim()};
+    const result=await postData<AuthResult>('/user/register',registrationRequest);
     registerDialog.value=false;
     await completeAuthentication(result);
     ElMessage.success('注册并登录成功');
