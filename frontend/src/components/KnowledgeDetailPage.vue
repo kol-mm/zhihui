@@ -17,7 +17,7 @@
           <el-button type="danger" text :icon="Warning" @click="emit('report', file)">举报</el-button>
         </div>
       </header>
-      <PdfViewer v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="detail-pdf" :src="pdfPreviewUrl" />
+      <PdfViewer v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="detail-pdf" :src="pdfPreviewUrl" :document-id="file.id" />
       <div v-else class="detail-knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in blocks" :key="`${block.type}-${index}`">
           <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />

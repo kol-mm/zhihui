@@ -283,7 +283,7 @@
     </el-dialog>
     <el-dialog v-model="readerDialog" class="reader-dialog" width="min(900px, 96vw)" top="3vh" destroy-on-close>
       <template #header><div class="reader-header"><span class="file-type large">{{ selectedKnowledge?.fileType?.toUpperCase() }}</span><div><h3>{{ selectedKnowledge?.title }}</h3><p>资源 #{{ selectedKnowledge?.id }} · {{ reviewingKnowledge ? auditLabel(selectedKnowledge?.auditStatus || '') : `浏览 ${selectedKnowledge?.views || 0} 次` }}</p></div></div></template>
-      <PdfViewer v-if="selectedKnowledge?.fileType === 'pdf' && pdfPreviewUrl" :src="pdfPreviewUrl" />
+      <PdfViewer v-if="selectedKnowledge?.fileType === 'pdf' && pdfPreviewUrl" :src="pdfPreviewUrl" :document-id="selectedKnowledge.id" />
       <article v-else class="knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in knowledgeContentBlocks" :key="`${block.type}-${index}`">
           <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
