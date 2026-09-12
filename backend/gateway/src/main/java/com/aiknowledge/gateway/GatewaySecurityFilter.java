@@ -59,13 +59,17 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
     }
 
     private int requestLimit(String path, String method) {
-        if (path.equals("/user/login") || path.equals("/user/register") || path.equals("/user/captcha")) return 10;
+        if (path.equals("/user/login")) return 10;
+        if (path.equals("/user/register")) return 5;
+        if (path.equals("/user/captcha")) return 20;
         if (!"GET".equals(method) && !"OPTIONS".equals(method)) return 120;
         return 600;
     }
 
     private String rateClass(String path) {
-        if (path.equals("/user/login") || path.equals("/user/register") || path.equals("/user/captcha")) return "auth";
+        if (path.equals("/user/login")) return "auth-login";
+        if (path.equals("/user/register")) return "auth-register";
+        if (path.equals("/user/captcha")) return "auth-captcha";
         return "general";
     }
 
@@ -73,10 +77,28 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         InetSocketAddress remote = exchange.getRequest().getRemoteAddress();
         InetAddress address = remote == null ? null : remote.getAddress();
         String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
-        if (address != null && address.isLoopbackAddress() && forwarded != null && !forwarded.isBlank()) {
-            return "ip:" + forwarded.split(",", 2)[0].trim();
+        if (isTrustedProxy(address) && forwarded != null && !forwarded.isBlank()) {
+            String[] chain = forwarded.split(",");
+            for (int index = chain.length - 1; index >= 0; index--) {
+                InetAddress candidate = parseAddress(chain[index]);
+                if (candidate != null && !isTrustedProxy(candidate)) return "ip:" + candidate.getHostAddress();
+            }
         }
         return "ip:" + (address == null ? "unknown" : address.getHostAddress());
+    }
+
+    private boolean isTrustedProxy(InetAddress address) {
+        return address != null && (address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress());
+    }
+
+    private InetAddress parseAddress(String value) {
+        String candidate = value == null ? "" : value.trim();
+        if (candidate.isEmpty() || !candidate.matches("[0-9A-Fa-f:.]{2,45}")) return null;
+        try {
+            return InetAddress.getByName(candidate);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private void addSecurityHeaders(ServerWebExchange exchange) {

@@ -40,7 +40,7 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  if (String(config.url || '').includes('/user/captcha')) {
+  if (/\/user\/(captcha|login|register)(?:$|[?#])/i.test(String(config.url || ''))) {
     config.headers['X-Captcha-Client'] = getCaptchaClientKey();
   }
   return config;
@@ -85,7 +85,8 @@ function toReadableError(error: unknown): Error {
 function localizeBackendMessage(message: string): string {
   const text = message.trim();
   const exact: Record<string, string> = {
-    'captcha is required or invalid; please obtain a new captcha': '验证码错误或已失效，请在倒计时结束后重新获取',
+    'captcha is required or invalid; please obtain a new captcha': '验证码错误或已失效，已为你更换验证码',
+    'too many requests': '操作过于频繁，请稍后再试',
     'valid user authorization is required': '请先登录后再操作',
     'admin authorization is required': '需要管理员权限',
     'internal authorization is required': GENERIC_ERROR_MESSAGE,

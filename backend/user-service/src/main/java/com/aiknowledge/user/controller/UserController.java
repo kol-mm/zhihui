@@ -8,6 +8,7 @@ import com.aiknowledge.user.store.UserStore;
 import com.aiknowledge.user.storage.UserAvatarStorageService;
 import com.aiknowledge.user.security.CaptchaService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,7 +73,9 @@ public class UserController {
     }
 
     @GetMapping("/captcha")
-    public ApiResponse<Map<String, Object>> captcha(HttpServletRequest request) {
+    public ApiResponse<Map<String, Object>> captcha(HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        response.setHeader("Pragma", "no-cache");
         String clientKey = request.getHeader("X-Captcha-Client");
         if (clientKey == null || clientKey.isBlank()) clientKey = request.getRemoteAddr();
         return ApiResponse.ok(captchaService.issue(clientKey));
@@ -111,11 +114,20 @@ public class UserController {
     }
 
     @PostMapping("/register")
-    public ApiResponse<Map<String, Object>> register(@RequestBody Map<String, String> request) {
+    public ApiResponse<Map<String, Object>> registerRequest(@RequestBody Map<String, String> request,
+                                                             HttpServletRequest servletRequest) {
+        return register(request, captchaClientKey(servletRequest));
+    }
+
+    public ApiResponse<Map<String, Object>> register(Map<String, String> request) {
+        return register(request, null);
+    }
+
+    private ApiResponse<Map<String, Object>> register(Map<String, String> request, String captchaClientKey) {
         if (platformConfig != null && !platformConfig.enabled("registration_enabled", true)) {
             return ApiResponse.fail("平台当前未开放新用户注册");
         }
-        if (!verifyCaptcha(request)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
+        if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
             return ApiResponse.fail("username must contain 3-32 letters, numbers, underscores or hyphens");
@@ -146,8 +158,17 @@ public class UserController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<Map<String, Object>> login(@RequestBody Map<String, String> request) {
-        if (!verifyCaptcha(request)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
+    public ApiResponse<Map<String, Object>> loginRequest(@RequestBody Map<String, String> request,
+                                                          HttpServletRequest servletRequest) {
+        return login(request, captchaClientKey(servletRequest));
+    }
+
+    public ApiResponse<Map<String, Object>> login(Map<String, String> request) {
+        return login(request, null);
+    }
+
+    private ApiResponse<Map<String, Object>> login(Map<String, String> request, String captchaClientKey) {
+        if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         String password = request.getOrDefault("password", "");
         if (username.length() > 32 || password.length() > 128) return ApiResponse.fail("invalid username or password");
@@ -532,8 +553,13 @@ public class UserController {
         return view;
     }
 
-    private boolean verifyCaptcha(Map<String, String> request) {
-        return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"));
+    private boolean verifyCaptcha(Map<String, String> request, String clientKey) {
+        return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"), clientKey);
+    }
+
+    private String captchaClientKey(HttpServletRequest request) {
+        String clientKey = request.getHeader("X-Captcha-Client");
+        return clientKey == null || clientKey.isBlank() ? request.getRemoteAddr() : clientKey;
     }
 
     private boolean isBlockedEitherDirection(Long userId, Long targetUserId) {
