@@ -14,25 +14,58 @@ export function resolveApiUrl(path: string): string {
 const AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
 const CAPTCHA_CLIENT_KEY = 'ai-knowledge-captcha-client';
 const GENERIC_ERROR_MESSAGE = '操作失败，请稍后重试';
+const volatileStorage = new Map<string, string>();
+const removedStorageKeys = new Set<string>();
 
 class UserFacingError extends Error {}
 
+export function getStoredValue(key: string, fallback = ''): string {
+  if (removedStorageKeys.has(key)) return fallback;
+  const volatileValue = volatileStorage.get(key);
+  if (volatileValue !== undefined) return volatileValue;
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setStoredValue(key: string, value: string): void {
+  removedStorageKeys.delete(key);
+  volatileStorage.set(key, value);
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 严格隐私模式下仅在当前页面会话内保存。
+  }
+}
+
+export function removeStoredValue(key: string): void {
+  volatileStorage.delete(key);
+  removedStorageKeys.add(key);
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // 持久存储不可用时，内存状态已经清理。
+  }
+}
+
 function getCaptchaClientKey() {
-  const existing = localStorage.getItem(CAPTCHA_CLIENT_KEY);
+  const existing = getStoredValue(CAPTCHA_CLIENT_KEY);
   if (existing) return existing;
   const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `captcha-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  localStorage.setItem(CAPTCHA_CLIENT_KEY, generated);
+  setStoredValue(CAPTCHA_CLIENT_KEY, generated);
   return generated;
 }
 
 export function setAuthToken(token: string) {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  setStoredValue(AUTH_TOKEN_KEY, token);
 }
 
 export function getAuthToken() {
-  return localStorage.getItem(AUTH_TOKEN_KEY) || '';
+  return getStoredValue(AUTH_TOKEN_KEY);
 }
 
 api.interceptors.request.use((config) => {

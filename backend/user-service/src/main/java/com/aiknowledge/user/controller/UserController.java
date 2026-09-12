@@ -559,7 +559,8 @@ public class UserController {
 
     private String captchaClientKey(HttpServletRequest request) {
         String clientKey = request.getHeader("X-Captcha-Client");
-        return clientKey == null || clientKey.isBlank() ? request.getRemoteAddr() : clientKey;
+        // 兼容仍在浏览器缓存中的旧版前端：旧版登录请求没有此请求头。
+        return clientKey == null || clientKey.isBlank() ? null : clientKey;
     }
 
     private boolean isBlockedEitherDirection(Long userId, Long targetUserId) {
