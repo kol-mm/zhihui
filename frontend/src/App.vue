@@ -283,11 +283,12 @@
     </el-dialog>
     <el-dialog v-model="readerDialog" class="reader-dialog" width="min(900px, 96vw)" top="3vh" destroy-on-close>
       <template #header><div class="reader-header"><span class="file-type large">{{ selectedKnowledge?.fileType?.toUpperCase() }}</span><div><h3>{{ selectedKnowledge?.title }}</h3><p>资源 #{{ selectedKnowledge?.id }} · {{ reviewingKnowledge ? auditLabel(selectedKnowledge?.auditStatus || '') : `浏览 ${selectedKnowledge?.views || 0} 次` }}</p></div></div></template>
-      <iframe v-if="selectedKnowledge?.fileType === 'pdf' && pdfPreviewUrl" class="knowledge-pdf-preview" :src="pdfPreviewUrl" title="PDF 预览" />
+      <PdfViewer v-if="selectedKnowledge?.fileType === 'pdf' && pdfPreviewUrl" :src="pdfPreviewUrl" />
       <article v-else class="knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in knowledgeContentBlocks" :key="`${block.type}-${index}`">
           <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
           <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
+          <div v-else-if="block.type === 'table'" class="knowledge-table-wrap"><table><tbody><tr v-for="(row, rowIndex) in knowledgeTableRows(block.text)" :key="rowIndex"><td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td></tr></tbody></table></div>
           <p v-else :class="{ 'knowledge-list-item': block.type === 'list' }">{{ block.text }}</p>
         </template>
         <el-empty v-if="!knowledgeContentBlocks.length" description="暂无可预览正文" />
@@ -328,12 +329,13 @@ import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, Collec
 import { deleteData, downloadData, getAuthToken, getData, getStoredValue, postData, postFormData, putData, removeStoredValue, resolveApiUrl, setAuthToken, setStoredValue, toUserMessage } from './api/client';
 import CommunityDetailPage from './components/CommunityDetailPage.vue';
 import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
+import PdfViewer from './components/PdfViewer.vue';
 
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; contentBlocks?:KnowledgeContentBlock[]; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean; createdAt?:string };
 type KnowledgeLikeResult = { fileId:number; liked:boolean; likes:number };
 type KnowledgeCollectResult = { userId:number; fileId:number; collected:boolean };
 type KnowledgeRanking = { rank:number; userId:number; uploads:number; views:number; downloads:number; violations:number; score:number };
-type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
+type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'|'table'; text?:string; url?:string };
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean; comments?:Comment[]; createdAt?:string };
 type PostLikeResult = { postId:number; liked:boolean; created:boolean; likes:number };
 type PostCollectResult = { postId:number; collected:boolean };
@@ -491,7 +493,7 @@ const analyticsTrendMax = computed(() => Math.max(1,...analyticsTrend.value.flat
 
 function parseKnowledgeContent(file?:KnowledgeFile):KnowledgeContentBlock[] {
   if (file?.contentBlocks?.length) {
-    return file.contentBlocks.filter(block => ['image','heading','list','paragraph'].includes(block.type));
+    return file.contentBlocks.filter(block => ['image','heading','list','paragraph','table'].includes(block.type));
   }
   const content = file?.content || '';
   if (!content.trim()) return [];
@@ -511,6 +513,7 @@ function parseKnowledgeContent(file?:KnowledgeFile):KnowledgeContentBlock[] {
   return blocks;
 }
 const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => parseKnowledgeContent(selectedKnowledge.value));
+function knowledgeTableRows(text?:string){return(text||'').split('\n').filter(Boolean).map(row=>row.split('\t'));}
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
 function categoryCount(categoryId:number){ return knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length; }
@@ -621,7 +624,7 @@ async function loadDetailRoute(){
       detailKnowledge.value=detail;detailKnowledgeBlocks.value=parseKnowledgeContent(detail);detailPost.value=undefined;detailComments.value=[];
       await loadUserSummaries([detail.userId]);
       if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}
-      if(detail.fileType?.toLowerCase()==='pdf'&&detail.fileUrl){const blob=await downloadData(`/knowledge/file/${detail.id}`);detailPdfPreviewUrl.value=URL.createObjectURL(blob);}
+      if(detail.fileType?.toLowerCase()==='pdf'&&detail.fileUrl){const blob=await downloadData(`/knowledge/file/${detail.id}/preview`);detailPdfPreviewUrl.value=URL.createObjectURL(blob);}
       await recordBehavior('VIEW','KNOWLEDGE',detail.id);
     }else{
       const [post,commentsResult]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<Comment[]>(`/comment/list?postId=${route.id}`)]);
@@ -664,7 +667,7 @@ async function uploadKnowledge(){
   }catch(error){notifyError(error);}finally{busy.value=false;}
 }
 function openKnowledge(file:KnowledgeFile){navigateToDetail('knowledge',file.id);}
-async function prepareKnowledgePreview(file:KnowledgeFile){if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}if(file.fileType?.toLowerCase()==='pdf'&&file.fileUrl){const blob=await downloadData(`/knowledge/file/${file.id}`);pdfPreviewUrl.value=URL.createObjectURL(blob);}}
+async function prepareKnowledgePreview(file:KnowledgeFile){if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}if(file.fileType?.toLowerCase()==='pdf'&&file.fileUrl){const blob=await downloadData(`/knowledge/file/${file.id}/preview`);pdfPreviewUrl.value=URL.createObjectURL(blob);}}
 async function viewKnowledge(file:KnowledgeFile){ reviewingKnowledge.value=false;const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:file.id});selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);readerDialog.value=true;await recordBehavior('VIEW','KNOWLEDGE',file.id);await loadKnowledge(); }
 async function reviewKnowledge(file:KnowledgeFile){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);selectedKnowledge.value=detail;await prepareKnowledgePreview(detail);reviewingKnowledge.value=true;readerDialog.value=true;}
 function reviewPost(post:Post){selectedReviewPost.value=post;postReviewDialog.value=true;}

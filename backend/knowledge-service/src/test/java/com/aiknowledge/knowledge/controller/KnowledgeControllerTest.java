@@ -178,6 +178,32 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void previewUsesInlineContentWithoutIncreasingDownloadCount() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (var document = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            document.addPage(new org.apache.pdfbox.pdmodel.PDPage());
+            document.save(output);
+        }
+        var multipart = new org.springframework.mock.web.MockMultipartFile(
+                "file", "preview.pdf", "application/pdf", output.toByteArray());
+        var uploaded = controller.uploadFile(userAuth, multipart, "Preview only", null);
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var preview = controller.filePreview(userAuth, fileId);
+        assertEquals(200, preview.getStatusCode().value());
+        assertEquals("application/pdf", preview.getHeaders().getContentType().toString());
+        assertTrue(preview.getHeaders().getFirst("Content-Disposition").startsWith("inline"));
+        assertEquals(0, ((Number) controller.adminPreview(
+                "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin"), fileId
+        ).data().get("downloads")).intValue());
+
+        controller.fileContent(userAuth, fileId);
+        assertEquals(1, ((Number) controller.adminPreview(
+                "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin"), fileId
+        ).data().get("downloads")).intValue());
+    }
+
+    @Test
     void docxEmbeddedImageIsRenderedInDocumentOrderAndDeletedWithKnowledge() throws Exception {
         byte[] png = Base64.getDecoder().decode(
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
@@ -216,6 +242,34 @@ class KnowledgeControllerTest {
         var deleted = controller.deleteFile(userAuth, Map.of("fileId", fileId));
         assertEquals(0, deleted.code());
         assertEquals(1, ((Number) deleted.data().get("mediaRemoved")).intValue());
+    }
+
+    @Test
+    void docxTablesArePreservedAsPreviewBlocks() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (var document = new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            var table = document.createTable(2, 2);
+            table.getRow(0).getCell(0).setText("项目");
+            table.getRow(0).getCell(1).setText("状态");
+            table.getRow(1).getCell(0).setText("移动端阅读");
+            table.getRow(1).getCell(1).setText("完成");
+            document.write(output);
+        }
+        var multipart = new org.springframework.mock.web.MockMultipartFile(
+                "file", "table.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", output.toByteArray());
+        var uploaded = controller.uploadFile(userAuth, multipart, "表格知识", null);
+        Long fileId = ((Number) uploaded.data().get("id")).longValue();
+
+        var preview = controller.adminPreview(
+                "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin"), fileId);
+        @SuppressWarnings("unchecked")
+        List<LocalFullTextSearchService.ContentBlock> blocks =
+                (List<LocalFullTextSearchService.ContentBlock>) preview.data().get("contentBlocks");
+
+        assertEquals(1, blocks.size());
+        assertEquals("table", blocks.get(0).getType());
+        assertTrue(blocks.get(0).getText().contains("移动端阅读\t完成"));
     }
 
     @Test

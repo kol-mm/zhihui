@@ -188,6 +188,18 @@ public class KnowledgeController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @PathVariable Long fileId
     ) {
+        return storedFileResponse(authorization, fileId, true);
+    }
+
+    @GetMapping("/file/{fileId}/preview")
+    public ResponseEntity<byte[]> filePreview(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @PathVariable Long fileId
+    ) {
+        return storedFileResponse(authorization, fileId, false);
+    }
+
+    private ResponseEntity<byte[]> storedFileResponse(String authorization, Long fileId, boolean download) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED);
         KnowledgeFileEntity file = knowledgeStore.find(fileId)
@@ -195,14 +207,26 @@ public class KnowledgeController {
         boolean allowed = "APPROVED".equals(file.getAuditStatus()) || userId.equals(file.getUserId()) || LocalAuth.isAdmin(authorization);
         if (!allowed) throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
         LocalFileStorageService.StoredContent stored = fileStorage.read(file.getFileUrl());
-        knowledgeStore.download(userId, fileId);
+        if (download) knowledgeStore.download(userId, fileId);
         String downloadName = file.getTitle() + (file.getFileType() == null || file.getFileType().isBlank() ? "" : "." + file.getFileType());
-        ContentDisposition disposition = ContentDisposition.attachment().filename(downloadName, StandardCharsets.UTF_8).build();
+        ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
+                .filename(downloadName, StandardCharsets.UTF_8).build();
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CACHE_CONTROL, download ? "no-store" : "private, max-age=300")
+                .header("X-Content-Type-Options", "nosniff")
+                .contentType(download ? MediaType.APPLICATION_OCTET_STREAM : previewMediaType(file.getFileType()))
                 .contentLength(stored.bytes().length)
                 .body(stored.bytes());
+    }
+
+    private MediaType previewMediaType(String fileType) {
+        return switch (fileType == null ? "" : fileType.toLowerCase()) {
+            case "pdf" -> MediaType.APPLICATION_PDF;
+            case "txt", "md", "markdown", "csv" -> new MediaType("text", "plain", StandardCharsets.UTF_8);
+            case "docx" -> MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+            default -> MediaType.APPLICATION_OCTET_STREAM;
+        };
     }
 
     @GetMapping("/health")

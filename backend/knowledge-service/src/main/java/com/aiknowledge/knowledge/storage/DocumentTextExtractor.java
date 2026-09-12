@@ -62,13 +62,39 @@ public class DocumentTextExtractor {
             if (element instanceof XWPFParagraph paragraph) {
                 parseParagraph(paragraph, blocks, context);
             } else if (element instanceof XWPFTable table) {
-                for (XWPFTableRow row : table.getRows()) {
-                    for (XWPFTableCell cell : row.getTableCells()) {
-                        parseBodyElements(cell.getBodyElements(), blocks, context);
+                parseTable(table, blocks, context);
+            }
+        }
+    }
+
+    private void parseTable(XWPFTable table, List<ParsedBlock> blocks, ParseContext context) {
+        List<String> rows = new ArrayList<>();
+        List<ParsedBlock> tableImages = new ArrayList<>();
+        for (XWPFTableRow row : table.getRows()) {
+            List<String> cells = row.getTableCells().stream()
+                    .map(cell -> cell.getText().replace('\t', ' ').replaceAll("[\\r\\n]+", " ").trim())
+                    .toList();
+            if (cells.stream().anyMatch(value -> !value.isBlank())) rows.add(String.join("\t", cells));
+            for (XWPFTableCell cell : row.getTableCells()) {
+                for (IBodyElement bodyElement : cell.getBodyElements()) {
+                    if (bodyElement instanceof XWPFParagraph paragraph) {
+                        for (XWPFRun run : paragraph.getRuns()) {
+                            for (XWPFPicture picture : run.getEmbeddedPictures()) {
+                                XWPFPictureData pictureData = picture.getPictureData();
+                                if (pictureData == null) continue;
+                                byte[] bytes = pictureData.getData();
+                                context.registerImage(bytes.length);
+                                String description = picture.getDescription();
+                                if (description == null || description.isBlank()) description = pictureData.getFileName();
+                                tableImages.add(ParsedBlock.image(description, bytes));
+                            }
+                        }
                     }
                 }
             }
         }
+        if (!rows.isEmpty()) blocks.add(ParsedBlock.text("table", String.join("\n", rows)));
+        blocks.addAll(tableImages);
     }
 
     private void parseParagraph(XWPFParagraph paragraph, List<ParsedBlock> blocks, ParseContext context) {

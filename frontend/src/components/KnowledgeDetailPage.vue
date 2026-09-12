@@ -17,11 +17,12 @@
           <el-button type="danger" text :icon="Warning" @click="emit('report', file)">举报</el-button>
         </div>
       </header>
-      <iframe v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="knowledge-pdf-preview detail-pdf" :src="pdfPreviewUrl" title="PDF 预览" />
+      <PdfViewer v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="detail-pdf" :src="pdfPreviewUrl" />
       <div v-else class="detail-knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in blocks" :key="`${block.type}-${index}`">
           <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
           <h2 v-else-if="block.type === 'heading'">{{ block.text }}</h2>
+          <div v-else-if="block.type === 'table'" class="knowledge-table-wrap"><table><tbody><tr v-for="(row, rowIndex) in tableRows(block.text)" :key="rowIndex"><td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td></tr></tbody></table></div>
           <p v-else :class="{ 'knowledge-list-item': block.type === 'list' }">{{ block.text }}</p>
         </template>
         <el-empty v-if="!blocks.length" description="暂无可预览正文" />
@@ -33,9 +34,10 @@
 <script setup lang="ts">
 import { ArrowLeft, CollectionTag, Delete, Download, Share, Star, Warning } from '@element-plus/icons-vue';
 import { resolveApiUrl } from '../api/client';
+import PdfViewer from './PdfViewer.vue';
 
 type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean };
-type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'; text?:string; url?:string };
+type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'|'table'; text?:string; url?:string };
 type UserSummary = { id:number; username:string; nickname:string; avatarUrl?:string };
 
 defineProps<{ file:KnowledgeFile; author:UserSummary; blocks:ContentBlock[]; pdfPreviewUrl:string; currentUserId:number; following:boolean }>();
@@ -49,4 +51,5 @@ const emit = defineEmits<{
   delete:[file:KnowledgeFile];
   follow:[userId:number];
 }>();
+function tableRows(text?:string){return(text||'').split('\n').filter(Boolean).map(row=>row.split('\t'));}
 </script>
