@@ -113,13 +113,13 @@
           :following="isFollowing(detailPost.userId)"
           :comments-enabled="platformConfig.comments_enabled"
           :max-comment-length="platformConfig.max_comment_length"
+          :on-submit-comment="createDetailComment"
           @back="leaveDetail"
           @like="likeDetailPost"
           @collect="collectPost"
           @edit="editPost"
           @delete-post="deletePost"
           @delete-comment="deleteComment"
-          @comment="createDetailComment"
           @follow="toggleFollowAuthor"
         />
         <div v-else-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
@@ -202,7 +202,7 @@
 
           <section v-else-if="activeView === 'messages'" class="message-page" :class="{ 'has-session': messageForm.sessionId }">
             <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ sessions.length }} 个联系人</p></div><div><el-button :icon="Delete" circle text type="danger" title="清空全部聊天记录" @click="clearAllMessages" /><el-button :icon="Plus" circle title="发起私信" @click="newConversation" /></div></div><div class="session-list"><button v-for="session in sessions" :key="session.id" :class="{ active: messageForm.sessionId === session.id }" @click="openSession(session)"><div class="mini-avatar">{{ sessionPartner(session).nickname.slice(0,1).toUpperCase() }}</div><span><strong>{{ sessionPartner(session).nickname }}</strong><small>{{ session.lastMessage || `@${sessionPartner(session).username}` }}</small></span></button></div><el-empty v-if="!sessions.length" description="暂无私信会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" description="选择联系人并发送第一条消息" /></div><div class="message-compose"><el-input v-model="messageForm.content" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId" placeholder="输入消息" @keyup.enter="sendMessage" /><el-button type="primary" :icon="Promotion" :disabled="!messageForm.sessionId" @click="sendMessage">发送</el-button></div></section>
+            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" circle text title="刷新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim()" @click="sendMessage">发送</el-button></div></section>
           </section>
 
           <section v-else-if="activeView === 'ai'" class="ai-page" :class="{ 'history-open': mobileAiHistoryOpen }">
@@ -332,7 +332,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, markRaw, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue';
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
@@ -402,6 +402,7 @@ const selectedPostImages = ref<UploadRawFile[]>([]);
 const postImageFiles = ref<UploadUserFile[]>([]);
 const auditingPostId = ref(0);
 const messageForm = ref({ sessionId:0, senderId:currentUserId.value, content:'' });
+const messageSending = ref(false); const messageListRef = ref<HTMLElement>();
 const conversationTargetId = ref(0);
 const feedbackForm = ref({ userId:currentUserId.value, type:'BUG', content:'' });
 const ticketReply = ref({ ticketId:0, status:'PROCESSING', reply:'' });
@@ -623,7 +624,7 @@ async function registerAccount(){
 }
 
 async function login(){if(busy.value)return;if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);invalidateCaptcha(true);captchaRefreshPending=false;await loadCaptcha({silent:true});}finally{busy.value=false;}}
-function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
+function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); messageDrafts.clear(); messageForm.value={sessionId:0,senderId:0,content:''}; messages.value=[]; sessions.value=[]; notifications.value=[]; authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;setStoredValue('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value={...platformConfig.value,...await getData<typeof platformConfig.value>('/ai/config/public')};}catch{/* 配置服务短暂不可用时继续使用安全默认值。 */}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
@@ -739,24 +740,86 @@ async function collectPost(post:Post){const result=await postData<PostCollectRes
 async function removeCollectedPost(post:Post){if(post.collected)await collectPost(post);}
 async function deletePost(post:Post){await ElMessageBox.confirm(`删除帖子“${post.title}”后评论和互动记录都无法恢复，确认继续？`,'删除帖子',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/post',{postId:post.id});feedPosts.value=feedPosts.value.filter(item=>item.id!==post.id);collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);if(detailPost.value?.id===post.id)leaveDetail();ElMessage.success('帖子已删除');}
 async function quickComment(post:Post){const {value}=await ElMessageBox.prompt('输入公开评论内容','快捷评论',{inputPattern:/\S+/,inputErrorMessage:'评论不能为空',confirmButtonText:'发布'});if(value.length>platformConfig.value.max_comment_length){ElMessage.warning(`评论不能超过 ${platformConfig.value.max_comment_length} 个字符`);return;}await postData('/square/quick-comment',{postId:post.id,content:value});await recordBehavior('COMMENT','POST',post.id);ElMessage.success('评论已发布');}
-async function createDetailComment(payload:{content:string;parentId:number}){if(!detailPost.value)return;await postData('/comment/create',{postId:detailPost.value.id,content:payload.content,parentId:payload.parentId});await recordBehavior('COMMENT','POST',detailPost.value.id);detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);await loadUserSummaries(detailComments.value.map(comment=>comment.userId));ElMessage.success(payload.parentId?'回复已发布':'评论已发布');}
+async function createDetailComment(payload:{content:string;parentId:number}){
+  if(!detailPost.value)return;
+  const postId=detailPost.value.id;
+  await postData('/comment/create',{postId,content:payload.content,parentId:payload.parentId});
+  ElMessage.success(payload.parentId?'回复已发布':'评论已发布');
+  void recordBehavior('COMMENT','POST',postId).catch(()=>{});
+  try {
+    const comments=await getData<Comment[]>(`/comment/list?postId=${postId}`);
+    if(detailPost.value?.id===postId){detailComments.value=comments;await loadUserSummaries(comments.map(comment=>comment.userId));}
+  } catch {
+    ElMessage.warning('评论已发布，列表暂时未刷新');
+  }
+}
 async function deleteComment(comment:Comment){await ElMessageBox.confirm('删除评论后，其下的回复也会一并删除，确认继续？','删除评论',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/comment',{commentId:comment.id});if(detailPost.value)detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已删除');}
 
-async function loadMessageData(){const [chatSessions,notices]=await Promise.all([getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`)]);sessions.value=chatSessions;notifications.value=notices;await loadUserSummaries(chatSessions.map(session=>session.otherUserId));if(sessions.value.length&&!sessions.value.some(session=>session.id===messageForm.value.sessionId))messageForm.value.sessionId=sessions.value[0].id;if(!sessions.value.length)messageForm.value.sessionId=0;await loadMessages();}
+const messageDrafts = new Map<number,string>();
+function selectMessageSession(sessionId:number){
+  const previous=messageForm.value.sessionId;
+  if(previous===sessionId)return;
+  if(previous)messageDrafts.set(previous,messageForm.value.content);
+  messageForm.value.sessionId=sessionId;
+  messageForm.value.content=sessionId?(messageDrafts.get(sessionId)||''):'';
+  messages.value=[];
+}
+async function loadMessageData(){
+  const [chatSessions,notices]=await Promise.all([
+    getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),
+    getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`).catch(()=>[] as Notice[])
+  ]);
+  sessions.value=chatSessions;
+  notifications.value=notices;
+  await loadUserSummaries(chatSessions.map(session=>session.otherUserId));
+  if(!chatSessions.some(session=>session.id===messageForm.value.sessionId)){
+    const firstSessionId=window.matchMedia('(max-width: 820px)').matches?0:(chatSessions[0]?.id||0);
+    selectMessageSession(firstSessionId);
+  }
+  await loadMessages();
+}
 async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
 async function markNotificationRead(notice:Notice){await postData('/notification/read',{notificationId:notice.id});notice.read=true;ElMessage.success('已标记为已读');}
 async function markAllNotificationsRead(){await postData('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));ElMessage.success('全部通知已读');}
 function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}
-async function openSession(session:ChatSession){messageForm.value.sessionId=session.id;await loadMessages();}
-function closeMobileConversation(){messageForm.value.sessionId=0;messages.value=[];}
-async function loadMessages(){messages.value=messageForm.value.sessionId?await getData(`/message/list?sessionId=${messageForm.value.sessionId}&userId=${currentUserId.value}`):[];}
+async function openSession(session:ChatSession){selectMessageSession(session.id);await refreshMessages();}
+function closeMobileConversation(){selectMessageSession(0);}
+function scrollMessagesToBottom(){const list=messageListRef.value;if(list)list.scrollTop=list.scrollHeight;}
+async function loadMessages(){
+  const sessionId=messageForm.value.sessionId;
+  if(!sessionId){messages.value=[];return;}
+  const loaded=await getData<ChatMessage[]>(`/message/list?sessionId=${sessionId}&userId=${currentUserId.value}`);
+  if(messageForm.value.sessionId!==sessionId)return;
+  messages.value=loaded;
+  await nextTick();
+  scrollMessagesToBottom();
+}
+async function refreshMessages(){try{await loadMessages();}catch(error){notifyError(error);}}
 async function newConversation(){conversationUsername.value='';conversationTargetUser.value=undefined;conversationTargetId.value=0;conversationDialog.value=true;}
 async function resolveConversationUser(){const query=conversationUsername.value.trim();if(!query){conversationTargetUser.value=undefined;conversationTargetId.value=0;return;}try{const user=await getData<UserRecord>(`/user/info?username=${encodeURIComponent(query)}`);if(user.id===currentUserId.value)throw new Error('不能给自己发起私信');conversationTargetUser.value=user;conversationTargetId.value=user.id;}catch(error){conversationTargetUser.value=undefined;conversationTargetId.value=0;notifyError(error);}}
-async function createConversation(){if(!conversationTargetId.value)return;busy.value=true;try{const session=await postData<ChatSession>('/message/session',{targetUserId:conversationTargetId.value});await loadMessageData();messageForm.value.sessionId=session.id;await loadMessages();conversationDialog.value=false;activeView.value='messages';ElMessage.success('私信会话已创建');}catch(error){notifyError(error);}finally{busy.value=false;}}
-async function sendMessage(){if(!messageForm.value.content.trim())return;await postData('/message/send',messageForm.value);messageForm.value.content='';await loadMessageData();}
+async function createConversation(){if(!conversationTargetId.value)return;busy.value=true;try{const session=await postData<ChatSession>('/message/session',{targetUserId:conversationTargetId.value});await loadMessageData();selectMessageSession(session.id);await loadMessages();conversationDialog.value=false;activeView.value='messages';ElMessage.success('私信会话已创建');}catch(error){notifyError(error);}finally{busy.value=false;}}
+async function sendMessage(){
+  const sessionId=messageForm.value.sessionId;
+  const content=messageForm.value.content.trim();
+  if(!sessionId||!content||messageSending.value)return;
+  messageSending.value=true;
+  try{
+    const saved=await postData<ChatMessage>('/message/send',{sessionId,content});
+    messageDrafts.set(sessionId,'');
+    if(messageForm.value.sessionId===sessionId){
+      messageForm.value.content='';
+      messages.value=[...messages.value,saved];
+      await nextTick();
+      scrollMessagesToBottom();
+    }
+    const session=sessions.value.find(item=>item.id===sessionId);
+    if(session){session.lastMessage=content;session.updatedAt=saved.createdAt;}
+  }catch(error){notifyError(error);}
+  finally{messageSending.value=false;}
+}
 async function clearCurrentSession(){await ElMessageBox.confirm('确认清空当前会话记录？','清空会话',{type:'warning'});await postData('/message/clear',{sessionId:messageForm.value.sessionId,userId:currentUserId.value});await loadMessageData();}
 async function clearAllMessages(){await ElMessageBox.confirm('确认清空全部私信会话中的聊天记录？会话联系人仍会保留。','清空全部聊天记录',{type:'warning',confirmButtonText:'确认清空'});await postData('/message/clear-all',{});await loadMessageData();ElMessage.success('全部聊天记录已清空');}
-async function deleteCurrentSession(){if(!messageForm.value.sessionId)return;await ElMessageBox.confirm('删除会话后，该会话及其中消息都无法恢复。','删除会话',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/message/session',{sessionId:messageForm.value.sessionId});messageForm.value.sessionId=0;await loadMessageData();ElMessage.success('会话已删除');}
+async function deleteCurrentSession(){if(!messageForm.value.sessionId)return;await ElMessageBox.confirm('删除会话后，该会话及其中消息都无法恢复。','删除会话',{type:'warning',confirmButtonText:'确认删除'});const sessionId=messageForm.value.sessionId;await deleteData('/message/session',{sessionId});selectMessageSession(0);messageDrafts.delete(sessionId);await loadMessageData();ElMessage.success('会话已删除');}
 async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});await loadMessageData();ElMessage.success('消息已删除');}
 
 async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string;references:AiReference[]}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;const references=[...new Map((result.references||[]).map(reference=>[reference.file_id,reference])).values()].slice(0,3);aiMessages.value.push({role:'assistant',content:result.answer,references});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}

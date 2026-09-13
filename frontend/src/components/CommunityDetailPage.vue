@@ -38,8 +38,8 @@
         </div>
         <div v-if="commentsEnabled" ref="commentComposer" class="detail-comment-compose">
           <div v-if="replyTarget" class="detail-reply-context"><span>回复 {{ userFor(replyTarget.userId).nickname }}：{{ replyTarget.content }}</span><el-button text size="small" @click="cancelReply">取消回复</el-button></div>
-          <el-input ref="commentInput" v-model="commentText" type="textarea" :rows="3" resize="none" :maxlength="maxCommentLength" show-word-limit :placeholder="replyTarget ? `回复 ${userFor(replyTarget.userId).nickname}` : '发表公开评论'" />
-          <el-button type="primary" :icon="Promotion" :disabled="!commentText.trim()" @click="submitComment">{{ replyTarget ? '发表回复' : '发表评论' }}</el-button>
+          <el-input ref="commentInput" v-model="commentText" type="textarea" :rows="3" resize="none" :maxlength="maxCommentLength" show-word-limit :disabled="commentSubmitting" :placeholder="replyTarget ? `回复 ${userFor(replyTarget.userId).nickname}` : '发表公开评论'" />
+          <el-button type="primary" :icon="Promotion" :loading="commentSubmitting" :disabled="!commentText.trim()" @click="submitComment">{{ replyTarget ? '发表回复' : '发表评论' }}</el-button>
         </div>
       </aside>
     </div>
@@ -49,14 +49,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
 import { ArrowLeft, ChatDotRound, CollectionTag, Delete, Edit, Promotion, Star } from '@element-plus/icons-vue';
-import { resolveApiUrl } from '../api/client';
+import { ElMessage } from 'element-plus/es/components/message/index.mjs';
+import { resolveApiUrl, toUserMessage } from '../api/client';
 
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean };
 type Comment = { id:number; userId:number; parentId?:number; content:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string };
 
-const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean; commentsEnabled:boolean; maxCommentLength:number }>();
-const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; 'delete-post':[post:Post]; 'delete-comment':[comment:Comment]; comment:[payload:{content:string;parentId:number}]; follow:[userId:number] }>();
+const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean; commentsEnabled:boolean; maxCommentLength:number; onSubmitComment:(payload:{content:string;parentId:number})=>Promise<void> }>();
+const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; 'delete-post':[post:Post]; 'delete-comment':[comment:Comment]; follow:[userId:number] }>();
+const commentSubmitting = ref(false);
 const commentText = ref('');
 const replyTarget = ref<Comment>();
 const commentInput = ref<{ focus:()=>void }>();
@@ -108,12 +110,19 @@ function cancelReply() {
   replyTarget.value = undefined;
 }
 
-function submitComment() {
+async function submitComment() {
   const content = commentText.value.trim();
-  if (!content) return;
-  emit('comment', { content, parentId:replyTarget.value?.id || 0 });
-  commentText.value = '';
-  replyTarget.value = undefined;
+  if (!content || commentSubmitting.value) return;
+  commentSubmitting.value = true;
+  try {
+    await props.onSubmitComment({ content, parentId:replyTarget.value?.id || 0 });
+    commentText.value = '';
+    replyTarget.value = undefined;
+  } catch (error) {
+    ElMessage.error(toUserMessage(error, '评论发布失败，请重试'));
+  } finally {
+    commentSubmitting.value = false;
+  }
 }
 
 function postStatusLabel(status:string):string {
