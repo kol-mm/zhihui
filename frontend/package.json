@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --config vite.config.mjs --host 127.0.0.1 --port 5173",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build.ps1",
+    "build:linux": "vue-tsc -b && vite build --config vite.config.mjs",
     "preview": "vite preview --config vite.config.mjs --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
