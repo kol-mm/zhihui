@@ -117,6 +117,31 @@ class MessageControllerTest {
     }
 
     @Test
+    void messagesCanBePagedBackwardAndPolledForward() {
+        Long sessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 7L)).data().get("id")).longValue();
+        for (int i = 1; i <= 5; i++) {
+            controller.send(userAuth, Map.of("sessionId", sessionId, "content", "m" + i));
+        }
+
+        List<Map<String, Object>> latest = controller.page(userAuth, sessionId, null, null, 2).data();
+        assertEquals(List.of("m4", "m5"), latest.stream().map(item -> item.get("content")).toList());
+
+        Long oldestLoaded = ((Number) latest.get(0).get("id")).longValue();
+        List<Map<String, Object>> older = controller.page(userAuth, sessionId, oldestLoaded, null, 2).data();
+        assertEquals(List.of("m2", "m3"), older.stream().map(item -> item.get("content")).toList());
+
+        Long newestLoaded = ((Number) latest.get(1).get("id")).longValue();
+        assertTrue(controller.page(userAuth, sessionId, null, newestLoaded, 30).data().isEmpty());
+        controller.send(userAuth, Map.of("sessionId", sessionId, "content", "m6"));
+        List<Map<String, Object>> newer = controller.page(userAuth, sessionId, null, newestLoaded, 30).data();
+        assertEquals(List.of("m6"), newer.stream().map(item -> item.get("content")).toList());
+
+        assertEquals(500, controller.page(userAuth, sessionId, oldestLoaded, newestLoaded, 30).code());
+        String outsiderAuth = "Bearer " + LocalAuth.issueToken("outsider", 3L, "USER");
+        assertEquals(500, controller.page(outsiderAuth, sessionId, null, null, 30).code());
+    }
+
+    @Test
     void recipientCannotDeleteTheSendersMessage() {
         var session = controller.createSession(userAuth, Map.of("targetUserId", 7L));
         Long sessionId = ((Number) session.data().get("id")).longValue();
@@ -141,6 +166,26 @@ class MessageControllerTest {
                 relations
         );
         assertEquals(500, restricted.createSession(userAuth, Map.of("targetUserId", 7L)).code());
+    }
+
+    @Test
+    void adminSessionListCountsMessagesPerSession() {
+        Long busy = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 41L)).data().get("id")).longValue();
+        Long quiet = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 42L)).data().get("id")).longValue();
+        for (int i = 0; i < 3; i++) controller.send(userAuth, Map.of("sessionId", busy, "content", "busy " + i));
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+
+        Map<Long, Object> counts = new java.util.HashMap<>();
+        Map<Long, Object> lastMessages = new java.util.HashMap<>();
+        controller.adminSessions(adminAuth).data().forEach(view -> {
+            counts.put(((Number) view.get("id")).longValue(), view.get("messageCount"));
+            lastMessages.put(((Number) view.get("id")).longValue(), view.get("lastMessage"));
+        });
+        assertEquals(3L, counts.get(busy));
+        assertEquals(0L, counts.get(quiet));
+        assertEquals("busy 2", lastMessages.get(busy));
+        assertEquals("", lastMessages.get(quiet));
+        assertEquals(500, controller.adminSessions(userAuth).code());
     }
 
     @Test

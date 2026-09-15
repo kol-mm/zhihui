@@ -10,12 +10,16 @@ import com.aiknowledge.message.mapper.ChatSessionMapper;
 import com.aiknowledge.message.mapper.FaqMapper;
 import com.aiknowledge.message.mapper.FeedbackTicketMapper;
 import com.aiknowledge.message.mapper.NotificationMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -85,6 +89,10 @@ public class MySqlMessageStore implements MessageStore {
     @Override
     public ChatMessageEntity sendMessage(ChatMessageEntity message) {
         messageMapper.insert(message);
+        if (message.getCreatedAt() == null) {
+            ChatMessageEntity stored = messageMapper.selectById(message.getId());
+            if (stored != null) message.setCreatedAt(stored.getCreatedAt());
+        }
         ChatSessionEntity session = sessionMapper.selectById(message.getSessionId());
         if (session != null) {
             session.setUpdatedAt(message.getCreatedAt() == null ? LocalDateTime.now() : message.getCreatedAt());
@@ -98,6 +106,53 @@ public class MySqlMessageStore implements MessageStore {
         return messageMapper.selectList(Wrappers.<ChatMessageEntity>lambdaQuery()
                 .eq(sessionId != null, ChatMessageEntity::getSessionId, sessionId)
                 .orderByAsc(ChatMessageEntity::getCreatedAt));
+    }
+
+    @Override
+    public List<ChatMessageEntity> pageMessages(Long sessionId, Long beforeId, Long afterId, int limit) {
+        var query = Wrappers.<ChatMessageEntity>lambdaQuery()
+                .eq(ChatMessageEntity::getSessionId, sessionId);
+        if (beforeId != null) query.lt(ChatMessageEntity::getId, beforeId);
+        if (afterId != null) query.gt(ChatMessageEntity::getId, afterId);
+        if (afterId != null) query.orderByAsc(ChatMessageEntity::getId);
+        else query.orderByDesc(ChatMessageEntity::getId);
+        List<ChatMessageEntity> page = new java.util.ArrayList<>(messageMapper.selectList(query.last("LIMIT " + limit)));
+        if (afterId == null) java.util.Collections.reverse(page);
+        return page;
+    }
+
+    @Override
+    public Map<Long, ChatMessageEntity> latestMessages(Collection<Long> sessionIds) {
+        Map<Long, ChatMessageEntity> latest = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) return latest;
+        List<Long> messageIds = messageMapper.selectObjs(new QueryWrapper<ChatMessageEntity>()
+                        .select("MAX(id)")
+                        .in("session_id", sessionIds)
+                        .groupBy("session_id"))
+                .stream().filter(java.util.Objects::nonNull).map(value -> ((Number) value).longValue()).toList();
+        if (messageIds.isEmpty()) return latest;
+        messageMapper.selectBatchIds(messageIds).forEach(message -> latest.put(message.getSessionId(), message));
+        return latest;
+    }
+
+    @Override
+    public Map<Long, Long> countMessages(Collection<Long> sessionIds) {
+        Map<Long, Long> counts = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) return counts;
+        messageMapper.selectMaps(new QueryWrapper<ChatMessageEntity>()
+                        .select("session_id AS session_id", "COUNT(*) AS message_count")
+                        .in("session_id", sessionIds)
+                        .groupBy("session_id"))
+                .forEach(row -> counts.put(((Number) row.get("session_id")).longValue(), ((Number) row.get("message_count")).longValue()));
+        return counts;
+    }
+
+    @Override
+    public Optional<ChatMessageEntity> latestMessage(Long sessionId) {
+        return Optional.ofNullable(messageMapper.selectOne(Wrappers.<ChatMessageEntity>lambdaQuery()
+                .eq(ChatMessageEntity::getSessionId, sessionId)
+                .orderByDesc(ChatMessageEntity::getId)
+                .last("LIMIT 1")));
     }
 
     @Override
@@ -129,7 +184,7 @@ public class MySqlMessageStore implements MessageStore {
     public List<NotificationEntity> listNotifications(Long userId) {
         return notificationMapper.selectList(Wrappers.<NotificationEntity>lambdaQuery()
                 .eq(userId != null, NotificationEntity::getUserId, userId)
-                .orderByDesc(NotificationEntity::getCreatedAt));
+                .orderByDesc(NotificationEntity::getId));
     }
 
     @Override

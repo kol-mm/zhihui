@@ -20,21 +20,24 @@
         </footer>
       </article>
       <aside class="detail-discussion">
-        <div class="discussion-head"><div><p>公开讨论</p><h2>{{ comments.length }} 条评论</h2></div><ChatDotRound /></div>
-        <div class="detail-comment-list">
+        <div class="discussion-head"><div><p>公开讨论</p><h2>{{ commentTotal }} 条评论</h2></div><ChatDotRound /></div>
+        <div class="detail-comment-list" @scroll.passive="handleCommentScroll">
           <section v-for="comment in rootComments" :key="comment.id" class="detail-comment-thread">
-            <article class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === comment.id }">
-              <div class="mini-avatar"><img v-if="userFor(comment.userId).avatarUrl" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
-              <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(comment.userId).nickname }}</strong></div><div><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(comment)">回复</el-button><el-button v-if="comment.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', comment)">删除</el-button></div></div><p>{{ comment.content }}</p></div>
+            <article class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === comment.id, 'is-placeholder': comment.placeholder }">
+              <div class="mini-avatar"><img v-if="!comment.placeholder && userFor(comment.userId).avatarUrl" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ comment.placeholder ? '·' : userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
+              <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ commentAuthorName(comment) }}</strong></div><div v-if="!comment.placeholder"><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(comment)">回复</el-button><el-button v-if="comment.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', comment)">删除</el-button></div></div><p>{{ comment.placeholder ? '该评论已被隐藏' : comment.content }}</p></div>
             </article>
             <div v-if="threadReplies(comment.id).length" class="detail-comment-replies">
-              <article v-for="reply in threadReplies(comment.id)" :key="reply.id" class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === reply.id }">
-                <div class="mini-avatar"><img v-if="userFor(reply.userId).avatarUrl" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
-                <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ userFor(reply.userId).nickname }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><div><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(reply)">回复</el-button><el-button v-if="reply.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', reply)">删除</el-button></div></div><p>{{ reply.content }}</p></div>
+              <article v-for="reply in threadReplies(comment.id)" :key="reply.id" class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === reply.id, 'is-placeholder': reply.placeholder }">
+                <div class="mini-avatar"><img v-if="!reply.placeholder && userFor(reply.userId).avatarUrl" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ reply.placeholder ? '·' : userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
+                <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ commentAuthorName(reply) }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><div v-if="!reply.placeholder"><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(reply)">回复</el-button><el-button v-if="reply.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', reply)">删除</el-button></div></div><p>{{ reply.placeholder ? '该回复已被隐藏' : reply.content }}</p></div>
               </article>
             </div>
           </section>
-          <el-empty v-if="!comments.length" description="暂无评论，发表第一条讨论" />
+          <div v-if="commentsHasMore || commentsLoading || commentsError" class="detail-comment-more">
+            <el-button text type="primary" size="small" :loading="commentsLoading" @click="emit('load-more-comments')">{{ commentsLoading ? '正在加载评论' : commentsError ? `${commentsError}，点击重试` : '加载更多评论' }}</el-button>
+          </div>
+          <el-empty v-else-if="!comments.length" description="暂无评论，发表第一条讨论" />
         </div>
         <div v-if="commentsEnabled" ref="commentComposer" class="detail-comment-compose">
           <div v-if="replyTarget" class="detail-reply-context"><span>回复 {{ userFor(replyTarget.userId).nickname }}：{{ replyTarget.content }}</span><el-button text size="small" @click="cancelReply">取消回复</el-button></div>
@@ -53,11 +56,11 @@ import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { resolveApiUrl, toUserMessage } from '../api/client';
 
 type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean };
-type Comment = { id:number; userId:number; parentId?:number; content:string };
+type Comment = { id:number; userId:number; parentId?:number; rootId?:number; content:string; placeholder?:boolean };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string };
 
-const props = defineProps<{ post:Post; comments:Comment[]; users:UserRecord[]; currentUserId:number; following:boolean; commentsEnabled:boolean; maxCommentLength:number; onSubmitComment:(payload:{content:string;parentId:number})=>Promise<void> }>();
-const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; 'delete-post':[post:Post]; 'delete-comment':[comment:Comment]; follow:[userId:number] }>();
+const props = defineProps<{ post:Post; comments:Comment[]; commentTotal:number; commentsHasMore:boolean; commentsLoading:boolean; commentsError:string; users:UserRecord[]; currentUserId:number; following:boolean; commentsEnabled:boolean; maxCommentLength:number; onSubmitComment:(payload:{content:string;parentId:number})=>Promise<void> }>();
+const emit = defineEmits<{ back:[]; like:[post:Post]; collect:[post:Post]; edit:[post:Post]; 'delete-post':[post:Post]; 'delete-comment':[comment:Comment]; 'load-more-comments':[]; follow:[userId:number] }>();
 const commentSubmitting = ref(false);
 const commentText = ref('');
 const replyTarget = ref<Comment>();
@@ -66,6 +69,16 @@ const commentComposer = ref<HTMLElement>();
 const author = computed(() => userFor(props.post.userId));
 const commentById = computed(() => new Map(props.comments.map(comment => [comment.id, comment])));
 const rootComments = computed(() => props.comments.filter(comment => !comment.parentId || !commentById.value.has(comment.parentId)));
+const repliesByParent = computed(() => {
+  const replies = new Map<number, Comment[]>();
+  for (const comment of props.comments) {
+    if (!comment.parentId) continue;
+    const siblings = replies.get(comment.parentId);
+    if (siblings) siblings.push(comment);
+    else replies.set(comment.parentId, [comment]);
+  }
+  return replies;
+});
 
 function userFor(userId:number):UserRecord {
   return props.users.find(user => user.id === userId) || { id:userId, username:'unknown', nickname:'已注销用户' };
@@ -77,7 +90,17 @@ function parentFor(comment:Comment):Comment|undefined {
 
 function parentAuthorName(comment:Comment):string {
   const parent = parentFor(comment);
-  return parent ? userFor(parent.userId).nickname : '';
+  return parent ? commentAuthorName(parent) : '';
+}
+
+function commentAuthorName(comment:Comment):string {
+  return comment.placeholder ? '已隐藏的评论' : userFor(comment.userId).nickname;
+}
+
+function handleCommentScroll(event:Event) {
+  const list = event.currentTarget as HTMLElement;
+  if (!props.commentsHasMore || props.commentsLoading || props.commentsError) return;
+  if (list.scrollHeight - list.scrollTop - list.clientHeight < 120) emit('load-more-comments');
 }
 
 function threadReplies(rootId:number):Comment[] {
@@ -88,11 +111,9 @@ function threadReplies(rootId:number):Comment[] {
     const parentId = pending.shift()!;
     if (visited.has(parentId)) continue;
     visited.add(parentId);
-    for (const comment of props.comments) {
-      if (comment.parentId === parentId) {
-        replies.push(comment);
-        pending.push(comment.id);
-      }
+    for (const comment of repliesByParent.value.get(parentId) || []) {
+      replies.push(comment);
+      pending.push(comment.id);
     }
   }
   return replies;

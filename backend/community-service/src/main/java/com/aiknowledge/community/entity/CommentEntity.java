@@ -13,6 +13,7 @@ public class CommentEntity {
     private Long postId;
     private Long userId;
     private Long parentId;
+    private Long rootId;
     private String content;
     private String source;
     private String status;
@@ -26,6 +27,8 @@ public class CommentEntity {
     public void setUserId(Long userId) { this.userId = userId; }
     public Long getParentId() { return parentId; }
     public void setParentId(Long parentId) { this.parentId = parentId; }
+    public Long getRootId() { return rootId; }
+    public void setRootId(Long rootId) { this.rootId = rootId; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public String getSource() { return source; }

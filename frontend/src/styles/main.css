@@ -166,6 +166,12 @@ body.pdf-reader-fullscreen { overflow:hidden; }
 .message-compose .el-textarea { min-width:0; flex:1; }
 .message-compose .el-button { flex:none; min-height:40px; }
 .message-bubble p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.feed-load-more { display:flex; justify-content:center; padding:4px 0 10px; }
+.conversation-panel { position:relative; }
+.message-history-state { display:flex; justify-content:center; min-height:28px; margin:-8px 0 10px; }
+.message-history-state small { align-self:center; color:#9aa39f; font-size:12px; }
+.message-new-indicator { position:absolute; left:50%; bottom:86px; z-index:2; transform:translateX(-50%); padding:6px 14px; color:#fff; font-size:12px; background:#176b4d; border:0; border-radius:999px; box-shadow:0 6px 18px rgba(23,107,77,.28); cursor:pointer; }
+.message-new-indicator:focus-visible { outline:2px solid #0f4a35; outline-offset:2px; }
 .conversation-panel { grid-template-rows:68px minmax(0,1fr) auto; }
 .message-compose .el-textarea__inner { font-size:16px; }
 .detail-comment-compose .el-textarea__inner { font-size:16px; }
@@ -268,6 +274,10 @@ body.pdf-reader-fullscreen { overflow:hidden; }
 .detail-comment-list p { margin-top:5px; color:#526159; line-height:1.65; }
 .detail-comment-replies { margin:0 0 8px 22px; padding-left:12px; background:#f7f9f8; border-left:2px solid #dbe8e2; border-radius:0 6px 6px 0; }
 .detail-comment-replies article+article { border-top:1px solid #e7ece9; }
+.detail-comment-more { display:flex; justify-content:center; padding:10px 0 6px; }
+.detail-comment-item.is-placeholder .mini-avatar { color:#7d8983; background:#e3e9e6; }
+.detail-comment-item.is-placeholder strong,.detail-comment-list .detail-comment-item.is-placeholder p { color:#94a09a; }
+.detail-comment-list .detail-comment-item.is-placeholder p { font-style:italic; }
 .detail-comment-compose { position:relative; z-index:1; display:grid; gap:9px; padding:14px 18px 16px; background:#fff; border-top:1px solid #e5eae7; }
 .detail-comment-compose .el-button { justify-self:end; }
 .detail-reply-context { display:flex; align-items:center; justify-content:space-between; gap:10px; color:#526159; font-size:12px; }

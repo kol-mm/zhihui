@@ -11,8 +11,13 @@ import org.springframework.stereotype.Repository;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -55,6 +60,7 @@ public class InMemoryCommunityStore implements CommunityStore {
             collectIds.set(maxId(collects, 2000L));
             imageIds.set(maxRecordId(images.stream().map(PostImageRecord::id).toList(), 3000L));
             likeIds.set(maxRecordId(likes.stream().map(PostLikeRecord::id).toList(), 4000L));
+            assignMissingRootIds();
             return;
         }
 
@@ -111,6 +117,7 @@ public class InMemoryCommunityStore implements CommunityStore {
     public CommentEntity saveComment(CommentEntity comment) {
         comment.setId(commentIds.incrementAndGet());
         comment.setCreatedAt(LocalDateTime.now());
+        if (comment.getRootId() == null) comment.setRootId(rootIdFor(comment));
         comments.add(comment);
         persist();
         return comment;
@@ -122,6 +129,61 @@ public class InMemoryCommunityStore implements CommunityStore {
                 .filter(comment -> postId == null || comment.getPostId().equals(postId))
                 .sorted(Comparator.comparing(CommentEntity::getCreatedAt))
                 .toList();
+    }
+
+    @Override
+    public Optional<CommentEntity> findComment(Long commentId) {
+        return comments.stream().filter(comment -> comment.getId().equals(commentId)).findFirst();
+    }
+
+    @Override
+    public List<CommentEntity> listRootComments(Long postId, Long afterId, int limit) {
+        return comments.stream()
+                .filter(comment -> comment.getPostId().equals(postId) && comment.getId().equals(comment.getRootId()))
+                .filter(comment -> afterId == null || comment.getId() > afterId)
+                .sorted(Comparator.comparing(CommentEntity::getId))
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    @Override
+    public List<CommentEntity> listThreadComments(Long postId, Collection<Long> rootIds) {
+        return comments.stream()
+                .filter(comment -> comment.getPostId().equals(postId) && rootIds.contains(comment.getRootId()))
+                .sorted(Comparator.comparing(CommentEntity::getId))
+                .toList();
+    }
+
+    @Override
+    public long countComments(Long postId, boolean visibleOnly) {
+        return comments.stream()
+                .filter(comment -> comment.getPostId().equals(postId))
+                .filter(comment -> !visibleOnly || "VISIBLE".equals(comment.getStatus()))
+                .count();
+    }
+
+    private Long rootIdFor(CommentEntity comment) {
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        CommentEntity current = comment;
+        while (current.getParentId() != null && current.getParentId() > 0 && visited.add(current.getId())) {
+            Long parentId = current.getParentId();
+            CommentEntity parent = comments.stream().filter(item -> item.getId().equals(parentId)).findFirst().orElse(null);
+            if (parent == null) break;
+            if (parent.getRootId() != null) return parent.getRootId();
+            current = parent;
+        }
+        return current.getId();
+    }
+
+    private void assignMissingRootIds() {
+        boolean changed = false;
+        for (CommentEntity comment : comments) {
+            if (comment.getRootId() == null) {
+                comment.setRootId(rootIdFor(comment));
+                changed = true;
+            }
+        }
+        if (changed) persist();
     }
 
     @Override
@@ -175,6 +237,58 @@ public class InMemoryCommunityStore implements CommunityStore {
         collects.add(collect);
         persist();
         return true;
+    }
+
+    @Override
+    public List<PostEntity> pagePosts(PostPageQuery query) {
+        return posts.stream()
+                .filter(post -> isVisible(post, query.viewerUserId(), query.includeAll()))
+                .filter(post -> query.authorUserId() == null || post.getUserId().equals(query.authorUserId()))
+                .filter(post -> query.authorUserIds() == null || query.authorUserIds().isEmpty() || query.authorUserIds().contains(post.getUserId()))
+                .filter(post -> query.beforeId() == null || query.beforeId() <= 0 || post.getId() < query.beforeId())
+                .sorted(Comparator.comparing(PostEntity::getId).reversed())
+                .limit(Math.max(1, query.limit()))
+                .toList();
+    }
+
+    @Override
+    public long countVisiblePosts(Long viewerUserId, boolean includeAll) {
+        return posts.stream().filter(post -> isVisible(post, viewerUserId, includeAll)).count();
+    }
+
+    private static boolean isVisible(PostEntity post, Long viewerUserId, boolean includeAll) {
+        return includeAll || "PUBLISHED".equals(post.getStatus()) || (viewerUserId != null && viewerUserId.equals(post.getUserId()));
+    }
+
+    @Override
+    public Map<Long, List<String>> listPostImages(Collection<Long> postIds) {
+        Map<Long, List<String>> result = new LinkedHashMap<>();
+        images.stream().filter(item -> postIds.contains(item.postId()))
+                .forEach(item -> result.computeIfAbsent(item.postId(), key -> new ArrayList<>()).add(item.imageUrl()));
+        return result;
+    }
+
+    @Override
+    public Map<Long, Long> countPostLikes(Collection<Long> postIds) {
+        Map<Long, Long> result = new LinkedHashMap<>();
+        likes.stream().filter(item -> postIds.contains(item.postId())).forEach(item -> result.merge(item.postId(), 1L, Long::sum));
+        return result;
+    }
+
+    @Override
+    public Set<Long> likedPostIds(Long userId, Collection<Long> postIds) {
+        Set<Long> result = new HashSet<>();
+        if (userId == null) return result;
+        likes.stream().filter(item -> item.userId().equals(userId) && postIds.contains(item.postId())).forEach(item -> result.add(item.postId()));
+        return result;
+    }
+
+    @Override
+    public Set<Long> collectedPostIds(Long userId, Collection<Long> postIds) {
+        Set<Long> result = new HashSet<>();
+        if (userId == null) return result;
+        collects.stream().filter(item -> item.getUserId().equals(userId) && postIds.contains(item.getPostId())).forEach(item -> result.add(item.getPostId()));
+        return result;
     }
 
     @Override

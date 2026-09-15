@@ -6,7 +6,9 @@ import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public interface MessageStore {
@@ -21,6 +23,38 @@ public interface MessageStore {
     ChatMessageEntity sendMessage(ChatMessageEntity message);
 
     List<ChatMessageEntity> listMessages(Long sessionId);
+
+    default List<ChatMessageEntity> pageMessages(Long sessionId, Long beforeId, Long afterId, int limit) {
+        List<ChatMessageEntity> ordered = listMessages(sessionId).stream()
+                .filter(message -> beforeId == null || message.getId() < beforeId)
+                .filter(message -> afterId == null || message.getId() > afterId)
+                .sorted(java.util.Comparator.comparing(ChatMessageEntity::getId))
+                .toList();
+        if (afterId != null) return ordered.stream().limit(limit).toList();
+        return ordered.subList(Math.max(0, ordered.size() - limit), ordered.size());
+    }
+
+    default Optional<ChatMessageEntity> latestMessage(Long sessionId) {
+        return listMessages(sessionId).stream()
+                .max(java.util.Comparator.comparing(ChatMessageEntity::getId));
+    }
+
+    /** Message count per session; sessions without messages are absent from the result. */
+    default Map<Long, Long> countMessages(Collection<Long> sessionIds) {
+        Map<Long, Long> counts = new java.util.HashMap<>();
+        for (Long sessionId : sessionIds) {
+            int size = listMessages(sessionId).size();
+            if (size > 0) counts.put(sessionId, (long) size);
+        }
+        return counts;
+    }
+
+    /** Latest message per session; sessions without messages are absent from the result. */
+    default Map<Long, ChatMessageEntity> latestMessages(Collection<Long> sessionIds) {
+        Map<Long, ChatMessageEntity> latest = new java.util.HashMap<>();
+        for (Long sessionId : sessionIds) latestMessage(sessionId).ifPresent(message -> latest.put(sessionId, message));
+        return latest;
+    }
 
     int clearMessages(Long sessionId);
 

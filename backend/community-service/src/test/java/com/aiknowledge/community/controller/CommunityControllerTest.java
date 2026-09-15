@@ -294,7 +294,141 @@ class CommunityControllerTest {
 
         ApiResponse<Map<String, Object>> detail = controller.detail(userAuth, 1L);
         assertEquals(0, detail.code());
-        assertFalse(((List<?>) detail.data().get("comments")).isEmpty());
+        assertFalse(detail.data().containsKey("comments"));
+        assertEquals((long) initialCommentCount + 2, ((Number) detail.data().get("commentCount")).longValue());
+    }
+
+    @Test
+    void commentThreadsPageByRootAndKeepNestedRepliesAttached() {
+        Long postId = publishedPost("Threaded discussion");
+        Long first = idOf(controller.createComment(userAuth, Map.of("postId", postId, "content", "root 1")));
+        Long reply = idOf(controller.createComment(secondUserAuth, Map.of("postId", postId, "parentId", first, "content", "reply 1")));
+        Long second = idOf(controller.createComment(secondUserAuth, Map.of("postId", postId, "content", "root 2")));
+        Long nested = idOf(controller.createComment(userAuth, Map.of("postId", postId, "parentId", reply, "content", "nested reply")));
+        Long third = idOf(controller.createComment(userAuth, Map.of("postId", postId, "content", "root 3")));
+
+        Map<String, Object> page = controller.commentThreads(userAuth, postId, null, 2).data();
+        assertEquals(List.of(first, reply, nested, second), ids(page));
+        assertEquals(first, ((Number) threadItems(page).get(2).get("rootId")).longValue());
+        assertEquals(true, page.get("hasMore"));
+        assertEquals(second, ((Number) page.get("nextCursor")).longValue());
+        assertEquals(5L, ((Number) page.get("total")).longValue());
+
+        Map<String, Object> next = controller.commentThreads(userAuth, postId, second, 2).data();
+        assertEquals(List.of(third), ids(next));
+        assertEquals(false, next.get("hasMore"));
+        assertEquals(null, next.get("nextCursor"));
+    }
+
+    @Test
+    void hiddenCommentsBecomePlaceholdersOnlyWhileTheyHaveVisibleReplies() {
+        Long postId = publishedPost("Moderated discussion");
+        Long hiddenRoot = idOf(controller.createComment(userAuth, Map.of("postId", postId, "content", "secret root")));
+        Long visibleReply = idOf(controller.createComment(secondUserAuth, Map.of("postId", postId, "parentId", hiddenRoot, "content", "still visible")));
+        Long hiddenAlone = idOf(controller.createComment(userAuth, Map.of("postId", postId, "content", "hidden alone")));
+        Long visibleRoot = idOf(controller.createComment(userAuth, Map.of("postId", postId, "content", "visible root")));
+        controller.updateCommentStatus(adminAuth, Map.of("commentId", hiddenRoot, "status", "HIDDEN"));
+        controller.updateCommentStatus(adminAuth, Map.of("commentId", hiddenAlone, "status", "HIDDEN"));
+
+        Map<String, Object> page = controller.commentThreads(userAuth, postId, null, 2).data();
+        assertEquals(List.of(hiddenRoot, visibleReply, visibleRoot), ids(page));
+        Map<String, Object> placeholder = threadItems(page).get(0);
+        assertEquals(true, placeholder.get("placeholder"));
+        assertEquals("", placeholder.get("content"));
+        assertEquals(0L, placeholder.get("userId"));
+        assertEquals(false, page.get("hasMore"));
+        assertEquals(2L, ((Number) page.get("total")).longValue());
+
+        assertEquals(500, controller.createComment(secondUserAuth, Map.of("postId", postId, "parentId", hiddenRoot, "content", "reply to hidden")).code());
+        Map<String, Object> adminPage = controller.commentThreads(adminAuth, postId, null, 10).data();
+        assertEquals(List.of(hiddenRoot, visibleReply, hiddenAlone, visibleRoot), ids(adminPage));
+        assertEquals("secret root", threadItems(adminPage).get(0).get("content"));
+    }
+
+    @Test
+    void feedPagesNewestFirstWithoutDuplicatesAndRespectsVisibility() {
+        String authorAuth = "Bearer " + LocalAuth.issueToken("feed-author", 777L, "USER");
+        List<Long> published = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            Long postId = idOf(controller.createPost(authorAuth, Map.of("title", "Feed " + i + " " + System.nanoTime(), "content", "body")));
+            controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+            published.add(postId);
+        }
+        Long pending = idOf(controller.createPost(authorAuth, Map.of("title", "Pending " + System.nanoTime(), "content", "body")));
+
+        Map<String, Object> first = controller.feedPage(userAuth, "author", 777L, "", null, 2).data();
+        assertEquals(List.of(published.get(2), published.get(1)), ids(first));
+        assertEquals(true, first.get("hasMore"));
+        Map<String, Object> second = controller.feedPage(userAuth, "author", 777L, "", ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(published.get(0)), ids(second));
+        assertEquals(false, second.get("hasMore"));
+
+        assertEquals(List.of(pending, published.get(2), published.get(1), published.get(0)),
+                ids(controller.feedPage(authorAuth, "author", 777L, "", null, 10).data()));
+        assertEquals(List.of(published.get(2), published.get(1), published.get(0)),
+                ids(controller.feedPage(userAuth, "following", null, "777, 778", null, 10).data()));
+        assertTrue(ids(controller.feedPage(userAuth, "following", null, "", null, 10).data()).isEmpty());
+        assertEquals(500, controller.feedPage(userAuth, "following", null, "777,abc", null, 10).code());
+        assertEquals(500, controller.feedPage(userAuth, "everything", null, "", null, 10).code());
+
+        List<Long> seen = new java.util.ArrayList<>();
+        Long cursor = null;
+        do {
+            Map<String, Object> page = controller.feedPage(userAuth, "all", null, "", cursor, 2).data();
+            seen.addAll(ids(page));
+            cursor = page.get("nextCursor") == null ? null : ((Number) page.get("nextCursor")).longValue();
+        } while (cursor != null);
+        assertEquals(seen.size(), new java.util.HashSet<>(seen).size());
+        assertEquals(seen.stream().sorted(java.util.Comparator.reverseOrder()).toList(), seen);
+        assertTrue(seen.containsAll(published));
+        assertFalse(seen.contains(pending));
+        long userVisible = ((Number) controller.feedCount(userAuth).data().get("total")).longValue();
+        assertEquals((long) seen.size(), userVisible);
+        assertTrue(((Number) controller.feedCount(adminAuth).data().get("total")).longValue() > userVisible);
+        assertTrue(ids(controller.feedPage(adminAuth, "author", 777L, "", null, 10).data()).contains(pending));
+    }
+
+    @Test
+    void feedViewsCarryBatchedLikeAndCollectState() {
+        Long postId = publishedPost("Batched interactions");
+        String readerAuth = "Bearer " + LocalAuth.issueToken("batch-reader", 888L, "USER");
+        controller.likePost(readerAuth, Map.of("postId", postId));
+        controller.squareCollect(readerAuth, Map.of("postId", postId));
+
+        Map<String, Object> mine = threadItems(controller.feedPage(readerAuth, "author", 1L, "", null, 50).data()).stream()
+                .filter(item -> postId.equals(((Number) item.get("id")).longValue())).findFirst().orElseThrow();
+        assertEquals(1L, mine.get("likes"));
+        assertEquals(true, mine.get("liked"));
+        assertEquals(true, mine.get("collected"));
+        assertEquals(List.of(), mine.get("imageUrls"));
+
+        Map<String, Object> other = controller.feed(secondUserAuth, 1L).data().stream()
+                .filter(item -> postId.equals(((Number) item.get("id")).longValue())).findFirst().orElseThrow();
+        assertEquals(1L, other.get("likes"));
+        assertEquals(false, other.get("liked"));
+        assertEquals(false, other.get("collected"));
+        assertTrue(controller.squareCollections(readerAuth, null).data().stream()
+                .anyMatch(item -> postId.equals(((Number) item.get("id")).longValue()) && Boolean.TRUE.equals(item.get("collected"))));
+    }
+
+    private Long publishedPost(String title) {
+        Long postId = idOf(controller.createPost(userAuth, Map.of("title", title + " " + System.nanoTime(), "content", "body")));
+        controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+        return postId;
+    }
+
+    private static Long idOf(ApiResponse<Map<String, Object>> response) {
+        assertEquals(0, response.code(), response.message());
+        return ((Number) response.data().get("id")).longValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> threadItems(Map<String, Object> page) {
+        return (List<Map<String, Object>>) page.get("items");
+    }
+
+    private static List<Long> ids(Map<String, Object> page) {
+        return threadItems(page).stream().map(item -> ((Number) item.get("id")).longValue()).toList();
     }
 
     @Test

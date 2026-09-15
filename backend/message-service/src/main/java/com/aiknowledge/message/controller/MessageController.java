@@ -127,6 +127,26 @@ public class MessageController {
         return ApiResponse.ok(messageStore.listMessages(sessionId).stream().map(this::toMessageView).toList());
     }
 
+    @GetMapping("/message/page")
+    public ApiResponse<List<Map<String, Object>>> page(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "sessionId") Long sessionId,
+            @RequestParam(name = "beforeId", required = false) Long beforeId,
+            @RequestParam(name = "afterId", required = false) Long afterId,
+            @RequestParam(name = "limit", defaultValue = "30") int limit
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (beforeId != null && afterId != null) return ApiResponse.fail("choose beforeId or afterId");
+        if (beforeId != null && beforeId <= 0 || afterId != null && afterId < 0) return ApiResponse.fail("invalid message cursor");
+        ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+        if (session == null) return ApiResponse.ok(List.of());
+        if (!isParticipant(session, userId)) return ApiResponse.fail("user is not a participant of this session");
+        int pageSize = Math.max(1, Math.min(100, limit));
+        return ApiResponse.ok(messageStore.pageMessages(sessionId, beforeId, afterId, pageSize)
+                .stream().map(this::toMessageView).toList());
+    }
+
     @PostMapping("/message/clear")
     public ApiResponse<Map<String, Object>> clear(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -209,8 +229,7 @@ public class MessageController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
-        return ApiResponse.ok(messageStore.listSessions(userId).stream()
-                .map(session -> toSessionView(session, userId)).toList());
+        return ApiResponse.ok(toSessionViews(messageStore.listSessions(userId), session -> userId));
     }
 
     @GetMapping("/event/status")
@@ -341,7 +360,7 @@ public class MessageController {
         return ApiResponse.ok(Map.of(
                 "module", "消息互动管理",
                 "notifications", messageStore.listNotifications(userId).size(),
-                "sessionOneMessages", messageStore.listMessages(1L).size(),
+                "sessionOneMessages", messageStore.countMessages(List.of(1L)).getOrDefault(1L, 0L),
                 "storedEvents", eventBus.list(200).size(),
                 "capabilities", List.of("私信监管", "互动提醒", "聊天归档", "消息清理")
         ));
@@ -352,11 +371,11 @@ public class MessageController {
             @RequestHeader(name = "Authorization", required = false) String authorization
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
-        return ApiResponse.ok(messageStore.listSessions(null).stream().map(session -> {
-            Map<String, Object> view = toSessionView(session, session.getUserAId());
-            view.put("messageCount", messageStore.listMessages(session.getId()).size());
-            return view;
-        }).toList());
+        List<ChatSessionEntity> sessions = messageStore.listSessions(null);
+        Map<Long, Long> counts = messageStore.countMessages(sessions.stream().map(ChatSessionEntity::getId).toList());
+        List<Map<String, Object>> views = toSessionViews(sessions, ChatSessionEntity::getUserAId);
+        views.forEach(view -> view.put("messageCount", counts.getOrDefault((Long) view.get("id"), 0L)));
+        return ApiResponse.ok(views);
     }
 
     @GetMapping("/message/admin/list")
@@ -515,9 +534,17 @@ public class MessageController {
         return view;
     }
 
+    /** Session views for a list, loading every session's latest message in one batch. */
+    private List<Map<String, Object>> toSessionViews(List<ChatSessionEntity> sessions, java.util.function.Function<ChatSessionEntity, Long> viewer) {
+        Map<Long, ChatMessageEntity> latest = messageStore.latestMessages(sessions.stream().map(ChatSessionEntity::getId).toList());
+        return sessions.stream().map(session -> toSessionView(session, viewer.apply(session), latest.get(session.getId()))).toList();
+    }
+
     private Map<String, Object> toSessionView(ChatSessionEntity session, Long userId) {
-        List<ChatMessageEntity> messages = messageStore.listMessages(session.getId());
-        ChatMessageEntity latest = messages.isEmpty() ? null : messages.get(messages.size() - 1);
+        return toSessionView(session, userId, messageStore.latestMessage(session.getId()).orElse(null));
+    }
+
+    private Map<String, Object> toSessionView(ChatSessionEntity session, Long userId, ChatMessageEntity latest) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", session.getId());
         view.put("userAId", session.getUserAId());

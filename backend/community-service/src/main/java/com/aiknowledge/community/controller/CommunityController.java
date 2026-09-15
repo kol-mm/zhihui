@@ -28,13 +28,19 @@ import org.springframework.http.ResponseEntity;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 public class CommunityController {
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int COMMENT_THREAD_PAGE_MAX = 50;
+    private static final int COMMENT_THREAD_FILL_ROUNDS = 5;
+    private static final int FEED_PAGE_MAX = 50;
     private final CommunityStore communityStore;
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
@@ -165,7 +171,7 @@ public class CommunityController {
         if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         Long userId = LocalAuth.userId(authorization);
         Map<String, Object> detail = toPostView(post, userId);
-        detail.put("comments", visibleComments(id, authorization));
+        detail.put("commentCount", communityStore.countComments(id, !LocalAuth.isAdmin(authorization)));
         return ApiResponse.ok(detail);
     }
 
@@ -186,10 +192,13 @@ public class CommunityController {
         if (!interactionAllowed(userId, post.get().getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         CommentEntity parent = null;
         if (comment.getParentId() != null && comment.getParentId() > 0) {
-            parent = communityStore.listComments(comment.getPostId()).stream()
-                    .filter(item -> comment.getParentId().equals(item.getId()))
-                    .findFirst().orElse(null);
+            parent = communityStore.findComment(comment.getParentId())
+                    .filter(item -> comment.getPostId().equals(item.getPostId()))
+                    .orElse(null);
             if (parent == null) return ApiResponse.fail("parent comment does not belong to this post");
+            if (!"VISIBLE".equals(parent.getStatus()) && !LocalAuth.isAdmin(authorization)) {
+                return ApiResponse.fail("parent comment is not available");
+            }
             if (!interactionAllowed(userId, parent.getUserId())) return ApiResponse.fail("interaction with this user is blocked");
         }
         comment.setContent(comment.getContent().trim());
@@ -214,6 +223,52 @@ public class CommunityController {
             if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
         }
         return ApiResponse.ok(visibleComments(postId, authorization));
+    }
+
+    /**
+     * Pages a post's discussion by thread: each page holds up to {@code limit} root comments together with
+     * every reply beneath them, so replies never arrive detached from their thread.
+     */
+    @GetMapping("/comment/threads")
+    public ApiResponse<Map<String, Object>> commentThreads(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "postId") Long postId,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "10") int limit
+    ) {
+        boolean admin = LocalAuth.isAdmin(authorization);
+        if (!communityEnabled() || (!commentsEnabled() && !admin)) return ApiResponse.ok(commentThreadPage(List.of(), null, false, 0));
+        if (cursor != null && cursor < 0) return ApiResponse.fail("invalid comment cursor");
+        PostEntity post = communityStore.findPost(postId).orElse(null);
+        if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        int pageSize = Math.max(1, Math.min(COMMENT_THREAD_PAGE_MAX, limit));
+        List<Map<String, Object>> items = new ArrayList<>();
+        Long lastRootId = cursor;
+        boolean hasMore = false;
+        int threads = 0;
+        // Hidden roots without visible replies are skipped, so keep reading until the page is full.
+        for (int round = 0; round < COMMENT_THREAD_FILL_ROUNDS && threads < pageSize; round++) {
+            int wanted = pageSize - threads;
+            List<CommentEntity> roots = communityStore.listRootComments(postId, lastRootId, wanted + 1);
+            hasMore = roots.size() > wanted;
+            if (hasMore) roots = roots.subList(0, wanted);
+            if (roots.isEmpty()) break;
+            Map<Long, List<CommentEntity>> byRoot = new LinkedHashMap<>();
+            roots.forEach(root -> byRoot.put(root.getId(), new ArrayList<>()));
+            communityStore.listThreadComments(postId, byRoot.keySet())
+                    .forEach(comment -> byRoot.get(comment.getRootId()).add(comment));
+            for (List<CommentEntity> thread : byRoot.values()) {
+                List<Map<String, Object>> views = threadViews(thread, admin);
+                if (!views.isEmpty()) {
+                    items.addAll(views);
+                    threads++;
+                }
+            }
+            lastRootId = roots.get(roots.size() - 1).getId();
+            if (!hasMore) break;
+        }
+        return ApiResponse.ok(commentThreadPage(items, hasMore ? lastRootId : null, hasMore,
+                communityStore.countComments(postId, !admin)));
     }
 
     @PostMapping("/post/draft")
@@ -300,9 +355,60 @@ public class CommunityController {
     ) {
         if (!communityEnabled()) return ApiResponse.ok(List.of());
         Long userId = LocalAuth.userId(authorization);
-        return ApiResponse.ok(communityStore.feed(authorUserId).stream()
-                .filter(post -> canViewPost(post, authorization))
-                .map(post -> toPostView(post, userId)).toList());
+        return ApiResponse.ok(toPostViews(communityStore.feed(authorUserId).stream()
+                .filter(post -> canViewPost(post, authorization)).toList(), userId));
+    }
+
+    /**
+     * Newest-first, cursor-paged feed for the client forum and following square. {@code scope} is
+     * {@code all}, {@code author} (requires authorUserId) or {@code following} (uses followedUserIds).
+     */
+    @GetMapping("/square/feed/page")
+    public ApiResponse<Map<String, Object>> feedPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "scope", defaultValue = "all") String scope,
+            @RequestParam(name = "authorUserId", required = false) Long authorUserId,
+            @RequestParam(name = "followedUserIds", defaultValue = "") String followedUserIds,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "10") int limit
+    ) {
+        if (!communityEnabled()) return ApiResponse.ok(feedPageView(List.of(), null, false));
+        if (cursor != null && cursor < 0) return ApiResponse.fail("invalid feed cursor");
+        Long author = null;
+        List<Long> authors = null;
+        switch (scope) {
+            case "all" -> { }
+            case "author" -> {
+                if (authorUserId == null || authorUserId <= 0) return ApiResponse.fail("authorUserId is required");
+                author = authorUserId;
+            }
+            case "following" -> {
+                authors = parseUserIds(followedUserIds);
+                if (authors == null) return ApiResponse.fail("invalid followedUserIds");
+                if (authors.isEmpty()) return ApiResponse.ok(feedPageView(List.of(), null, false));
+            }
+            default -> {
+                return ApiResponse.fail("invalid feed scope");
+            }
+        }
+        Long viewerUserId = LocalAuth.userId(authorization);
+        int pageSize = Math.max(1, Math.min(FEED_PAGE_MAX, limit));
+        List<PostEntity> posts = communityStore.pagePosts(new CommunityStore.PostPageQuery(
+                author, authors, viewerUserId, LocalAuth.isAdmin(authorization), cursor, pageSize + 1));
+        boolean hasMore = posts.size() > pageSize;
+        if (hasMore) posts = posts.subList(0, pageSize);
+        Long nextCursor = hasMore ? posts.get(posts.size() - 1).getId() : null;
+        return ApiResponse.ok(feedPageView(toPostViews(posts.stream().filter(post -> canViewPost(post, authorization)).toList(), viewerUserId), nextCursor, hasMore));
+    }
+
+    @GetMapping("/square/feed/count")
+    public ApiResponse<Map<String, Object>> feedCount(
+            @RequestHeader(name = "Authorization", required = false) String authorization
+    ) {
+        long total = communityEnabled()
+                ? communityStore.countVisiblePosts(LocalAuth.userId(authorization), LocalAuth.isAdmin(authorization))
+                : 0;
+        return ApiResponse.ok(Map.of("total", total));
     }
 
     @GetMapping("/square/following-feed")
@@ -314,9 +420,8 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         List<Long> ids = java.util.Arrays.stream(followedUserIds.split(","))
                 .map(String::trim).filter(value -> !value.isBlank()).map(Long::valueOf).toList();
-        return ApiResponse.ok(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
-                .filter(post -> canViewPost(post, authorization))
-                .map(post -> toPostView(post, userId)).toList());
+        return ApiResponse.ok(toPostViews(communityStore.feed(null).stream().filter(post -> ids.contains(post.getUserId()))
+                .filter(post -> canViewPost(post, authorization)).toList(), userId));
     }
 
     @PostMapping("/square/quick-comment")
@@ -367,8 +472,7 @@ public class CommunityController {
         Long userId = requestedUserId == null ? viewerUserId : requestedUserId;
         if (!LocalAuth.canAccessUser(authorization, userId)) return ApiResponse.fail("access to this user is denied");
         if (!communityEnabled()) return ApiResponse.ok(List.of());
-        return ApiResponse.ok(communityStore.listCollectedPosts(userId).stream()
-                .map(post -> toPostView(post, userId)).toList());
+        return ApiResponse.ok(toPostViews(communityStore.listCollectedPosts(userId), userId));
     }
 
     @PostMapping("/post/like")
@@ -467,8 +571,7 @@ public class CommunityController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         Long commentId = number(request.get("commentId"), 0L);
-        CommentEntity comment = communityStore.listComments(null).stream()
-                .filter(item -> commentId.equals(item.getId())).findFirst().orElse(null);
+        CommentEntity comment = communityStore.findComment(commentId).orElse(null);
         if (comment == null) return ApiResponse.fail("comment not found");
         if (!LocalAuth.isAdmin(authorization) && !userId.equals(comment.getUserId())) {
             return ApiResponse.fail("access to this comment is denied");
@@ -553,12 +656,63 @@ public class CommunityController {
         return view;
     }
 
+    /** Builds post views for a list with a fixed number of queries instead of four per post. */
+    private List<Map<String, Object>> toPostViews(List<PostEntity> posts, Long viewerUserId) {
+        if (posts.isEmpty()) return List.of();
+        List<Long> postIds = posts.stream().map(PostEntity::getId).toList();
+        Map<Long, List<String>> images = communityStore.listPostImages(postIds);
+        Map<Long, Long> likes = communityStore.countPostLikes(postIds);
+        Set<Long> liked = communityStore.likedPostIds(viewerUserId, postIds);
+        Set<Long> collected = communityStore.collectedPostIds(viewerUserId, postIds);
+        return posts.stream().map(post -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("id", post.getId());
+            view.put("userId", post.getUserId());
+            view.put("title", post.getTitle());
+            view.put("content", post.getContent());
+            view.put("status", post.getStatus());
+            view.put("imageUrls", images.getOrDefault(post.getId(), List.of()));
+            view.put("likes", likes.getOrDefault(post.getId(), 0L));
+            view.put("liked", liked.contains(post.getId()));
+            view.put("collected", collected.contains(post.getId()));
+            view.put("createdAt", post.getCreatedAt());
+            view.put("updatedAt", post.getUpdatedAt());
+            return view;
+        }).toList();
+    }
+
+    private Map<String, Object> feedPageView(List<Map<String, Object>> items, Long nextCursor, boolean hasMore) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("items", items);
+        page.put("nextCursor", nextCursor);
+        page.put("hasMore", hasMore);
+        return page;
+    }
+
+    /** Parses a comma-separated id list; returns null when any entry is not a positive number. */
+    private static List<Long> parseUserIds(String value) {
+        List<Long> ids = new ArrayList<>();
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) continue;
+            try {
+                long id = Long.parseLong(trimmed);
+                if (id <= 0) return null;
+                ids.add(id);
+            } catch (NumberFormatException error) {
+                return null;
+            }
+        }
+        return ids;
+    }
+
     private Map<String, Object> toCommentView(CommentEntity comment) {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("id", comment.getId());
         view.put("postId", comment.getPostId());
         view.put("userId", comment.getUserId());
         view.put("parentId", comment.getParentId());
+        view.put("rootId", comment.getRootId());
         view.put("content", comment.getContent());
         view.put("source", comment.getSource());
         view.put("status", comment.getStatus());
@@ -648,6 +802,53 @@ public class CommunityController {
 
     private boolean publishingAllowed(Long userId) {
         return userId != null && (userRelationClient == null || userRelationClient.publishingAllowed(userId));
+    }
+
+    /**
+     * Non-admins only see visible comments. A hidden comment that still has visible replies is returned as a
+     * content-free placeholder so those replies stay attached to the thread.
+     */
+    private List<Map<String, Object>> threadViews(List<CommentEntity> thread, boolean admin) {
+        if (admin) return thread.stream().map(this::toCommentView).toList();
+        Map<Long, CommentEntity> byId = new LinkedHashMap<>();
+        thread.forEach(comment -> byId.put(comment.getId(), comment));
+        Set<Long> required = new HashSet<>();
+        for (CommentEntity comment : thread) {
+            if (!"VISIBLE".equals(comment.getStatus())) continue;
+            CommentEntity current = comment;
+            while (current != null && required.add(current.getId())) {
+                current = current.getParentId() == null ? null : byId.get(current.getParentId());
+            }
+        }
+        List<Map<String, Object>> views = new ArrayList<>();
+        for (CommentEntity comment : thread) {
+            if (!required.contains(comment.getId())) continue;
+            views.add("VISIBLE".equals(comment.getStatus()) ? toCommentView(comment) : toCommentPlaceholder(comment));
+        }
+        return views;
+    }
+
+    private Map<String, Object> toCommentPlaceholder(CommentEntity comment) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", comment.getId());
+        view.put("postId", comment.getPostId());
+        view.put("userId", 0L);
+        view.put("parentId", comment.getParentId());
+        view.put("rootId", comment.getRootId());
+        view.put("content", "");
+        view.put("status", "HIDDEN");
+        view.put("placeholder", true);
+        view.put("createdAt", comment.getCreatedAt());
+        return view;
+    }
+
+    private Map<String, Object> commentThreadPage(List<Map<String, Object>> items, Long nextCursor, boolean hasMore, long total) {
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("items", items);
+        page.put("nextCursor", nextCursor);
+        page.put("hasMore", hasMore);
+        page.put("total", total);
+        return page;
     }
 
     private List<Map<String, Object>> visibleComments(Long postId, String authorization) {

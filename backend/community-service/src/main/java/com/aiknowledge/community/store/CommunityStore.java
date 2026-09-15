@@ -4,7 +4,10 @@ import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import java.time.LocalDateTime;
 
@@ -17,9 +20,24 @@ public interface CommunityStore {
 
     List<PostEntity> feed(Long authorUserId);
 
+    /** Newest-first page of posts (by id) that the viewer may see. */
+    List<PostEntity> pagePosts(PostPageQuery query);
+
+    long countVisiblePosts(Long viewerUserId, boolean includeAll);
+
     CommentEntity saveComment(CommentEntity comment);
 
     List<CommentEntity> listComments(Long postId);
+
+    Optional<CommentEntity> findComment(Long commentId);
+
+    /** Thread roots (root_id = id) of a post with id greater than afterId, ascending by id. */
+    List<CommentEntity> listRootComments(Long postId, Long afterId, int limit);
+
+    /** Every comment (roots and replies) belonging to the given thread roots, ascending by id. */
+    List<CommentEntity> listThreadComments(Long postId, Collection<Long> rootIds);
+
+    long countComments(Long postId, boolean visibleOnly);
 
     PostDraftEntity saveDraft(PostDraftEntity draft);
 
@@ -41,11 +59,19 @@ public interface CommunityStore {
 
     List<String> listPostImages(Long postId);
 
+    Map<Long, List<String>> listPostImages(Collection<Long> postIds);
+
     boolean togglePostLike(Long userId, Long postId);
 
     boolean hasPostLike(Long userId, Long postId);
 
     long countPostLikes(Long postId);
+
+    Map<Long, Long> countPostLikes(Collection<Long> postIds);
+
+    Set<Long> likedPostIds(Long userId, Collection<Long> postIds);
+
+    Set<Long> collectedPostIds(Long userId, Collection<Long> postIds);
 
     boolean removePost(Long postId);
 
@@ -57,6 +83,13 @@ public interface CommunityStore {
 
     int removeDraftsBefore(LocalDateTime cutoff);
 
+    /**
+     * @param authorUserId  only posts by this author (optional)
+     * @param authorUserIds only posts by one of these authors (optional)
+     * @param includeAll    true for admins: skip the published-or-own visibility rule
+     * @param beforeId      cursor: only posts with a smaller id (optional)
+     */
+    record PostPageQuery(Long authorUserId, Collection<Long> authorUserIds, Long viewerUserId, boolean includeAll, Long beforeId, int limit) { }
     record PostImageRecord(Long id, Long postId, String imageUrl, LocalDateTime createdAt) { }
     record PostLikeRecord(Long id, Long userId, Long postId, LocalDateTime createdAt) { }
 }

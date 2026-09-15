@@ -108,6 +108,10 @@
           v-else-if="detailRoute?.kind === 'community' && detailPost"
           :post="detailPost"
           :comments="detailComments"
+          :comment-total="detailCommentTotal"
+          :comments-has-more="detailCommentsHasMore"
+          :comments-loading="detailCommentsLoading"
+          :comments-error="detailCommentsError"
           :users="communityDirectory"
           :current-user-id="currentUserId"
           :following="isFollowing(detailPost.userId)"
@@ -120,6 +124,7 @@
           @edit="editPost"
           @delete-post="deletePost"
           @delete-comment="deleteComment"
+          @load-more-comments="loadMoreDetailComments"
           @follow="toggleFollowAuthor"
         />
         <div v-else-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
@@ -194,6 +199,7 @@
                   <div v-if="post.imageUrls?.length" class="post-images"><img v-for="image in post.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
                   <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button v-if="post.userId !== currentUserId" text :type="isFollowing(post.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(post.userId)">{{ isFollowing(post.userId) ? '取消关注' : '关注作者' }}</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button v-if="platformConfig.comments_enabled" text :icon="ChatDotRound" @click="quickComment(post)">快捷评论</el-button><el-button text :type="post.collected ? 'primary' : 'default'" :icon="CollectionTag" @click="collectPost(post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button><el-button v-if="post.userId === currentUserId" text type="danger" :icon="Delete" @click="deletePost(post)">删除</el-button></div>
                 </article>
+                <div v-if="feedPosts.length && (feedHasMore || feedLoadingMore || feedLoadError)" ref="feedSentinelRef" class="feed-load-more"><el-button :loading="feedLoadingMore" @click="loadMoreFeed">{{ feedLoadingMore ? '正在加载帖子' : feedLoadError ? `${feedLoadError}，点击重试` : '加载更多帖子' }}</el-button></div>
                 <el-empty v-if="!feedPosts.length" :description="activeView === 'square' ? '暂时没有关注动态' : '还没有已发布的帖子'" />
               </section>
               <aside class="surface community-side"><h3>我的创作</h3><button @click="openDrafts"><Document />草稿箱<span>{{ drafts.length }}</span></button><button :class="{ active: feedMode === 'mine' }" @click="loadMyPosts"><EditPen />我的帖子<ArrowRight /></button><h3>社区提示</h3><p>尊重原创，理性交流。发现不当内容可通过举报交由管理员处理。</p></aside>
@@ -202,7 +208,7 @@
 
           <section v-else-if="activeView === 'messages'" class="message-page" :class="{ 'has-session': messageForm.sessionId }">
             <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ sessions.length }} 个联系人</p></div><div><el-button :icon="Delete" circle text type="danger" title="清空全部聊天记录" @click="clearAllMessages" /><el-button :icon="Plus" circle title="发起私信" @click="newConversation" /></div></div><div class="session-list"><button v-for="session in sessions" :key="session.id" :class="{ active: messageForm.sessionId === session.id }" @click="openSession(session)"><div class="mini-avatar">{{ sessionPartner(session).nickname.slice(0,1).toUpperCase() }}</div><span><strong>{{ sessionPartner(session).nickname }}</strong><small>{{ session.lastMessage || `@${sessionPartner(session).username}` }}</small></span></button></div><el-empty v-if="!sessions.length" description="暂无私信会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" circle text title="刷新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list"><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim()" @click="sendMessage">发送</el-button></div></section>
+            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" :loading="messageRefreshing" circle text title="获取新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list" @scroll.passive="handleMessageScroll"><div v-if="messageForm.sessionId && messages.length" class="message-history-state"><el-button v-if="messageHasOlder || messageHistoryLoading" text size="small" :loading="messageHistoryLoading" @click="loadOlderMessages">{{ messageHistoryLoading ? '正在加载更早的消息' : '查看更早的消息' }}</el-button><small v-else>已显示全部消息</small></div><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><button v-if="messageUnseenCount" type="button" class="message-new-indicator" @click="jumpToLatestMessages">{{ messageUnseenCount }} 条新消息</button><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim()" @click="sendMessage">发送</el-button></div></section>
           </section>
 
           <section v-else-if="activeView === 'ai'" class="ai-page" :class="{ 'history-open': mobileAiHistoryOpen }">
@@ -347,7 +353,7 @@ type KnowledgeLikeResult = { fileId:number; liked:boolean; likes:number };
 type KnowledgeCollectResult = { userId:number; fileId:number; collected:boolean };
 type KnowledgeRanking = { rank:number; userId:number; uploads:number; views:number; downloads:number; violations:number; score:number };
 type KnowledgeContentBlock = { type:'image'|'heading'|'list'|'paragraph'|'table'; text?:string; url?:string };
-type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean; comments?:Comment[]; createdAt?:string };
+type Post = { id:number; userId:number; title:string; content:string; status:string; imageUrls?:string[]; likes?:number; liked?:boolean; collected?:boolean; commentCount?:number; createdAt?:string };
 type PostLikeResult = { postId:number; liked:boolean; created:boolean; likes:number };
 type PostCollectResult = { postId:number; collected:boolean };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string; assigneeUserId?:number; assignedAt?:string; closedAt?:string; createdAt?:string; updatedAt?:string };
@@ -360,7 +366,10 @@ type Report = { id:number; fileId?:number; targetUserId?:number; reason:string; 
 type Faq = { id:number; question:string; answer:string; sortNo:number };
 type EventRecord = { id:number; type:string; aggregateId:string; status:string; createdAt:string };
 type AiSession = { id:number; user_id?:number; title:string; created_at:string };
-type Comment = { id:number; postId?:number; userId:number; parentId?:number; content:string; status?:string };
+type Comment = { id:number; postId?:number; userId:number; parentId?:number; rootId?:number; content:string; status?:string; placeholder?:boolean };
+type CommentThreadPage = { items:Comment[]; nextCursor:number|null; hasMore:boolean; total:number };
+type FeedPage = { items:Post[]; nextCursor:number|null; hasMore:boolean };
+type FeedMode = 'all'|'following'|'mine'|'author';
 type BehaviorRecord = { id:number; action:string; targetType:string; targetId:number; createdAt:string };
 type AiChunk = { id:number; file_id:number; title:string; content:string; created_at:string };
 type AiReference = { id:number; file_id:number; title:string; content:string; score?:number };
@@ -403,6 +412,10 @@ const postImageFiles = ref<UploadUserFile[]>([]);
 const auditingPostId = ref(0);
 const messageForm = ref({ sessionId:0, senderId:currentUserId.value, content:'' });
 const messageSending = ref(false); const messageListRef = ref<HTMLElement>();
+const MESSAGE_PAGE_SIZE = 30; const MESSAGE_POLL_INTERVAL = 9000; const MESSAGE_BOTTOM_THRESHOLD = 80;
+const messageHasOlder = ref(false); const messageHistoryLoading = ref(false); const messageRefreshing = ref(false); const messageUnseenCount = ref(0);
+const pageVisible = ref(typeof document === 'undefined' || document.visibilityState !== 'hidden');
+let loadedMessageSessionId = 0; let messagePollTimer: number | undefined; let messageFetchInFlight = false;
 const conversationTargetId = ref(0);
 const feedbackForm = ref({ userId:currentUserId.value, type:'BUG', content:'' });
 const ticketReply = ref({ ticketId:0, status:'PROCESSING', reply:'' });
@@ -416,6 +429,8 @@ const categoryForm = ref({ id:0, name:'', sortNo:10 });
 const knowledgeMetadataForm = ref({ fileId:0, title:'', categoryId:null as number|null, auditStatus:'PENDING' });
 const userGovernanceForm = ref({ userId:0, nickname:'', avatarUrl:'', signature:'', status:'ACTIVE', role:'USER', publishPolicy:'STANDARD', messagingEnabled:true, resetPassword:'' });
 
+const FEED_PAGE_SIZE = 10; const feedCursor = ref<number|null>(null); const feedHasMore = ref(false); const feedLoadingMore = ref(false); const feedLoadError = ref(''); const feedSentinelRef = ref<HTMLElement>();
+let feedRequestToken = 0; let feedPageMode: FeedMode = 'all'; let feedObserver: IntersectionObserver | undefined;
 const knowledgeFiles = ref<KnowledgeFile[]>([]); const feedPosts = ref<Post[]>([]); const communityPostCount = ref(0); const collectedPosts = ref<Post[]>([]); const tickets = ref<Ticket[]>([]); const adminTickets = ref<Ticket[]>([]);
 const messages = ref<ChatMessage[]>([]); const notifications = ref<Notice[]>([]); const drafts = ref<Draft[]>([]); const sessions = ref<ChatSession[]>([]); const adminChatSessions = ref<ChatSession[]>([]); const adminChatMessages = ref<ChatMessage[]>([]);
 const adminUsers = ref<UserRecord[]>([]); const knowledgeReports = ref<Report[]>([]); const userReports = ref<Report[]>([]); const faqs = ref<Faq[]>([]); const adminEvents = ref<EventRecord[]>([]);
@@ -436,6 +451,8 @@ const detailRoute = ref<DetailRoute>();
 const detailLoading = ref(false); const detailError = ref('');
 const detailKnowledge = ref<KnowledgeFile>(); const detailKnowledgeBlocks = ref<KnowledgeContentBlock[]>([]); const detailPdfPreviewUrl = ref('');
 const detailPost = ref<Post>(); const detailComments = ref<Comment[]>([]);
+const COMMENT_THREAD_PAGE_SIZE = 10; const detailCommentTotal = ref(0); const detailCommentCursor = ref<number|null>(null);
+const detailCommentsHasMore = ref(false); const detailCommentsLoading = ref(false); const detailCommentsError = ref('');
 const selectedReviewPost = ref<Post>(); const reviewingKnowledge = ref(false);
 const governancePreviewDialog = ref(false); const governancePreviewKind = ref('内容预览'); const governancePreviewTitle = ref(''); const governancePreviewContent = ref('');
 const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
@@ -624,11 +641,11 @@ async function registerAccount(){
 }
 
 async function login(){if(busy.value)return;if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);invalidateCaptcha(true);captchaRefreshPending=false;await loadCaptcha({silent:true});}finally{busy.value=false;}}
-function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); messageDrafts.clear(); messageForm.value={sessionId:0,senderId:0,content:''}; messages.value=[]; sessions.value=[]; notifications.value=[]; authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
+function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); messageDrafts.clear(); messageForm.value={sessionId:0,senderId:0,content:''}; resetMessagePaging(); sessions.value=[]; notifications.value=[]; authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;setStoredValue('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value={...platformConfig.value,...await getData<typeof platformConfig.value>('/ai/config/public')};}catch{/* 配置服务短暂不可用时继续使用安全默认值。 */}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
-function resetDetailState(){detailRoute.value=undefined;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;detailComments.value=[];if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
+function resetDetailState(){detailRoute.value=undefined;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;resetDetailCommentPaging();if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
 function returnToRoot(){if(window.location.pathname!=='/')window.history.pushState({},'', '/');resetDetailState();}
 async function confirmDiscardAdminConfig(){if(!aiConfigDirty.value)return true;try{await ElMessageBox.confirm('平台配置还有未保存的更改，离开后这些更改会丢失。','离开配置页面？',{confirmButtonText:'放弃更改并离开',cancelButtonText:'继续编辑',type:'warning'});return true;}catch{return false;}}
 async function switchPortal(value:'client'|'admin'){ if(value!==portal.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return;returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; await refreshCurrentView(); }
@@ -651,15 +668,15 @@ async function loadDetailRoute(){
   try{
     if(route.kind==='knowledge'){
       const detail=await postData<KnowledgeFile>('/knowledge/view',{fileId:route.id});
-      detailKnowledge.value=detail;detailKnowledgeBlocks.value=parseKnowledgeContent(detail);detailPost.value=undefined;detailComments.value=[];
+      detailKnowledge.value=detail;detailKnowledgeBlocks.value=parseKnowledgeContent(detail);detailPost.value=undefined;resetDetailCommentPaging();
       await loadUserSummaries([detail.userId]);
       if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}
       if(detail.fileType?.toLowerCase()==='pdf'&&detail.fileUrl){const blob=await downloadData(`/knowledge/file/${detail.id}/preview`);detailPdfPreviewUrl.value=URL.createObjectURL(blob);}
       await recordBehavior('VIEW','KNOWLEDGE',detail.id);
     }else{
-      const [post,commentsResult]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<Comment[]>(`/comment/list?postId=${route.id}`)]);
-      detailPost.value=post;detailComments.value=commentsResult;detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];
-      await loadUserSummaries([post.userId,...commentsResult.map(comment=>comment.userId)]);
+      const [post,commentPage]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<CommentThreadPage>(commentThreadsUrl(route.id))]);
+      detailPost.value=post;applyCommentThreadPage(commentPage,true);detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];
+      await loadUserSummaries([post.userId,...commentPage.items.map(comment=>comment.userId)]);
       await recordBehavior('VIEW','POST',post.id);
     }
     window.scrollTo({top:0,behavior:'auto'});
@@ -710,8 +727,50 @@ async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/f
 async function reportKnowledge(file:KnowledgeFile){ const {value}=await ElMessageBox.prompt('请填写举报原因','举报知识资源',{inputValue:'内容不准确'}); await postData('/knowledge/report',{userId:currentUserId.value,fileId:file.id,reason:value}); ElMessage.success('举报已提交'); }
 async function deleteKnowledge(file:KnowledgeFile){await ElMessageBox.confirm(`删除“${file.title}”后正文、收藏和互动记录都无法恢复，确认继续？`,'删除知识资源',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/knowledge/file',{fileId:file.id});if(role.value==='ADMIN'){try{await deleteData(`/ai/admin/index/file/${file.id}`);}catch{/* 本地全文索引和业务数据已完成删除，AI 索引可由管理员稍后重建。 */}}knowledgeFiles.value=knowledgeFiles.value.filter(item=>item.id!==file.id);myKnowledge.value=myKnowledge.value.filter(item=>item.id!==file.id);if(detailKnowledge.value?.id===file.id)leaveDetail();ElMessage.success('知识资源已删除');}
 
-async function loadFeed(mode:'all'|'following'|'mine'|'author'=feedMode.value){ if(mode==='mine'){await Promise.all([loadMyPosts(),loadFollowData()]);return;} feedMode.value=mode; const relations=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);followData.value=relations;if(mode==='following')feedPosts.value=await getData(`/square/following-feed?followedUserIds=${relations.followedUserIds.join(',')}`);else if(mode==='author'&&authorFilterUserId.value)feedPosts.value=await getData(`/square/feed?authorUserId=${authorFilterUserId.value}`);else feedPosts.value=await getData('/square/feed');await loadUserSummaries(feedPosts.value.map(post=>post.userId)); }
-async function loadCommunityPostCount(){communityPostCount.value=(await getData<Post[]>('/square/feed')).length;}
+async function loadFeed(mode:FeedMode=feedMode.value){ if(mode==='mine'){await Promise.all([loadMyPosts(),loadFollowData()]);return;} feedMode.value=mode; const relations=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);followData.value=relations;await loadFeedFirstPage(mode==='author'&&!authorFilterUserId.value?'all':mode); }
+function feedPageUrl(mode:FeedMode,cursor?:number|null){
+  const params=new URLSearchParams({limit:String(FEED_PAGE_SIZE)});
+  if(mode==='following'){params.set('scope','following');params.set('followedUserIds',(followData.value.followedUserIds||[]).join(','));}
+  else if(mode==='mine'||mode==='author'){params.set('scope','author');params.set('authorUserId',String(mode==='mine'?currentUserId.value:authorFilterUserId.value));}
+  else params.set('scope','all');
+  if(cursor)params.set('cursor',String(cursor));
+  return `/square/feed/page?${params}`;
+}
+async function loadFeedFirstPage(mode:FeedMode){
+  const token=++feedRequestToken;
+  feedLoadError.value='';
+  const page=await getData<FeedPage>(feedPageUrl(mode));
+  if(token!==feedRequestToken)return;
+  feedPageMode=mode;
+  feedPosts.value=page.items;
+  feedCursor.value=page.nextCursor;
+  feedHasMore.value=page.hasMore;
+  await loadUserSummaries(page.items.map(post=>post.userId));
+}
+async function loadMoreFeed(){
+  if(!feedHasMore.value||feedLoadingMore.value||portal.value!=='client'||!['forum','square'].includes(activeView.value))return;
+  const token=feedRequestToken;
+  feedLoadingMore.value=true;
+  feedLoadError.value='';
+  try{
+    const page=await getData<FeedPage>(feedPageUrl(feedPageMode,feedCursor.value));
+    if(token!==feedRequestToken)return;
+    const known=new Set(feedPosts.value.map(post=>post.id));
+    feedPosts.value=[...feedPosts.value,...page.items.filter(post=>!known.has(post.id))];
+    feedCursor.value=page.nextCursor;
+    feedHasMore.value=page.hasMore;
+    await loadUserSummaries(page.items.map(post=>post.userId));
+  }catch(error){if(token===feedRequestToken)feedLoadError.value=toUserMessage(error,'帖子加载失败');}
+  finally{feedLoadingMore.value=false;}
+}
+watch(feedSentinelRef,element=>{
+  feedObserver?.disconnect();
+  feedObserver=undefined;
+  if(!element||typeof IntersectionObserver==='undefined')return;
+  feedObserver=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)&&!feedLoadError.value)void loadMoreFeed();},{rootMargin:'240px 0px'});
+  feedObserver.observe(element);
+});
+async function loadCommunityPostCount(){communityPostCount.value=(await getData<{total:number}>('/square/feed/count')).total;}
 async function loadAuthorPosts(userId:number){authorFilterUserId.value=userId;feedMode.value='author';await loadFeed('author');}
 async function loadAuthorPostsFromProfile(userId:number){activeView.value='forum';await loadAuthorPosts(userId);}
 function communityUser(userId:number):UserRecord{return userId===currentUserId.value?{id:userId,username:username.value,nickname:displayName.value,avatarUrl:avatarUrl.value,status:'ACTIVE',role:role.value}:userSummaries.value[userId]||{id:userId,username:'unknown',nickname:'已注销用户',status:'DISABLED',role:'USER'};}
@@ -726,7 +785,7 @@ async function loadDrafts(){ drafts.value=await getData(`/post/drafts?userId=${c
 async function loadMyKnowledge(){myKnowledge.value=await getData<KnowledgeFile[]>(`/knowledge/mine?type=${knowledgeActivityType.value}`);}
 async function loadCollectedPosts(){collectedPosts.value=await getData<Post[]>('/square/collections');await loadUserSummaries(collectedPosts.value.map(post=>post.userId));}
 async function openDrafts(){activeView.value='profile';profileToolTab.value='drafts';await loadProfile();}
-async function loadMyPosts(){feedMode.value='mine';feedPosts.value=await getData(`/square/feed?authorUserId=${currentUserId.value}`);await loadUserSummaries(feedPosts.value.map(post=>post.userId));}
+async function loadMyPosts(){feedMode.value='mine';await loadFeedFirstPage('mine');}
 function resetPostEditor(){editingPostId.value=0;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:'',content:''};selectedPostImages.value=[];postImageFiles.value=[];}
 function existingImageFiles(imageUrls?:string[]):UploadUserFile[]{return(imageUrls||[]).map((url,index)=>({name:`图片 ${index+1}`,url,status:'success'}));}
 function editPost(post:Post){editingPostId.value=post.id;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:post.title,content:post.content};selectedPostImages.value=[];postImageFiles.value=existingImageFiles(post.imageUrls);postDialog.value=true;}
@@ -743,17 +802,42 @@ async function quickComment(post:Post){const {value}=await ElMessageBox.prompt('
 async function createDetailComment(payload:{content:string;parentId:number}){
   if(!detailPost.value)return;
   const postId=detailPost.value.id;
-  await postData('/comment/create',{postId,content:payload.content,parentId:payload.parentId});
+  const saved=await postData<Comment>('/comment/create',{postId,content:payload.content,parentId:payload.parentId});
   ElMessage.success(payload.parentId?'回复已发布':'评论已发布');
   void recordBehavior('COMMENT','POST',postId).catch(()=>{});
-  try {
-    const comments=await getData<Comment[]>(`/comment/list?postId=${postId}`);
-    if(detailPost.value?.id===postId){detailComments.value=comments;await loadUserSummaries(comments.map(comment=>comment.userId));}
-  } catch {
-    ElMessage.warning('评论已发布，列表暂时未刷新');
-  }
+  if(detailPost.value?.id!==postId)return;
+  detailComments.value=mergeComments(detailComments.value,[saved]);
+  detailCommentTotal.value+=1;
+  void loadUserSummaries([saved.userId]);
 }
-async function deleteComment(comment:Comment){await ElMessageBox.confirm('删除评论后，其下的回复也会一并删除，确认继续？','删除评论',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/comment',{commentId:comment.id});if(detailPost.value)detailComments.value=await getData(`/comment/list?postId=${detailPost.value.id}`);ElMessage.success('评论已删除');}
+function resetDetailCommentPaging(){detailComments.value=[];detailCommentTotal.value=0;detailCommentCursor.value=null;detailCommentsHasMore.value=false;detailCommentsLoading.value=false;detailCommentsError.value='';}
+function commentThreadsUrl(postId:number,cursor?:number|null){const params=new URLSearchParams({postId:String(postId),limit:String(COMMENT_THREAD_PAGE_SIZE)});if(cursor)params.set('cursor',String(cursor));return `/comment/threads?${params}`;}
+function mergeComments(current:Comment[],incoming:Comment[]){const byId=new Map<number,Comment>();[...current,...incoming].forEach(comment=>byId.set(comment.id,comment));return [...byId.values()].sort((a,b)=>a.id-b.id);}
+function applyCommentThreadPage(page:CommentThreadPage,reset:boolean){detailComments.value=mergeComments(reset?[]:detailComments.value,page.items);detailCommentCursor.value=page.nextCursor;detailCommentsHasMore.value=page.hasMore;detailCommentTotal.value=page.total;detailCommentsError.value='';}
+async function loadMoreDetailComments(){
+  const postId=detailPost.value?.id;
+  if(!postId||!detailCommentsHasMore.value||detailCommentsLoading.value)return;
+  detailCommentsLoading.value=true;
+  detailCommentsError.value='';
+  try{
+    const page=await getData<CommentThreadPage>(commentThreadsUrl(postId,detailCommentCursor.value));
+    if(detailPost.value?.id!==postId)return;
+    applyCommentThreadPage(page,false);
+    await loadUserSummaries(page.items.map(comment=>comment.userId));
+  }catch(error){if(detailPost.value?.id===postId)detailCommentsError.value=toUserMessage(error,'评论加载失败');}
+  finally{detailCommentsLoading.value=false;}
+}
+function removeDetailCommentSubtree(commentId:number){
+  const removed=new Set([commentId]);
+  for(let changed=true;changed;){changed=false;for(const item of detailComments.value){if(item.parentId&&removed.has(item.parentId)&&!removed.has(item.id)){removed.add(item.id);changed=true;}}}
+  const removedCount=detailComments.value.filter(item=>removed.has(item.id)&&!item.placeholder).length;
+  let remaining=detailComments.value.filter(item=>!removed.has(item.id));
+  // 占位评论只用于承载可见回复，回复被删光后一并移除。
+  for(let pruned=true;pruned;){const parentIds=new Set(remaining.map(item=>item.parentId));const next=remaining.filter(item=>!item.placeholder||parentIds.has(item.id));pruned=next.length!==remaining.length;remaining=next;}
+  detailComments.value=remaining;
+  detailCommentTotal.value=Math.max(0,detailCommentTotal.value-removedCount);
+}
+async function deleteComment(comment:Comment){await ElMessageBox.confirm('删除评论后，其下的回复也会一并删除，确认继续？','删除评论',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/comment',{commentId:comment.id});removeDetailCommentSubtree(comment.id);ElMessage.success('评论已删除');}
 
 const messageDrafts = new Map<number,string>();
 function selectMessageSession(sessionId:number){
@@ -762,9 +846,10 @@ function selectMessageSession(sessionId:number){
   if(previous)messageDrafts.set(previous,messageForm.value.content);
   messageForm.value.sessionId=sessionId;
   messageForm.value.content=sessionId?(messageDrafts.get(sessionId)||''):'';
-  messages.value=[];
+  resetMessagePaging();
 }
-async function loadMessageData(){
+function resetMessagePaging(){messages.value=[];loadedMessageSessionId=0;messageHasOlder.value=false;messageUnseenCount.value=0;}
+async function loadMessageData(options:{reloadMessages?:boolean}={}){
   const [chatSessions,notices]=await Promise.all([
     getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),
     getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`).catch(()=>[] as Notice[])
@@ -776,25 +861,98 @@ async function loadMessageData(){
     const firstSessionId=window.matchMedia('(max-width: 820px)').matches?0:(chatSessions[0]?.id||0);
     selectMessageSession(firstSessionId);
   }
-  await loadMessages();
+  if(options.reloadMessages!==false||loadedMessageSessionId!==messageForm.value.sessionId)await loadMessages();
 }
 async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
 async function markNotificationRead(notice:Notice){await postData('/notification/read',{notificationId:notice.id});notice.read=true;ElMessage.success('已标记为已读');}
 async function markAllNotificationsRead(){await postData('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));ElMessage.success('全部通知已读');}
 function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}
-async function openSession(session:ChatSession){selectMessageSession(session.id);await refreshMessages();}
+async function openSession(session:ChatSession){selectMessageSession(session.id);try{await loadMessages();}catch(error){notifyError(error);}}
 function closeMobileConversation(){selectMessageSession(0);}
-function scrollMessagesToBottom(){const list=messageListRef.value;if(list)list.scrollTop=list.scrollHeight;}
+function scrollMessagesToBottom(){const list=messageListRef.value;if(list)list.scrollTop=list.scrollHeight;messageUnseenCount.value=0;}
+function isMessageListNearBottom(){const list=messageListRef.value;return !list||list.scrollHeight-list.scrollTop-list.clientHeight<=MESSAGE_BOTTOM_THRESHOLD;}
+function mergeMessages(current:ChatMessage[],incoming:ChatMessage[]){const byId=new Map<number,ChatMessage>();[...current,...incoming].forEach(message=>byId.set(message.id,message));return [...byId.values()].sort((a,b)=>a.id-b.id);}
+function messagePageUrl(sessionId:number,cursor:{beforeId?:number;afterId?:number}={},limit=MESSAGE_PAGE_SIZE){const params=new URLSearchParams({sessionId:String(sessionId),limit:String(limit)});if(cursor.beforeId)params.set('beforeId',String(cursor.beforeId));if(cursor.afterId!==undefined)params.set('afterId',String(cursor.afterId));return `/message/page?${params}`;}
 async function loadMessages(){
   const sessionId=messageForm.value.sessionId;
-  if(!sessionId){messages.value=[];return;}
-  const loaded=await getData<ChatMessage[]>(`/message/list?sessionId=${sessionId}&userId=${currentUserId.value}`);
+  if(!sessionId){resetMessagePaging();return;}
+  const loaded=await getData<ChatMessage[]>(messagePageUrl(sessionId));
   if(messageForm.value.sessionId!==sessionId)return;
-  messages.value=loaded;
+  messages.value=mergeMessages([],loaded);
+  loadedMessageSessionId=sessionId;
+  messageHasOlder.value=loaded.length>=MESSAGE_PAGE_SIZE;
   await nextTick();
   scrollMessagesToBottom();
 }
-async function refreshMessages(){try{await loadMessages();}catch(error){notifyError(error);}}
+async function loadOlderMessages(){
+  const sessionId=messageForm.value.sessionId;
+  const oldest=messages.value[0];
+  if(!sessionId||!oldest||loadedMessageSessionId!==sessionId||!messageHasOlder.value||messageHistoryLoading.value)return;
+  messageHistoryLoading.value=true;
+  try{
+    const older=await getData<ChatMessage[]>(messagePageUrl(sessionId,{beforeId:oldest.id}));
+    if(messageForm.value.sessionId!==sessionId||loadedMessageSessionId!==sessionId)return;
+    const list=messageListRef.value;
+    const distanceFromBottom=list?list.scrollHeight-list.scrollTop:0;
+    messages.value=mergeMessages(older,messages.value);
+    messageHasOlder.value=older.length>=MESSAGE_PAGE_SIZE;
+    await nextTick();
+    if(list)list.scrollTop=list.scrollHeight-distanceFromBottom;
+  }catch(error){notifyError(error);}
+  finally{messageHistoryLoading.value=false;}
+}
+function handleMessageScroll(){
+  const list=messageListRef.value;
+  if(!list)return;
+  if(list.scrollTop<=60)void loadOlderMessages();
+  if(isMessageListNearBottom())messageUnseenCount.value=0;
+}
+function jumpToLatestMessages(){const list=messageListRef.value;if(list)list.scrollTo({top:list.scrollHeight,behavior:'smooth'});messageUnseenCount.value=0;}
+async function fetchNewMessages(manual=false){
+  const sessionId=messageForm.value.sessionId;
+  if(!sessionId||messageFetchInFlight)return 0;
+  if(loadedMessageSessionId!==sessionId){if(manual)await loadMessages();return 0;}
+  messageFetchInFlight=true;
+  try{
+    const received:ChatMessage[]=[];
+    for(let round=0;round<5;round++){
+      const newest=messages.value[messages.value.length-1];
+      const batch=await getData<ChatMessage[]>(messagePageUrl(sessionId,{afterId:newest?.id??0},100));
+      if(messageForm.value.sessionId!==sessionId||loadedMessageSessionId!==sessionId)return 0;
+      const known=new Set(messages.value.map(message=>message.id));
+      const fresh=batch.filter(message=>!known.has(message.id));
+      if(fresh.length){
+        const stickToBottom=isMessageListNearBottom();
+        messages.value=mergeMessages(messages.value,fresh);
+        received.push(...fresh);
+        await nextTick();
+        if(stickToBottom)scrollMessagesToBottom();
+        else messageUnseenCount.value+=fresh.filter(message=>message.senderId!==currentUserId.value).length;
+      }
+      if(batch.length<100)break;
+    }
+    const latest=received[received.length-1];
+    const session=sessions.value.find(item=>item.id===sessionId);
+    if(latest&&session){session.lastMessage=latest.content;session.updatedAt=latest.createdAt;}
+    return received.length;
+  }finally{messageFetchInFlight=false;}
+}
+async function refreshMessages(){
+  if(messageRefreshing.value)return;
+  messageRefreshing.value=true;
+  try{const count=await fetchNewMessages(true);if(!count)ElMessage.info('暂无新消息');}
+  catch(error){notifyError(error);}
+  finally{messageRefreshing.value=false;}
+}
+const shouldPollMessages=computed(()=>authenticated.value&&portal.value==='client'&&activeView.value==='messages'&&!detailRoute.value&&Boolean(messageForm.value.sessionId)&&pageVisible.value);
+function stopMessagePolling(){if(messagePollTimer!==undefined){window.clearInterval(messagePollTimer);messagePollTimer=undefined;}}
+watch(shouldPollMessages,(active,wasActive)=>{
+  stopMessagePolling();
+  if(!active)return;
+  messagePollTimer=window.setInterval(()=>{void fetchNewMessages().catch(()=>undefined);},MESSAGE_POLL_INTERVAL);
+  if(wasActive===false)void fetchNewMessages().catch(()=>undefined);
+});
+function handleVisibilityChange(){pageVisible.value=document.visibilityState!=='hidden';}
 async function newConversation(){conversationUsername.value='';conversationTargetUser.value=undefined;conversationTargetId.value=0;conversationDialog.value=true;}
 async function resolveConversationUser(){const query=conversationUsername.value.trim();if(!query){conversationTargetUser.value=undefined;conversationTargetId.value=0;return;}try{const user=await getData<UserRecord>(`/user/info?username=${encodeURIComponent(query)}`);if(user.id===currentUserId.value)throw new Error('不能给自己发起私信');conversationTargetUser.value=user;conversationTargetId.value=user.id;}catch(error){conversationTargetUser.value=undefined;conversationTargetId.value=0;notifyError(error);}}
 async function createConversation(){if(!conversationTargetId.value)return;busy.value=true;try{const session=await postData<ChatSession>('/message/session',{targetUserId:conversationTargetId.value});await loadMessageData();selectMessageSession(session.id);await loadMessages();conversationDialog.value=false;activeView.value='messages';ElMessage.success('私信会话已创建');}catch(error){notifyError(error);}finally{busy.value=false;}}
@@ -808,7 +966,7 @@ async function sendMessage(){
     messageDrafts.set(sessionId,'');
     if(messageForm.value.sessionId===sessionId){
       messageForm.value.content='';
-      messages.value=[...messages.value,saved];
+      messages.value=mergeMessages(messages.value,[saved]);
       await nextTick();
       scrollMessagesToBottom();
     }
@@ -820,7 +978,7 @@ async function sendMessage(){
 async function clearCurrentSession(){await ElMessageBox.confirm('确认清空当前会话记录？','清空会话',{type:'warning'});await postData('/message/clear',{sessionId:messageForm.value.sessionId,userId:currentUserId.value});await loadMessageData();}
 async function clearAllMessages(){await ElMessageBox.confirm('确认清空全部私信会话中的聊天记录？会话联系人仍会保留。','清空全部聊天记录',{type:'warning',confirmButtonText:'确认清空'});await postData('/message/clear-all',{});await loadMessageData();ElMessage.success('全部聊天记录已清空');}
 async function deleteCurrentSession(){if(!messageForm.value.sessionId)return;await ElMessageBox.confirm('删除会话后，该会话及其中消息都无法恢复。','删除会话',{type:'warning',confirmButtonText:'确认删除'});const sessionId=messageForm.value.sessionId;await deleteData('/message/session',{sessionId});selectMessageSession(0);messageDrafts.delete(sessionId);await loadMessageData();ElMessage.success('会话已删除');}
-async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});await loadMessageData();ElMessage.success('消息已删除');}
+async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});messages.value=messages.value.filter(item=>item.id!==message.id);await loadMessageData({reloadMessages:false});ElMessage.success('消息已删除');}
 
 async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string;references:AiReference[]}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;const references=[...new Map((result.references||[]).map(reference=>[reference.file_id,reference])).values()].slice(0,3);aiMessages.value.push({role:'assistant',content:result.answer,references});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}
 async function openAiReference(reference:AiReference){const files=await getData<KnowledgeFile[]>('/knowledge/list');const file=files.find(item=>item.id===reference.file_id);if(!file){ElMessage.warning('该知识来源当前不可访问');return;}openKnowledge(file);}
@@ -847,7 +1005,7 @@ async function loadFeedback(){tickets.value=await getData(`/feedback/tickets?use
 async function createTicket(){if(!feedbackForm.value.content.trim())return;await postData('/feedback/ticket',feedbackForm.value);feedbackDialog.value=false;feedbackForm.value.content='';await loadFeedback();ElMessage.success('反馈已提交');}
 
 async function loadAdminDashboard(){const [userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin,checks]=await Promise.all([getData<Record<string,unknown>>('/user/admin/overview'),getData<Record<string,unknown>>('/knowledge/admin/overview'),getData<Record<string,unknown>>('/post/admin/overview'),getData<Record<string,unknown>>('/message/admin/overview?userId=1'),getData<Record<string,unknown>>('/feedback/admin/overview'),Promise.allSettled(['/user/health','/knowledge/health','/post/health','/message/health','/ai/health'].map(url=>getData(url)))]);adminOverview.value={userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin};systemHealth.value={user:checks[0].status==='fulfilled',knowledge:checks[1].status==='fulfilled',community:checks[2].status==='fulfilled',message:checks[3].status==='fulfilled',ai:checks[4].status==='fulfilled'};const [,ticketList]=await Promise.all([loadModeration(),getData<Ticket[]>('/feedback/tickets')]);adminTickets.value=ticketList;}
-async function loadModeration(){[knowledgeFiles.value,knowledgeReports.value,userReports.value,feedPosts.value,adminUsers.value]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list?includeAll=true'),getData<Report[]>('/knowledge/admin/reports'),getData<Report[]>('/user/admin/reports'),getData<Post[]>('/square/feed'),getData<UserRecord[]>('/user/admin/users')]);}
+async function loadModeration(){feedRequestToken++;feedHasMore.value=false;[knowledgeFiles.value,knowledgeReports.value,userReports.value,feedPosts.value,adminUsers.value]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list?includeAll=true'),getData<Report[]>('/knowledge/admin/reports'),getData<Report[]>('/user/admin/reports'),getData<Post[]>('/square/feed'),getData<UserRecord[]>('/user/admin/users')]);}
 async function openAdminKnowledgeUpload(){knowledgeCategories.value=await getData<KnowledgeCategory[]>('/knowledge/categories');knowledgeDialog.value=true;}
 async function openKnowledgeMetadata(file:KnowledgeFile){knowledgeCategories.value=await getData<KnowledgeCategory[]>('/knowledge/categories');knowledgeMetadataForm.value={fileId:file.id,title:file.title,categoryId:file.categoryId||null,auditStatus:file.auditStatus};knowledgeMetadataDialog.value=true;}
 async function saveKnowledgeMetadata(){const updated=await putData<KnowledgeFile>('/knowledge/admin/file',knowledgeMetadataForm.value);knowledgeMetadataDialog.value=false;await syncKnowledgeIndex(updated);await loadModeration();ElMessage.success('知识资源已更新');}
@@ -916,6 +1074,6 @@ function handleGlobalKeydown(event:KeyboardEvent){if(event.key==='Escape')mobile
 function handleBeforeUnload(event:BeforeUnloadEvent){if(!aiConfigDirty.value)return;event.preventDefault();event.returnValue='';}
 watch(mobileMenuOpen,open=>document.body.classList.toggle('mobile-menu-active',open));
 watch(moderationTab,()=>adminModerationStatus.value='');
-onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);window.addEventListener('keydown',handleGlobalKeydown);window.addEventListener('beforeunload',handleBeforeUnload);await loadPublicConfig();if(authenticated.value)await restoreSession();else await loadCaptcha();});
-onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
+onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);window.addEventListener('keydown',handleGlobalKeydown);window.addEventListener('beforeunload',handleBeforeUnload);document.addEventListener('visibilitychange',handleVisibilityChange);await loadPublicConfig();if(authenticated.value)await restoreSession();else await loadCaptcha();});
+onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
 </script>
