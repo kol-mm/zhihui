@@ -48,6 +48,7 @@ import 'element-plus/es/components/dropdown-menu/style/css';
 import 'element-plus/es/components/message/style/css';
 import 'element-plus/es/components/message-box/style/css';
 import './styles/main.css';
+import './styles/theme.css';
 import App from './App.vue';
 
 const app = createApp(App);
