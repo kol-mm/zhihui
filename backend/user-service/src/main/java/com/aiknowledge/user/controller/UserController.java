@@ -438,14 +438,16 @@ public class UserController {
         if (denied != null) {
             return denied;
         }
-        java.util.List<UserEntity> users = userStore.listUsers();
+        UserStore.UserTotals totals = userStore.userTotals();
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("module", "用户账号管理");
-        overview.put("totalUsers", users.size());
-        overview.put("activeUsers", users.stream().filter(user -> "ACTIVE".equals(user.getStatus())).count());
+        overview.put("totalUsers", totals.total());
+        overview.put("activeUsers", totals.active());
         overview.put("pendingAudits", 0);
-        overview.put("riskUsers", users.stream().filter(user -> !"ACTIVE".equals(user.getStatus())).count());
-        overview.put("reports", userStore.listUserReports().size());
+        overview.put("riskUsers", totals.risk());
+        overview.put("admins", totals.admins());
+        overview.put("reports", userStore.countUserReports());
+        overview.put("openReports", userStore.countOpenUserReports());
         overview.put("capabilities", java.util.List.of("资料审核", "账号状态管理", "关注关系查看", "个人内容追踪"));
         return ApiResponse.ok(overview);
     }
@@ -610,4 +612,48 @@ public class UserController {
         String configured = System.getenv("INTERNAL_USER_TOKEN");
         return configured == null || configured.isBlank() ? "ai-knowledge-local-internal" : configured;
     }
+
+    private static final int ADMIN_USER_PAGE_MAX = 100;
+
+    /**
+     * One page of the admin user table. The table used to download every account and filter in
+     * the browser; the filters and the cursor are applied by the database here.
+     */
+    @GetMapping("/admin/users/page")
+    public ApiResponse<Map<String, Object>> adminUsersPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "role", required = false) String role,
+            @RequestParam(name = "userId", required = false) Long userId,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        if (cursor != null && cursor < 0) {
+            return ApiResponse.fail("cursor must not be negative");
+        }
+        int size = Math.min(Math.max(limit, 1), ADMIN_USER_PAGE_MAX);
+        UserStore.UserPageQuery query = new UserStore.UserPageQuery(keyword, status, role, userId, cursor, size + 1);
+        java.util.List<UserEntity> found = userStore.pageUsers(query);
+        boolean hasMore = found.size() > size;
+        java.util.List<UserEntity> page = hasMore ? found.subList(0, size) : found;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page.stream().map(this::toView).toList());
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).getId());
+        result.put("hasMore", hasMore);
+        // Counting can touch most of the table, so only a first page that is full pays for it: a short first
+        // page already is the whole result, and later pages send null.
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? userStore.countUsers(new UserStore.UserPageQuery(keyword, status, role, userId, null, size))
+                    : page.size();
+        }
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
 }

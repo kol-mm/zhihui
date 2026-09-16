@@ -646,4 +646,72 @@ class KnowledgeControllerTest {
         return value instanceof Number found ? found.longValue() : 0L;
     }
 
+
+    @Test
+    void adminOverviewCountsFilesWithoutReadingThemAll() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        Map<String, Object> before = controller.adminOverview(adminAuth).data();
+        long baseFiles = number(before.get("totalFiles"));
+        long basePending = number(before.get("pendingAudit"));
+        long baseViews = number(before.get("totalViews"));
+        long baseReports = number(before.get("reports"));
+
+        Long approved = ((Number) controller.upload(userAuth, Map.of(
+                "title", "概览样本 " + System.nanoTime(), "fileType", "pdf", "content", "概览内容")).data().get("id")).longValue();
+        controller.audit(adminAuth, Map.of("fileId", approved, "auditStatus", "APPROVED"));
+        controller.upload(userAuth, Map.of(
+                "title", "概览待审 " + System.nanoTime(), "fileType", "pdf", "content", "待审内容"));
+        controller.view(userAuth, Map.of("fileId", approved));
+        controller.report(userAuth, Map.of("fileId", approved, "reason", "概览举报"));
+
+        Map<String, Object> after = controller.adminOverview(adminAuth).data();
+        assertEquals(baseFiles + 2, number(after.get("totalFiles")));
+        assertEquals(basePending + 1, number(after.get("pendingAudit")));
+        assertEquals(baseViews + 1, number(after.get("totalViews")));
+        assertEquals(baseReports + 1, number(after.get("reports")));
+        assertEquals(500, controller.adminOverview(userAuth).code());
+    }
+
+
+    @Test
+    void adminFilePageCoversEveryAuditStateAndCountsOpenReports() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "审核队列" + System.nanoTime();
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(((Number) controller.upload(userAuth, Map.of(
+                    "title", marker + " " + i, "fileType", i == 3 ? "md" : "pdf", "content", "队列内容 " + i)).data().get("id")).longValue());
+        }
+        controller.audit(adminAuth, Map.of("fileId", created.get(0), "auditStatus", "APPROVED"));
+        controller.audit(adminAuth, Map.of("fileId", created.get(1), "auditStatus", "REJECTED"));
+
+        // Newest first and across every audit state, unlike the member-facing library.
+        Map<String, Object> first = controller.adminFilesPage(adminAuth, marker, null, null, 2).data();
+        assertEquals(List.of(created.get(2), created.get(1)), idsOf(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, ((Number) first.get("total")).longValue());
+        Map<String, Object> second = controller.adminFilesPage(
+                adminAuth, marker, null, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(created.get(0)), idsOf(second));
+        assertEquals(false, second.get("hasMore"));
+        assertEquals(null, second.get("total"));
+
+        assertEquals(List.of(created.get(2)), idsOf(controller.adminFilesPage(adminAuth, marker, "PENDING", null, 20).data()));
+        assertEquals(List.of(created.get(1)), idsOf(controller.adminFilesPage(adminAuth, marker, "REJECTED", null, 20).data()));
+        assertEquals(List.of(created.get(0)), idsOf(controller.adminFilesPage(adminAuth, marker, "APPROVED", null, 20).data()));
+        assertEquals(List.of(created.get(2)), idsOf(controller.adminFilesPage(adminAuth, marker + " 3", null, null, 20).data()));
+        assertEquals(500, controller.adminFilesPage(userAuth, marker, null, null, 20).code());
+        assertEquals(500, controller.adminFilesPage(adminAuth, null, null, -1L, 20).code());
+
+        long openBefore = number(controller.adminOverview(adminAuth).data().get("openReports"));
+        controller.report(userAuth, Map.of("fileId", created.get(0), "reason", "队列举报"));
+        assertEquals(openBefore + 1, number(controller.adminOverview(adminAuth).data().get("openReports")));
+        Long reportId = controller.adminReports(adminAuth).data().stream()
+                .filter(report -> created.get(0).equals(((Number) report.get("fileId")).longValue()))
+                .map(report -> ((Number) report.get("id")).longValue())
+                .findFirst().orElseThrow();
+        controller.resolveReport(adminAuth, Map.of("reportId", reportId, "status", "RESOLVED", "result", "已处理"));
+        assertEquals(openBefore, number(controller.adminOverview(adminAuth).data().get("openReports")));
+    }
+
 }

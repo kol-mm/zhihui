@@ -56,4 +56,65 @@ public interface UserStore {
     record BehaviorRecord(Long id, Long userId, String action, String targetType, Long targetId,
                           LocalDateTime createdAt) {
     }
+
+    /** Counters behind the user admin overview. */
+    record UserTotals(long total, long active, long risk, long admins) { }
+
+    /** MySQL answers this with one grouped query; the in-memory profile folds the user list. */
+    default UserTotals userTotals() {
+        List<UserEntity> users = listUsers();
+        long active = users.stream().filter(user -> "ACTIVE".equals(user.getStatus())).count();
+        long admins = users.stream().filter(user -> "ADMIN".equals(user.getRole())).count();
+        return new UserTotals(users.size(), active, users.size() - active, admins);
+    }
+
+    /** Number of user reports, without reading them. */
+    default long countUserReports() {
+        return listUserReports().size();
+    }
+
+
+    /**
+     * One page of the admin user table.
+     *
+     * @param keyword matches the id, username or nickname (optional)
+     * @param status  ACTIVE or DISABLED (optional)
+     * @param role    ADMIN or USER (optional)
+     * @param userId  a single account, used when opening one user from a report (optional)
+     * @param afterId cursor: only users with a larger id, because the table reads oldest first
+     */
+    record UserPageQuery(String keyword, String status, String role, Long userId, Long afterId, int limit) { }
+
+    /** MySQL pages this by keyset; the in-memory profile filters the user list the same way. */
+    default List<UserEntity> pageUsers(UserPageQuery query) {
+        return matchingUsers(query)
+                .filter(user -> query.afterId() == null || user.getId() > query.afterId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    /** How many users match the filters, ignoring the cursor. */
+    default long countUsers(UserPageQuery query) {
+        return matchingUsers(query).count();
+    }
+
+    private java.util.stream.Stream<UserEntity> matchingUsers(UserPageQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listUsers().stream()
+                .sorted(java.util.Comparator.comparing(UserEntity::getId))
+                .filter(user -> query.userId() == null || query.userId().equals(user.getId()))
+                .filter(user -> query.status() == null || query.status().isBlank() || query.status().equals(user.getStatus()))
+                .filter(user -> query.role() == null || query.role().isBlank() || query.role().equals(user.getRole()))
+                .filter(user -> keyword.isEmpty()
+                        || String.valueOf(user.getId()).contains(keyword)
+                        || (user.getUsername() != null && user.getUsername().toLowerCase().contains(keyword))
+                        || (user.getNickname() != null && user.getNickname().toLowerCase().contains(keyword)));
+    }
+
+
+    /** User reports that still need a decision, for the moderation badge. */
+    default long countOpenUserReports() {
+        return listUserReports().stream().filter(report -> !"RESOLVED".equals(report.status())).count();
+    }
+
 }

@@ -41,6 +41,10 @@ public class KnowledgeSchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "knowledge_like", "idx_like_user_id", "user_id, id");
             ensureIndex(connection, statement, "knowledge_download", "idx_download_user_id", "user_id, id");
             ensureIndex(connection, statement, "knowledge_forward", "idx_forward_user_id", "user_id, id");
+            // The moderation badge counts reports that are still open.
+            ensureIndex(connection, statement, "knowledge_report", "idx_knowledge_report_status", "status");
+            // Analytics reads approved files created inside a time window.
+            ensureIndex(connection, statement, "knowledge_file", "idx_file_audit_created", "audit_status, created_at");
         }
     }
 

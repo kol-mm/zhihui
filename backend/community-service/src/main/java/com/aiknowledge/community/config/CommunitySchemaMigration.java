@@ -48,6 +48,10 @@ public class CommunitySchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "post_like", "idx_post_like_post", "post_id");
             ensureIndex(connection, statement, "post_collect", "idx_post_collect_post", "post_id");
             ensureIndex(connection, statement, "post_image", "idx_post_image_post", "post_id, sort_no");
+            // The moderation queues page posts by id within a status.
+            ensureIndex(connection, statement, "post", "idx_post_status_id", "status, id");
+            // Analytics reads published posts created inside a time window.
+            ensureIndex(connection, statement, "post", "idx_post_status_created", "status, created_at");
             backfillCommentRootIds(connection, statement);
         }
     }

@@ -407,7 +407,7 @@ public class MessageController {
         }
         return ApiResponse.ok(Map.of(
                 "module", "消息互动管理",
-                "notifications", messageStore.listNotifications(userId).size(),
+                "notifications", messageStore.countNotifications(userId),
                 "sessionOneMessages", messageStore.countMessages(List.of(1L)).getOrDefault(1L, 0L),
                 "storedEvents", eventBus.list(200).size(),
                 "capabilities", List.of("私信监管", "互动提醒", "聊天归档", "消息清理")
@@ -461,18 +461,18 @@ public class MessageController {
         if (denied != null) {
             return denied;
         }
-        List<FeedbackTicketEntity> tickets = messageStore.listTickets(userId);
+        MessageStore.TicketTotals totals = messageStore.ticketTotals(userId);
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("module", "工单反馈管理");
-        overview.put("tickets", tickets.size());
-        overview.put("faqs", messageStore.listFaqs().size());
-        overview.put("pendingTickets", tickets.stream().filter(ticket -> "PENDING".equals(ticket.getStatus())).count());
-        overview.put("processingTickets", tickets.stream().filter(ticket -> "PROCESSING".equals(ticket.getStatus())).count());
-        overview.put("resolvedTickets", tickets.stream().filter(ticket -> "RESOLVED".equals(ticket.getStatus())).count());
-        overview.put("bugTickets", tickets.stream().filter(ticket -> "BUG".equals(ticket.getType())).count());
-        overview.put("suggestionTickets", tickets.stream().filter(ticket -> "SUGGESTION".equals(ticket.getType())).count());
-        overview.put("supportTickets", tickets.stream().filter(ticket -> "SUPPORT".equals(ticket.getType())).count());
-        overview.put("supportWorkload", supportWorkload(tickets));
+        overview.put("tickets", totals.total());
+        overview.put("faqs", messageStore.countFaqs());
+        overview.put("pendingTickets", totals.pending());
+        overview.put("processingTickets", totals.processing());
+        overview.put("resolvedTickets", totals.resolved());
+        overview.put("bugTickets", totals.bug());
+        overview.put("suggestionTickets", totals.suggestion());
+        overview.put("supportTickets", totals.support());
+        overview.put("supportWorkload", messageStore.ticketWorkload(userId));
         overview.put("capabilities", List.of("客服分配", "工单处理", "进度跟踪", "接待统计", "FAQ维护"));
         return ApiResponse.ok(overview);
     }
@@ -542,24 +542,6 @@ public class MessageController {
 
     private String storeMode(Object store) {
         return store.getClass().getSimpleName().startsWith("MySql") ? "mysql" : "local";
-    }
-
-    private Map<Long, Map<String, Long>> supportWorkload(List<FeedbackTicketEntity> tickets) {
-        Map<Long, Map<String, Long>> workload = new LinkedHashMap<>();
-        for (FeedbackTicketEntity ticket : tickets) {
-            if (ticket.getAssigneeUserId() == null) continue;
-            Map<String, Long> counts = workload.computeIfAbsent(ticket.getAssigneeUserId(), ignored -> {
-                Map<String, Long> initial = new LinkedHashMap<>();
-                initial.put("assigned", 0L);
-                initial.put("processing", 0L);
-                initial.put("resolved", 0L);
-                return initial;
-            });
-            counts.put("assigned", counts.get("assigned") + 1);
-            if ("PROCESSING".equals(ticket.getStatus())) counts.put("processing", counts.get("processing") + 1);
-            if ("RESOLVED".equals(ticket.getStatus())) counts.put("resolved", counts.get("resolved") + 1);
-        }
-        return workload;
     }
 
     private boolean interactionAllowed(Long userId, Long targetUserId) {
@@ -725,6 +707,49 @@ public class MessageController {
         analytics.put("resolved", totals.resolved());
         analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
         return ApiResponse.ok(analytics);
+    }
+
+
+    private static final int TICKET_PAGE_MAX = 100;
+
+    /**
+     * One page of the ticket table. Admins see every reporter unless they ask for one; members
+     * only ever see their own tickets.
+     */
+    @GetMapping("/feedback/tickets/page")
+    public ApiResponse<Map<String, Object>> ticketsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        Long authenticatedUserId = LocalAuth.userId(authorization);
+        if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) {
+            return ApiResponse.fail("access to this user is denied");
+        }
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
+        int size = Math.min(Math.max(limit, 1), TICKET_PAGE_MAX);
+        MessageStore.TicketPageQuery query = new MessageStore.TicketPageQuery(userId, status, keyword, cursor, size + 1);
+        List<FeedbackTicketEntity> found = messageStore.pageTickets(query);
+        boolean hasMore = found.size() > size;
+        List<FeedbackTicketEntity> page = hasMore ? found.subList(0, size) : found;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page.stream().map(this::toTicketView).toList());
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).getId());
+        result.put("hasMore", hasMore);
+        // Counting can touch most of the table, so only a first page that is full pays for it: a short first
+        // page already is the whole result, and later pages send null.
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? messageStore.countTickets(new MessageStore.TicketPageQuery(userId, status, keyword, null, size))
+                    : page.size();
+        }
+        result.put("total", total);
+        return ApiResponse.ok(result);
     }
 
 }

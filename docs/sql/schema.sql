@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS user (
   publish_policy VARCHAR(32) NOT NULL DEFAULT 'STANDARD',
   messaging_enabled TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_user_status_id (status, id),
+  KEY idx_user_role_id (role, id)
 );
 CREATE TABLE IF NOT EXISTS role (id BIGINT PRIMARY KEY AUTO_INCREMENT, code VARCHAR(64) NOT NULL UNIQUE, name VARCHAR(64) NOT NULL);
 CREATE TABLE IF NOT EXISTS permission (id BIGINT PRIMARY KEY AUTO_INCREMENT, code VARCHAR(128) NOT NULL UNIQUE, name VARCHAR(64) NOT NULL);
@@ -36,18 +38,18 @@ ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role);
 
 USE knowledge_db;
 CREATE TABLE IF NOT EXISTS knowledge_category (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL, parent_id BIGINT DEFAULT 0, sort_no INT DEFAULT 0);
-CREATE TABLE IF NOT EXISTS knowledge_file (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, category_id BIGINT, title VARCHAR(255) NOT NULL, file_url VARCHAR(500), file_type VARCHAR(16), parse_status VARCHAR(32) DEFAULT 'PENDING', audit_status VARCHAR(32) DEFAULT 'PENDING', views INT DEFAULT 0, downloads INT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_file_user(user_id), KEY idx_file_user_id(user_id, id), KEY idx_file_category(category_id), KEY idx_file_audit(audit_status, id), KEY idx_file_category_audit(category_id, audit_status, id));
+CREATE TABLE IF NOT EXISTS knowledge_file (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, category_id BIGINT, title VARCHAR(255) NOT NULL, file_url VARCHAR(500), file_type VARCHAR(16), parse_status VARCHAR(32) DEFAULT 'PENDING', audit_status VARCHAR(32) DEFAULT 'PENDING', views INT DEFAULT 0, downloads INT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_file_user(user_id), KEY idx_file_user_id(user_id, id), KEY idx_file_category(category_id), KEY idx_file_audit(audit_status, id), KEY idx_file_category_audit(category_id, audit_status, id), KEY idx_file_audit_created(audit_status, created_at));
 CREATE TABLE IF NOT EXISTS knowledge_collect (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_file_collect(user_id, file_id), KEY idx_file_collect_file(file_id), KEY idx_collect_user_id(user_id, id));
 CREATE TABLE IF NOT EXISTS knowledge_like (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_file_like(user_id, file_id), KEY idx_file_like_file(file_id), KEY idx_like_user_id(user_id, id));
 CREATE TABLE IF NOT EXISTS knowledge_download (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_download_file(file_id), KEY idx_download_user_id(user_id, id));
 CREATE TABLE IF NOT EXISTS knowledge_forward (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_forward_user(user_id, created_at), KEY idx_forward_user_id(user_id, id));
-CREATE TABLE IF NOT EXISTS knowledge_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS knowledge_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_knowledge_report_status(status));
 INSERT INTO knowledge_category (id, name, parent_id, sort_no)
 VALUES (1, 'Product', 0, 10), (2, 'Engineering', 0, 20), (3, 'Operations', 0, 30)
 ON DUPLICATE KEY UPDATE name = VALUES(name), sort_no = VALUES(sort_no);
 
 USE community_db;
-CREATE TABLE IF NOT EXISTS post (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_post_user(user_id, created_at));
+CREATE TABLE IF NOT EXISTS post (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_post_user(user_id, created_at), KEY idx_post_status_id(status, id), KEY idx_post_status_created(status, created_at));
 CREATE TABLE IF NOT EXISTS post_image (id BIGINT PRIMARY KEY AUTO_INCREMENT, post_id BIGINT NOT NULL, image_url VARCHAR(500) NOT NULL, sort_no INT DEFAULT 0, KEY idx_post_image_post(post_id, sort_no));
 CREATE TABLE IF NOT EXISTS comment (id BIGINT PRIMARY KEY AUTO_INCREMENT, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, parent_id BIGINT DEFAULT 0, root_id BIGINT NULL, is_root TINYINT(1) NOT NULL DEFAULT 0, content TEXT NOT NULL, source VARCHAR(32) DEFAULT 'POST', status VARCHAR(32) DEFAULT 'VISIBLE', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_comment_post(post_id, created_at), KEY idx_comment_thread(post_id, root_id, id), KEY idx_comment_root(post_id, is_root, id));
 CREATE TABLE IF NOT EXISTS post_like (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, post_id BIGINT NOT NULL, source VARCHAR(32) DEFAULT 'POST', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_post_like(user_id, post_id), KEY idx_post_like_post(post_id));
@@ -58,7 +60,7 @@ USE message_db;
 CREATE TABLE IF NOT EXISTS chat_session (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_a_id BIGINT NOT NULL, user_b_id BIGINT NOT NULL, status VARCHAR(32) DEFAULT 'ACTIVE', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_session_pair(user_a_id, user_b_id), KEY idx_session_user_b(user_b_id));
 CREATE TABLE IF NOT EXISTS chat_message (id BIGINT PRIMARY KEY AUTO_INCREMENT, session_id BIGINT NOT NULL, sender_id BIGINT NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'NORMAL', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_message_session(session_id, created_at), KEY idx_message_session_id(session_id, id));
 CREATE TABLE IF NOT EXISTS notification (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, is_read TINYINT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_notification_user(user_id, is_read, id), KEY idx_notification_user_id(user_id, id));
-  CREATE TABLE IF NOT EXISTS feedback_ticket (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'PENDING', official_reply TEXT, assignee_user_id BIGINT, assigned_at DATETIME, closed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_feedback_assignee(assignee_user_id, status));
+  CREATE TABLE IF NOT EXISTS feedback_ticket (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'PENDING', official_reply TEXT, assignee_user_id BIGINT, assigned_at DATETIME, closed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_feedback_assignee(assignee_user_id, status), KEY idx_feedback_status_id(status, id), KEY idx_feedback_user_ticket(user_id, id), KEY idx_feedback_created(created_at), KEY idx_feedback_type_status(type, status));
 CREATE TABLE IF NOT EXISTS faq (id BIGINT PRIMARY KEY AUTO_INCREMENT, question VARCHAR(255) NOT NULL, answer TEXT NOT NULL, sort_no INT DEFAULT 0, enabled TINYINT DEFAULT 1);
 INSERT INTO faq (id, question, answer, sort_no, enabled)
 VALUES (1, 'How do I upload knowledge?', 'Open the knowledge library and choose Upload.', 10, 1)

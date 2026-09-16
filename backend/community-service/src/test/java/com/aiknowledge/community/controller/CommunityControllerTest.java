@@ -574,4 +574,68 @@ class CommunityControllerTest {
         return value instanceof Number found ? found.longValue() : 0L;
     }
 
+
+    @Test
+    void adminOverviewCountsPostsAndDraftsWithoutReadingTheFeed() {
+        String overviewAuthor = "Bearer " + LocalAuth.issueToken("overview-author", 4243L, "USER");
+        Map<String, Object> before = controller.adminOverview(adminAuth, null).data();
+        long basePublished = analyticsNumber(before.get("publishedPosts"));
+        long basePending = analyticsNumber(before.get("pendingAudit"));
+        long baseDrafts = analyticsNumber(before.get("draftsTracked"));
+
+        Long published = ((Number) controller.createPost(overviewAuthor, Map.of(
+                "title", "概览帖子 " + System.nanoTime(), "content", "概览内容")).data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", published, "status", "PUBLISHED"));
+        controller.createPost(overviewAuthor, Map.of("title", "概览待审 " + System.nanoTime(), "content", "待审内容"));
+        controller.saveDraft(overviewAuthor, Map.of("title", "概览草稿", "content", "草稿内容"));
+
+        Map<String, Object> after = controller.adminOverview(adminAuth, null).data();
+        assertEquals(basePublished + 1, analyticsNumber(after.get("publishedPosts")));
+        assertEquals(basePending + 1, analyticsNumber(after.get("pendingAudit")));
+        assertEquals(baseDrafts + 1, analyticsNumber(after.get("draftsTracked")));
+
+        // The same counters narrowed to one author.
+        Map<String, Object> mine = controller.adminOverview(adminAuth, 4243L).data();
+        assertEquals(1L, analyticsNumber(mine.get("publishedPosts")));
+        assertEquals(1L, analyticsNumber(mine.get("pendingAudit")));
+        assertEquals(1L, analyticsNumber(mine.get("draftsTracked")));
+    }
+
+
+    @Test
+    void adminPostPageSplitsTheModerationQueues() {
+        String queueAuthor = "Bearer " + LocalAuth.issueToken("queue-author", 4244L, "USER");
+        String marker = "队列帖子" + System.nanoTime();
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            created.add(((Number) controller.createPost(queueAuthor, Map.of(
+                    "title", marker + " " + i, "content", "队列内容")).data().get("id")).longValue());
+        }
+        long hiddenBefore = analyticsNumber(controller.adminOverview(adminAuth, null).data().get("hiddenPosts"));
+        controller.auditPost(adminAuth, Map.of("postId", created.get(0), "status", "PUBLISHED"));
+        controller.auditPost(adminAuth, Map.of("postId", created.get(1), "status", "HIDDEN"));
+        assertEquals(hiddenBefore + 1, analyticsNumber(controller.adminOverview(adminAuth, null).data().get("hiddenPosts")));
+
+        // The pending queue and the management table are two views of the same post table.
+        Map<String, Object> pending = controller.adminPostsPage(adminAuth, "PENDING", marker, null, 1).data();
+        assertEquals(List.of(created.get(3)), ids(pending));
+        assertEquals(true, pending.get("hasMore"));
+        assertEquals(2L, ((Number) pending.get("total")).longValue());
+        Map<String, Object> pendingNext = controller.adminPostsPage(
+                adminAuth, "PENDING", marker, ((Number) pending.get("nextCursor")).longValue(), 1).data();
+        assertEquals(List.of(created.get(2)), ids(pendingNext));
+        assertEquals(null, pendingNext.get("total"));
+
+        Map<String, Object> managed = controller.adminPostsPage(adminAuth, "PUBLISHED,HIDDEN", marker, null, 20).data();
+        assertEquals(List.of(created.get(1), created.get(0)), ids(managed));
+        assertEquals(List.of(created.get(1)), ids(controller.adminPostsPage(adminAuth, "HIDDEN", marker, null, 20).data()));
+        assertEquals(4L, ((Number) controller.adminPostsPage(adminAuth, "", marker, null, 20).data().get("total")).longValue());
+        // The author id is searchable too.
+        assertTrue(ids(controller.adminPostsPage(adminAuth, "", "4244", null, 50).data()).containsAll(created));
+
+        assertEquals(500, controller.adminPostsPage(adminAuth, "DELETED", marker, null, 20).code());
+        assertEquals(500, controller.adminPostsPage(userAuth, "PENDING", marker, null, 20).code());
+        assertEquals(500, controller.adminPostsPage(adminAuth, "PENDING", null, -1L, 20).code());
+    }
+
 }

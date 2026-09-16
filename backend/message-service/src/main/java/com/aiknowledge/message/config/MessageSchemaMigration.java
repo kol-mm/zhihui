@@ -37,6 +37,13 @@ public class MessageSchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "notification", "idx_notification_user", "user_id, is_read, id");
             // Listing a user's notifications orders by id; without this the optimiser falls back to a primary-key scan.
             ensureIndex(connection, statement, "notification", "idx_notification_user_id", "user_id, id");
+            // The admin ticket table pages by id, filtered by status or by reporter.
+            ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_status_id", "status, id");
+            ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_user_ticket", "user_id, id");
+            // Analytics reads tickets created inside a time window.
+            ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_created", "created_at");
+            // The feedback overview counts tickets by type and status from this index alone.
+            ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_type_status", "type, status");
         }
     }
 

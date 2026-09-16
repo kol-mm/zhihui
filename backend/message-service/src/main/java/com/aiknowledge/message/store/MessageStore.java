@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.TreeMap;
 
 public interface MessageStore {
     ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId);
@@ -140,6 +141,90 @@ public interface MessageStore {
         return listTickets(null).stream()
                 .filter(ticket -> ticket.getCreatedAt() == null || !ticket.getCreatedAt().isBefore(since))
                 .toList();
+    }
+
+
+    /** Counters behind the feedback admin overview, optionally narrowed to one reporter. */
+    record TicketTotals(long total, long pending, long processing, long resolved,
+                        long bug, long suggestion, long support) { }
+
+    /** MySQL answers this with one grouped query; the in-memory profile folds the ticket list. */
+    default TicketTotals ticketTotals(Long userId) {
+        List<FeedbackTicketEntity> tickets = listTickets(userId);
+        return new TicketTotals(
+                tickets.size(),
+                tickets.stream().filter(ticket -> "PENDING".equals(ticket.getStatus())).count(),
+                tickets.stream().filter(ticket -> "PROCESSING".equals(ticket.getStatus())).count(),
+                tickets.stream().filter(ticket -> "RESOLVED".equals(ticket.getStatus())).count(),
+                tickets.stream().filter(ticket -> "BUG".equals(ticket.getType())).count(),
+                tickets.stream().filter(ticket -> "SUGGESTION".equals(ticket.getType())).count(),
+                tickets.stream().filter(ticket -> "SUPPORT".equals(ticket.getType())).count());
+    }
+
+    /** Assigned, in-progress and resolved ticket counts per support agent, ordered by agent id. */
+    default Map<Long, Map<String, Long>> ticketWorkload(Long userId) {
+        Map<Long, Map<String, Long>> workload = new TreeMap<>();
+        for (FeedbackTicketEntity ticket : listTickets(userId)) {
+            if (ticket.getAssigneeUserId() == null) continue;
+            Map<String, Long> counts = workload.computeIfAbsent(ticket.getAssigneeUserId(), ignored -> {
+                Map<String, Long> initial = new LinkedHashMap<>();
+                initial.put("assigned", 0L);
+                initial.put("processing", 0L);
+                initial.put("resolved", 0L);
+                return initial;
+            });
+            counts.put("assigned", counts.get("assigned") + 1);
+            if ("PROCESSING".equals(ticket.getStatus())) counts.put("processing", counts.get("processing") + 1);
+            if ("RESOLVED".equals(ticket.getStatus())) counts.put("resolved", counts.get("resolved") + 1);
+        }
+        return new LinkedHashMap<>(workload);
+    }
+
+    /** Number of published FAQ entries, without reading them. */
+    default long countFaqs() {
+        return listFaqs().size();
+    }
+
+    /** Number of notifications, without reading them. */
+    default long countNotifications(Long userId) {
+        return listNotifications(userId).size();
+    }
+
+
+    /**
+     * One page of the admin ticket table.
+     *
+     * @param userId   only this reporter's tickets (optional)
+     * @param status   PENDING, PROCESSING or RESOLVED (optional)
+     * @param keyword  matches the ticket id, reporter id, type, content or official reply (optional)
+     * @param beforeId cursor: only tickets with a smaller id, because the table reads newest first
+     */
+    record TicketPageQuery(Long userId, String status, String keyword, Long beforeId, int limit) { }
+
+    /** MySQL pages this by keyset; the in-memory profile filters the ticket list the same way. */
+    default List<FeedbackTicketEntity> pageTickets(TicketPageQuery query) {
+        return matchingTickets(query)
+                .filter(ticket -> query.beforeId() == null || ticket.getId() < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    /** How many tickets match the filters, ignoring the cursor. */
+    default long countTickets(TicketPageQuery query) {
+        return matchingTickets(query).count();
+    }
+
+    private java.util.stream.Stream<FeedbackTicketEntity> matchingTickets(TicketPageQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listTickets(query.userId()).stream()
+                .sorted(java.util.Comparator.comparing(FeedbackTicketEntity::getId).reversed())
+                .filter(ticket -> query.status() == null || query.status().isBlank() || query.status().equals(ticket.getStatus()))
+                .filter(ticket -> keyword.isEmpty()
+                        || String.valueOf(ticket.getId()).contains(keyword)
+                        || String.valueOf(ticket.getUserId()).contains(keyword)
+                        || (ticket.getType() != null && ticket.getType().toLowerCase().contains(keyword))
+                        || (ticket.getContent() != null && ticket.getContent().toLowerCase().contains(keyword))
+                        || (ticket.getOfficialReply() != null && ticket.getOfficialReply().toLowerCase().contains(keyword)));
     }
 
 }

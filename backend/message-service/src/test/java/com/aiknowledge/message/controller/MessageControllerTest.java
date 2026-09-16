@@ -416,4 +416,78 @@ class MessageControllerTest {
         return value instanceof Number found ? found.longValue() : 0L;
     }
 
+
+    @Test
+    void adminOverviewsCountTicketsFaqsAndNotifications() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        Map<String, Object> before = controller.feedbackAdminOverview(adminAuth, null).data();
+        long baseTickets = analyticsNumber(before.get("tickets"));
+        long baseSupport = analyticsNumber(before.get("supportTickets"));
+        long baseProcessing = analyticsNumber(before.get("processingTickets"));
+        long baseFaqs = analyticsNumber(before.get("faqs"));
+
+        Long ticketId = ((Number) controller.createTicket(userAuth, Map.of(
+                "type", "SUPPORT", "content", "概览工单 " + System.nanoTime())).data().get("id")).longValue();
+        controller.assignTicket(adminAuth, Map.of("ticketId", ticketId, "assigneeUserId", 7L));
+        controller.saveFaq(adminAuth, Map.of("question", "概览问题 " + System.nanoTime(), "answer", "概览答案"));
+
+        Map<String, Object> after = controller.feedbackAdminOverview(adminAuth, null).data();
+        assertEquals(baseTickets + 1, analyticsNumber(after.get("tickets")));
+        assertEquals(baseSupport + 1, analyticsNumber(after.get("supportTickets")));
+        assertEquals(baseProcessing + 1, analyticsNumber(after.get("processingTickets")));
+        assertEquals(baseFaqs + 1, analyticsNumber(after.get("faqs")));
+        @SuppressWarnings("unchecked")
+        Map<Long, Map<String, Long>> workload = (Map<Long, Map<String, Long>>) after.get("supportWorkload");
+        assertEquals(1L, workload.get(7L).get("assigned"));
+        assertEquals(1L, workload.get(7L).get("processing"));
+        assertEquals(0L, workload.get(7L).get("resolved"));
+
+        // Narrowed to one user the count matches that user's list; unscoped it covers everyone.
+        long mine = analyticsNumber(controller.messageAdminOverview(adminAuth, 1L).data().get("notifications"));
+        assertEquals(controller.notifications(userAuth, null).data().size(), mine);
+        assertTrue(analyticsNumber(controller.messageAdminOverview(adminAuth, null).data().get("notifications")) >= mine);
+    }
+
+
+    @Test
+    void ticketPageFiltersAndPagesServerSide() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "工单分页" + System.nanoTime();
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(((Number) controller.createTicket(userAuth, Map.of(
+                    "type", i == 3 ? "SUPPORT" : "BUG", "content", marker + " " + i)).data().get("id")).longValue());
+        }
+        controller.replyTicket(adminAuth, Map.of("ticketId", created.get(0), "status", "RESOLVED", "reply", "已处理"));
+
+        // Newest first, so the walk starts at the last ticket created.
+        Map<String, Object> first = controller.ticketsPage(adminAuth, null, null, marker, null, 2).data();
+        assertEquals(List.of(created.get(2), created.get(1)), ticketIds(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, ((Number) first.get("total")).longValue());
+
+        Map<String, Object> second = controller.ticketsPage(
+                adminAuth, null, null, marker, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(created.get(0)), ticketIds(second));
+        assertEquals(false, second.get("hasMore"));
+        assertEquals(null, second.get("total"));
+
+        assertEquals(List.of(created.get(0)), ticketIds(controller.ticketsPage(adminAuth, null, "RESOLVED", marker, null, 20).data()));
+        assertEquals(2L, ((Number) controller.ticketsPage(adminAuth, null, "PENDING", marker, null, 20)
+                .data().get("total")).longValue());
+        assertEquals(List.of(created.get(2)), ticketIds(controller.ticketsPage(adminAuth, null, null, marker + " 3", null, 20).data()));
+
+        // A member only ever sees their own tickets, whatever userId they ask for.
+        String otherAuth = "Bearer " + LocalAuth.issueToken("other-reporter", 4321L, "USER");
+        assertTrue(ticketIds(controller.ticketsPage(otherAuth, null, null, marker, null, 20).data()).isEmpty());
+        assertEquals(500, controller.ticketsPage(otherAuth, 1L, null, null, null, 20).code());
+        assertEquals(500, controller.ticketsPage(adminAuth, null, null, null, -1L, 20).code());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Long> ticketIds(Map<String, Object> page) {
+        return ((List<Map<String, Object>>) page.get("items")).stream()
+                .map(item -> ((Number) item.get("id")).longValue()).toList();
+    }
+
 }

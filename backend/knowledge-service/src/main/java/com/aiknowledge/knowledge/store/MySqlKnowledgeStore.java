@@ -488,15 +488,23 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         return view;
     }
 
+    /**
+     * Optimizer hint for the analytics time windows. Left alone, MySQL reads every file with the status through
+     * a status-only index and filters the dates afterwards; on a 300k-file table that was 3 to 10 times slower
+     * for 7 to 180 day windows and no faster for a full year. KnowledgeSchemaMigration creates the index, and
+     * MySQL ignores the hint with a warning if it is ever missing.
+     */
+    private static final String WINDOW_INDEX = "/*+ INDEX(knowledge_file idx_file_audit_created) */ ";
+
     @Override
     public ContentAnalytics analytics(LocalDateTime since) {
         List<Map<String, Object>> rows = fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
-                .select("COUNT(*) AS file_count", "IFNULL(SUM(views), 0) AS view_total", "IFNULL(SUM(downloads), 0) AS download_total")
+                .select(WINDOW_INDEX + "COUNT(*) AS file_count", "IFNULL(SUM(views), 0) AS view_total", "IFNULL(SUM(downloads), 0) AS download_total")
                 .eq("audit_status", "APPROVED")
                 .ge("created_at", since));
         Map<String, Object> totals = rows.isEmpty() ? Map.of() : rows.get(0);
         Long likes = likeMapper.selectCount(new QueryWrapper<KnowledgeLikeEntity>()
-                .apply("file_id IN (SELECT id FROM knowledge_file WHERE audit_status = 'APPROVED' AND created_at >= {0})", since));
+                .apply("file_id IN (SELECT " + WINDOW_INDEX + "id FROM knowledge_file WHERE audit_status = 'APPROVED' AND created_at >= {0})", since));
         return new ContentAnalytics(
                 longValue(totals.get("file_count")),
                 longValue(totals.get("view_total")),
@@ -507,7 +515,7 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     @Override
     public List<DailyCount> dailyFileCounts(LocalDateTime since) {
         return fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
-                        .select("DATE(created_at) AS day", "COUNT(*) AS file_count")
+                        .select(WINDOW_INDEX + "DATE(created_at) AS day", "COUNT(*) AS file_count")
                         .eq("audit_status", "APPROVED")
                         .ge("created_at", since)
                         .groupBy("DATE(created_at)")
@@ -550,6 +558,67 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
 
     private static long longValue(Object value) {
         return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+
+    @Override
+    public FileTotals fileTotals() {
+        List<Map<String, Object>> rows = fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
+                .select("COUNT(*) AS file_count",
+                        "IFNULL(SUM(CASE WHEN audit_status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count",
+                        "IFNULL(SUM(views), 0) AS view_total",
+                        "IFNULL(SUM(downloads), 0) AS download_total"));
+        Map<String, Object> totals = rows.isEmpty() ? Map.of() : rows.get(0);
+        return new FileTotals(
+                longValue(totals.get("file_count")),
+                longValue(totals.get("pending_count")),
+                longValue(totals.get("view_total")),
+                longValue(totals.get("download_total")));
+    }
+
+    @Override
+    public long countReports(Long userId) {
+        Long count = reportMapper.selectCount(Wrappers.<KnowledgeReportEntity>lambdaQuery()
+                .eq(userId != null, KnowledgeReportEntity::getUserId, userId));
+        return count == null ? 0L : count;
+    }
+
+
+    @Override
+    public List<KnowledgeFileEntity> pageAdminFiles(AdminFileQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return fileMapper.selectList(adminFileFilter(query)
+                .lt(query.beforeId() != null, KnowledgeFileEntity::getId, query.beforeId())
+                .orderByDesc(KnowledgeFileEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countAdminFiles(AdminFileQuery query) {
+        Long count = fileMapper.selectCount(adminFileFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<KnowledgeFileEntity> adminFileFilter(AdminFileQuery query) {
+        LambdaQueryWrapper<KnowledgeFileEntity> wrapper = Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                .eq(query.auditStatus() != null && !query.auditStatus().isBlank(),
+                        KnowledgeFileEntity::getAuditStatus, query.auditStatus());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // The queue searches by file id as well as by text, so the id is matched as text.
+            wrapper.and(match -> match.like(KnowledgeFileEntity::getTitle, keyword)
+                    .or().like(KnowledgeFileEntity::getFileType, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+    @Override
+    public long countOpenReports() {
+        Long count = reportMapper.selectCount(Wrappers.<KnowledgeReportEntity>lambdaQuery()
+                .and(open -> open.ne(KnowledgeReportEntity::getStatus, "RESOLVED")
+                        .or().isNull(KnowledgeReportEntity::getStatus)));
+        return count == null ? 0L : count;
     }
 
 }

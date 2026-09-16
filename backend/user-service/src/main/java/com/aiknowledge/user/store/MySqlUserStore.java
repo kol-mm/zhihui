@@ -17,6 +17,9 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.util.Map;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 @Repository
 @Profile("mysql")
@@ -222,4 +225,68 @@ public class MySqlUserStore implements UserStore {
         return new UserReport(report.getId(), report.getReporterId(), report.getTargetUserId(), report.getReason(),
                 report.getStatus(), report.getResult(), report.getCreatedAt(), report.getUpdatedAt());
     }
+
+    @Override
+    public UserTotals userTotals() {
+        List<Map<String, Object>> rows = userMapper.selectMaps(new QueryWrapper<UserEntity>()
+                .select("COUNT(*) AS user_count",
+                        "IFNULL(SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END), 0) AS active_count",
+                        "IFNULL(SUM(CASE WHEN role = 'ADMIN' THEN 1 ELSE 0 END), 0) AS admin_count"));
+        Map<String, Object> totals = rows.isEmpty() ? Map.of() : rows.get(0);
+        long total = totalValue(totals.get("user_count"));
+        long active = totalValue(totals.get("active_count"));
+        return new UserTotals(total, active, total - active, totalValue(totals.get("admin_count")));
+    }
+
+    @Override
+    public long countUserReports() {
+        Long count = reportMapper.selectCount(Wrappers.<UserReportEntity>lambdaQuery());
+        return count == null ? 0L : count;
+    }
+
+    private static long totalValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+
+    @Override
+    public List<UserEntity> pageUsers(UserPageQuery query) {
+        if (query.limit() <= 0) return List.of();
+        LambdaQueryWrapper<UserEntity> wrapper = userFilter(query)
+                .gt(query.afterId() != null, UserEntity::getId, query.afterId())
+                .orderByAsc(UserEntity::getId)
+                .last("LIMIT " + query.limit());
+        return userMapper.selectList(wrapper);
+    }
+
+    @Override
+    public long countUsers(UserPageQuery query) {
+        Long count = userMapper.selectCount(userFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<UserEntity> userFilter(UserPageQuery query) {
+        LambdaQueryWrapper<UserEntity> wrapper = Wrappers.<UserEntity>lambdaQuery()
+                .eq(query.userId() != null, UserEntity::getId, query.userId())
+                .eq(query.status() != null && !query.status().isBlank(), UserEntity::getStatus, query.status())
+                .eq(query.role() != null && !query.role().isBlank(), UserEntity::getRole, query.role());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // The table searches by account id as well as by name, so the id is matched as text.
+            wrapper.and(match -> match.like(UserEntity::getUsername, keyword)
+                    .or().like(UserEntity::getNickname, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+
+    @Override
+    public long countOpenUserReports() {
+        Long count = reportMapper.selectCount(Wrappers.<UserReportEntity>lambdaQuery()
+                .and(open -> open.ne(UserReportEntity::getStatus, "RESOLVED")
+                        .or().isNull(UserReportEntity::getStatus)));
+        return count == null ? 0L : count;
+    }
+
 }

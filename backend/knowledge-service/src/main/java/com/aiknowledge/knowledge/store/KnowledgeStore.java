@@ -126,4 +126,63 @@ public interface KnowledgeStore {
         return views + downloads * 2L + likes * 2L;
     }
 
+
+    /** Counters behind the knowledge admin overview, across every file whatever its audit state. */
+    record FileTotals(long files, long pendingAudit, long views, long downloads) { }
+
+    /** MySQL answers this with one grouped query; the in-memory profile folds the file list. */
+    default FileTotals fileTotals() {
+        List<KnowledgeFileEntity> files = listFiles();
+        return new FileTotals(
+                files.size(),
+                files.stream().filter(file -> "PENDING".equals(file.getAuditStatus())).count(),
+                files.stream().mapToLong(file -> file.getViews() == null ? 0L : file.getViews()).sum(),
+                files.stream().mapToLong(file -> file.getDownloads() == null ? 0L : file.getDownloads()).sum());
+    }
+
+    /** Number of content reports, without reading the reports themselves. */
+    default long countReports(Long userId) {
+        return listReports(userId).size();
+    }
+
+
+    /**
+     * One page of the moderation file table, newest first and across every audit state.
+     *
+     * @param keyword     matches the id, title or file type (optional)
+     * @param auditStatus PENDING, APPROVED, REJECTED or HIDDEN (optional)
+     * @param beforeId    cursor: only files with a smaller id (optional)
+     */
+    record AdminFileQuery(String keyword, String auditStatus, Long beforeId, int limit) { }
+
+    /** MySQL pages this by keyset; the in-memory profile filters the file list the same way. */
+    default List<KnowledgeFileEntity> pageAdminFiles(AdminFileQuery query) {
+        return matchingAdminFiles(query)
+                .filter(file -> query.beforeId() == null || file.getId() < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    /** How many files match the moderation filters, ignoring the cursor. */
+    default long countAdminFiles(AdminFileQuery query) {
+        return matchingAdminFiles(query).count();
+    }
+
+    private java.util.stream.Stream<KnowledgeFileEntity> matchingAdminFiles(AdminFileQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listFiles().stream()
+                .sorted(Comparator.comparing(KnowledgeFileEntity::getId).reversed())
+                .filter(file -> query.auditStatus() == null || query.auditStatus().isBlank()
+                        || query.auditStatus().equals(file.getAuditStatus()))
+                .filter(file -> keyword.isEmpty()
+                        || String.valueOf(file.getId()).contains(keyword)
+                        || (file.getTitle() != null && file.getTitle().toLowerCase().contains(keyword))
+                        || (file.getFileType() != null && file.getFileType().toLowerCase().contains(keyword)));
+    }
+
+    /** Reports that still need a decision, for the moderation badge. */
+    default long countOpenReports() {
+        return listReports(null).stream().filter(report -> !"RESOLVED".equals(report.get("status"))).count();
+    }
+
 }

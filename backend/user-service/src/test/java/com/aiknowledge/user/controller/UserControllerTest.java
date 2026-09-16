@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 
@@ -262,4 +263,106 @@ class UserControllerTest {
         assertEquals("VIEW", behavior.data().action());
         assertEquals(1, controller.behaviors(auth, 1L).data().size());
     }
+
+    @Test
+    void adminOverviewCountsUsersAndReportsWithoutReadingThemAll() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        Map<String, Object> before = controller.adminOverview(adminAuth).data();
+        long baseTotal = overviewNumber(before.get("totalUsers"));
+        long baseActive = overviewNumber(before.get("activeUsers"));
+        long baseRisk = overviewNumber(before.get("riskUsers"));
+        long baseReports = overviewNumber(before.get("reports"));
+
+        String username = "overview-" + System.nanoTime();
+        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+                .data().get("user")).get("id")).longValue();
+        controller.reportUser("Bearer " + LocalAuth.issueToken(username, userId, "USER"),
+                Map.of("targetUserId", 1L, "reason", "概览举报"));
+
+        Map<String, Object> afterRegister = controller.adminOverview(adminAuth).data();
+        assertEquals(baseTotal + 1, overviewNumber(afterRegister.get("totalUsers")));
+        assertEquals(baseActive + 1, overviewNumber(afterRegister.get("activeUsers")));
+        assertEquals(baseRisk, overviewNumber(afterRegister.get("riskUsers")));
+        assertEquals(baseReports + 1, overviewNumber(afterRegister.get("reports")));
+
+        controller.updateUserStatus(adminAuth, Map.of("userId", userId, "status", "DISABLED"));
+        Map<String, Object> afterDisable = controller.adminOverview(adminAuth).data();
+        assertEquals(baseTotal + 1, overviewNumber(afterDisable.get("totalUsers")));
+        assertEquals(baseActive, overviewNumber(afterDisable.get("activeUsers")));
+        assertEquals(baseRisk + 1, overviewNumber(afterDisable.get("riskUsers")));
+    }
+
+    private static long overviewNumber(Object value) {
+        return value instanceof Number found ? found.longValue() : 0L;
+    }
+
+
+    @Test
+    void adminUserPageFiltersAndPagesServerSide() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "pagesample" + System.nanoTime();
+        java.util.List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(((Number) ((Map<?, ?>) controller.register(credentials(marker + "-" + i, "password123"))
+                    .data().get("user")).get("id")).longValue());
+        }
+        controller.updateUserStatus(adminAuth, Map.of("userId", created.get(2), "status", "DISABLED"));
+
+        // The keyword narrows the table to this test's accounts, so the cursor walk is stable.
+        Map<String, Object> first = controller.adminUsersPage(adminAuth, marker, null, null, null, null, 2).data();
+        assertEquals(List.of(created.get(0), created.get(1)), pagedIds(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, ((Number) first.get("total")).longValue());
+
+        Map<String, Object> second = controller.adminUsersPage(
+                adminAuth, marker, null, null, null, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(created.get(2)), pagedIds(second));
+        assertEquals(false, second.get("hasMore"));
+        assertEquals(null, second.get("total"));
+
+        Map<String, Object> disabled = controller.adminUsersPage(adminAuth, marker, "DISABLED", null, null, null, 20).data();
+        assertEquals(List.of(created.get(2)), pagedIds(disabled));
+        assertEquals(1L, ((Number) disabled.get("total")).longValue());
+        assertEquals(2L, ((Number) controller.adminUsersPage(adminAuth, marker, "ACTIVE", null, null, null, 20)
+                .data().get("total")).longValue());
+        assertTrue(pagedIds(controller.adminUsersPage(adminAuth, marker, null, "ADMIN", null, null, 20).data()).isEmpty());
+
+        // One account by id, the lookup the moderation view uses to open a reported user.
+        Map<String, Object> single = controller.adminUsersPage(adminAuth, null, null, null, created.get(1), null, 1).data();
+        assertEquals(List.of(created.get(1)), pagedIds(single));
+
+        assertEquals(500, controller.adminUsersPage(userAuth(), marker, null, null, null, null, 20).code());
+        assertEquals(500, controller.adminUsersPage(adminAuth, null, null, null, null, -1L, 20).code());
+    }
+
+    private String userAuth() {
+        return "Bearer " + LocalAuth.issueToken("demo", 1L, "USER");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Long> pagedIds(Map<String, Object> page) {
+        return ((List<Map<String, Object>>) page.get("items")).stream()
+                .map(item -> ((Number) item.get("id")).longValue()).toList();
+    }
+
+
+    @Test
+    void adminOverviewCountsOpenUserReports() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        long openBefore = overviewNumber(controller.adminOverview(adminAuth).data().get("openReports"));
+        long allBefore = overviewNumber(controller.adminOverview(adminAuth).data().get("reports"));
+
+        String username = "openreport-" + System.nanoTime();
+        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+                .data().get("user")).get("id")).longValue();
+        Long reportId = controller.reportUser("Bearer " + LocalAuth.issueToken(username, userId, "USER"),
+                Map.of("targetUserId", 1L, "reason", "待处理举报")).data().id();
+        assertEquals(openBefore + 1, overviewNumber(controller.adminOverview(adminAuth).data().get("openReports")));
+
+        controller.resolveUserReport(adminAuth, Map.of("reportId", reportId, "status", "RESOLVED", "result", "已处理"));
+        Map<String, Object> after = controller.adminOverview(adminAuth).data();
+        assertEquals(openBefore, overviewNumber(after.get("openReports")));
+        assertEquals(allBefore + 1, overviewNumber(after.get("reports")));
+    }
+
 }

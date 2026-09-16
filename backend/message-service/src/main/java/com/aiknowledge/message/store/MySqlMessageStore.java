@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.LinkedHashMap;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 
 @Repository
 @Profile("mysql")
@@ -286,23 +287,25 @@ public class MySqlMessageStore implements MessageStore {
     public TicketAnalytics ticketAnalytics(LocalDateTime since) {
         Map<String, Long> byType = new LinkedHashMap<>();
         long total = 0L;
+        long resolved = 0L;
+        // The resolved count rides on the same window scan: as a separate status = 'RESOLVED' query, MySQL
+        // preferred the status index and walked every resolved ticket ever filed.
         for (Map<String, Object> row : ticketMapper.selectMaps(new QueryWrapper<FeedbackTicketEntity>()
-                .select("type AS ticket_type", "COUNT(*) AS ticket_count")
+                .select("type AS ticket_type", "COUNT(*) AS ticket_count",
+                        "IFNULL(SUM(CASE WHEN status = 'RESOLVED' THEN 1 ELSE 0 END), 0) AS resolved_count")
                 .ge("created_at", since)
                 .groupBy("type"))) {
             long count = ticketCount(row.get("ticket_count"));
             byType.put(String.valueOf(row.get("ticket_type")), count);
             total += count;
+            resolved += ticketCount(row.get("resolved_count"));
         }
-        Long resolved = ticketMapper.selectCount(Wrappers.<FeedbackTicketEntity>lambdaQuery()
-                .eq(FeedbackTicketEntity::getStatus, "RESOLVED")
-                .ge(FeedbackTicketEntity::getCreatedAt, since));
         return new TicketAnalytics(
                 total,
                 byType.getOrDefault("BUG", 0L),
                 byType.getOrDefault("SUGGESTION", 0L),
                 byType.getOrDefault("SUPPORT", 0L),
-                resolved == null ? 0L : resolved);
+                resolved);
     }
 
     @Override
@@ -319,6 +322,101 @@ public class MySqlMessageStore implements MessageStore {
 
     private static long ticketCount(Object value) {
         return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+
+    @Override
+    public TicketTotals ticketTotals(Long userId) {
+        // Grouping by (type, status) lets MySQL answer from idx_feedback_type_status alone instead of reading
+        // every ticket row; the handful of groups are folded into the totals here.
+        QueryWrapper<FeedbackTicketEntity> wrapper = new QueryWrapper<FeedbackTicketEntity>()
+                .select("type AS ticket_type", "status AS ticket_status", "COUNT(*) AS ticket_count")
+                .groupBy("type", "status");
+        if (userId != null) wrapper.eq("user_id", userId);
+        Map<String, Long> byType = new LinkedHashMap<>();
+        Map<String, Long> byStatus = new LinkedHashMap<>();
+        long total = 0L;
+        for (Map<String, Object> row : ticketMapper.selectMaps(wrapper)) {
+            long count = ticketCount(row.get("ticket_count"));
+            byType.merge(String.valueOf(row.get("ticket_type")), count, Long::sum);
+            byStatus.merge(String.valueOf(row.get("ticket_status")), count, Long::sum);
+            total += count;
+        }
+        return new TicketTotals(
+                total,
+                byStatus.getOrDefault("PENDING", 0L),
+                byStatus.getOrDefault("PROCESSING", 0L),
+                byStatus.getOrDefault("RESOLVED", 0L),
+                byType.getOrDefault("BUG", 0L),
+                byType.getOrDefault("SUGGESTION", 0L),
+                byType.getOrDefault("SUPPORT", 0L));
+    }
+
+    @Override
+    public Map<Long, Map<String, Long>> ticketWorkload(Long userId) {
+        QueryWrapper<FeedbackTicketEntity> wrapper = new QueryWrapper<FeedbackTicketEntity>()
+                .select("assignee_user_id AS assignee_user_id",
+                        "COUNT(*) AS assigned_count",
+                        "IFNULL(SUM(CASE WHEN status = 'PROCESSING' THEN 1 ELSE 0 END), 0) AS processing_count",
+                        "IFNULL(SUM(CASE WHEN status = 'RESOLVED' THEN 1 ELSE 0 END), 0) AS resolved_count")
+                .isNotNull("assignee_user_id")
+                .groupBy("assignee_user_id")
+                .orderByAsc("assignee_user_id");
+        if (userId != null) wrapper.eq("user_id", userId);
+        Map<Long, Map<String, Long>> workload = new LinkedHashMap<>();
+        for (Map<String, Object> row : ticketMapper.selectMaps(wrapper)) {
+            Map<String, Long> counts = new LinkedHashMap<>();
+            counts.put("assigned", ticketCount(row.get("assigned_count")));
+            counts.put("processing", ticketCount(row.get("processing_count")));
+            counts.put("resolved", ticketCount(row.get("resolved_count")));
+            workload.put(((Number) row.get("assignee_user_id")).longValue(), counts);
+        }
+        return workload;
+    }
+
+    @Override
+    public long countFaqs() {
+        Long count = faqMapper.selectCount(Wrappers.<FaqEntity>lambdaQuery());
+        return count == null ? 0L : count;
+    }
+
+    @Override
+    public long countNotifications(Long userId) {
+        Long count = notificationMapper.selectCount(Wrappers.<NotificationEntity>lambdaQuery()
+                .eq(userId != null, NotificationEntity::getUserId, userId));
+        return count == null ? 0L : count;
+    }
+
+
+    @Override
+    public List<FeedbackTicketEntity> pageTickets(TicketPageQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return ticketMapper.selectList(ticketFilter(query)
+                .lt(query.beforeId() != null, FeedbackTicketEntity::getId, query.beforeId())
+                .orderByDesc(FeedbackTicketEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countTickets(TicketPageQuery query) {
+        Long count = ticketMapper.selectCount(ticketFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<FeedbackTicketEntity> ticketFilter(TicketPageQuery query) {
+        LambdaQueryWrapper<FeedbackTicketEntity> wrapper = Wrappers.<FeedbackTicketEntity>lambdaQuery()
+                .eq(query.userId() != null, FeedbackTicketEntity::getUserId, query.userId())
+                .eq(query.status() != null && !query.status().isBlank(), FeedbackTicketEntity::getStatus, query.status());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // The table searches by ticket and reporter id as well as by text, so ids are matched as text.
+            wrapper.and(match -> match.like(FeedbackTicketEntity::getContent, keyword)
+                    .or().like(FeedbackTicketEntity::getOfficialReply, keyword)
+                    .or().like(FeedbackTicketEntity::getType, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
     }
 
 }

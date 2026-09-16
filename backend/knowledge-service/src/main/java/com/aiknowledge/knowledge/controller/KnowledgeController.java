@@ -680,17 +680,15 @@ public class KnowledgeController {
         if (denied != null) {
             return denied;
         }
-        List<KnowledgeFileEntity> files = knowledgeStore.listFiles();
-        long pendingAudit = files.stream().filter(file -> "PENDING".equals(file.getAuditStatus())).count();
-        int totalViews = files.stream().mapToInt(file -> file.getViews() == null ? 0 : file.getViews()).sum();
-        int totalDownloads = files.stream().mapToInt(file -> file.getDownloads() == null ? 0 : file.getDownloads()).sum();
+        KnowledgeStore.FileTotals totals = knowledgeStore.fileTotals();
         return ApiResponse.ok(Map.of(
                 "module", "知识库管理",
-                "totalFiles", files.size(),
-                "pendingAudit", pendingAudit,
-                "totalViews", totalViews,
-                "totalDownloads", totalDownloads,
-                "reports", knowledgeStore.listReports(null).size(),
+                "totalFiles", totals.files(),
+                "pendingAudit", totals.pendingAudit(),
+                "totalViews", totals.views(),
+                "totalDownloads", totals.downloads(),
+                "reports", knowledgeStore.countReports(null),
+                "openReports", knowledgeStore.countOpenReports(),
                 "capabilities", List.of("资源审核", "分类维护", "AI解析状态追踪", "违规举报处理")
         ));
     }
@@ -1036,6 +1034,48 @@ public class KnowledgeController {
         analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
         analytics.put("top", ranking);
         return ApiResponse.ok(analytics);
+    }
+
+
+    private static final int ADMIN_FILE_PAGE_MAX = 100;
+
+    /**
+     * One page of the moderation file table. The queue used to download every file in every audit
+     * state; the status, keyword and cursor are applied by the database here.
+     */
+    @GetMapping("/admin/files/page")
+    public ApiResponse<Map<String, Object>> adminFilesPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        if (cursor != null && cursor < 0) {
+            return ApiResponse.fail("cursor must not be negative");
+        }
+        int size = Math.min(Math.max(limit, 1), ADMIN_FILE_PAGE_MAX);
+        List<KnowledgeFileEntity> found = knowledgeStore.pageAdminFiles(
+                new KnowledgeStore.AdminFileQuery(keyword, status, cursor, size + 1));
+        boolean hasMore = found.size() > size;
+        List<KnowledgeFileEntity> page = hasMore ? found.subList(0, size) : found;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", toViews(page, LocalAuth.userId(authorization)));
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).getId());
+        result.put("hasMore", hasMore);
+        // Counting can touch most of the table, so only a first page that is full pays for it: a short first
+        // page already is the whole result, and later pages send null.
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? knowledgeStore.countAdminFiles(new KnowledgeStore.AdminFileQuery(keyword, status, null, size))
+                    : page.size();
+        }
+        result.put("total", total);
+        return ApiResponse.ok(result);
     }
 
 }

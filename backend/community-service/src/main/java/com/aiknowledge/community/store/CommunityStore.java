@@ -141,4 +141,52 @@ public interface CommunityStore {
                 .toList();
     }
 
+
+    /** Counters behind the forum admin overview, optionally narrowed to one author. */
+    record PostTotals(long published, long pendingAudit, long hidden, long drafts) { }
+
+    /** MySQL answers this with one grouped query; the in-memory profile folds the feed. */
+    default PostTotals postTotals(Long authorUserId) {
+        List<PostEntity> posts = feed(authorUserId);
+        return new PostTotals(
+                posts.stream().filter(post -> "PUBLISHED".equals(post.getStatus())).count(),
+                posts.stream().filter(post -> "PENDING".equals(post.getStatus())).count(),
+                posts.stream().filter(post -> "HIDDEN".equals(post.getStatus())).count(),
+                listDrafts(authorUserId).size());
+    }
+
+
+    /**
+     * One page of a moderation post table, newest first.
+     *
+     * @param statuses only posts in one of these states; empty means every state
+     * @param keyword  matches the post id, author id or title (optional)
+     * @param beforeId cursor: only posts with a smaller id (optional)
+     */
+    record AdminPostQuery(Collection<String> statuses, String keyword, Long beforeId, int limit) { }
+
+    /** MySQL pages this by keyset; the in-memory profile filters the feed the same way. */
+    default List<PostEntity> pageAdminPosts(AdminPostQuery query) {
+        return matchingAdminPosts(query)
+                .filter(post -> query.beforeId() == null || post.getId() < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    /** How many posts match the moderation filters, ignoring the cursor. */
+    default long countAdminPosts(AdminPostQuery query) {
+        return matchingAdminPosts(query).count();
+    }
+
+    private java.util.stream.Stream<PostEntity> matchingAdminPosts(AdminPostQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return feed(null).stream()
+                .sorted(Comparator.comparing(PostEntity::getId).reversed())
+                .filter(post -> query.statuses() == null || query.statuses().isEmpty() || query.statuses().contains(post.getStatus()))
+                .filter(post -> keyword.isEmpty()
+                        || String.valueOf(post.getId()).contains(keyword)
+                        || String.valueOf(post.getUserId()).contains(keyword)
+                        || (post.getTitle() != null && post.getTitle().toLowerCase().contains(keyword)));
+    }
+
 }

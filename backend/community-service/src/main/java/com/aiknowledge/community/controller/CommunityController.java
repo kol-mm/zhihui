@@ -507,12 +507,13 @@ public class CommunityController {
         if (denied != null) {
             return denied;
         }
-        List<PostEntity> feed = communityStore.feed(authorUserId);
+        CommunityStore.PostTotals totals = communityStore.postTotals(authorUserId);
         return ApiResponse.ok(Map.of(
                 "module", "论坛管理",
-                "publishedPosts", feed.stream().filter(post -> "PUBLISHED".equals(post.getStatus())).count(),
-                "pendingAudit", feed.stream().filter(post -> "PENDING".equals(post.getStatus())).count(),
-                "draftsTracked", communityStore.listDrafts(authorUserId).size(),
+                "publishedPosts", totals.published(),
+                "pendingAudit", totals.pendingAudit(),
+                "hiddenPosts", totals.hidden(),
+                "draftsTracked", totals.drafts(),
                 "squareMode", "仅展示已关注用户动态",
                 "capabilities", List.of("帖子审核", "评论管理", "草稿追踪", "广场互动管理")
         ));
@@ -908,6 +909,54 @@ public class CommunityController {
         analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
         analytics.put("top", ranking);
         return ApiResponse.ok(analytics);
+    }
+
+
+    private static final int ADMIN_POST_PAGE_MAX = 100;
+    private static final Set<String> ADMIN_POST_STATUSES = Set.of("PENDING", "PUBLISHED", "HIDDEN");
+
+    /**
+     * One page of a moderation post table. The queue used to download the whole feed and split it
+     * in the browser; {@code status} takes one state or a comma list, such as PUBLISHED,HIDDEN.
+     */
+    @GetMapping("/post/admin/posts/page")
+    public ApiResponse<Map<String, Object>> adminPostsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "status", defaultValue = "") String status,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        List<String> statuses = new ArrayList<>();
+        for (String part : status.split(",")) {
+            String value = part.trim();
+            if (value.isEmpty()) continue;
+            if (!ADMIN_POST_STATUSES.contains(value)) return ApiResponse.fail("invalid post status");
+            if (!statuses.contains(value)) statuses.add(value);
+        }
+        int size = Math.min(Math.max(limit, 1), ADMIN_POST_PAGE_MAX);
+        List<PostEntity> found = communityStore.pageAdminPosts(
+                new CommunityStore.AdminPostQuery(statuses, keyword, cursor, size + 1));
+        boolean hasMore = found.size() > size;
+        List<PostEntity> page = hasMore ? found.subList(0, size) : found;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", toPostViews(page, LocalAuth.userId(authorization)));
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).getId());
+        result.put("hasMore", hasMore);
+        // Counting can touch most of the table, so only a first page that is full pays for it: a short first
+        // page already is the whole result, and later pages send null.
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? communityStore.countAdminPosts(new CommunityStore.AdminPostQuery(statuses, keyword, null, size))
+                    : page.size();
+        }
+        result.put("total", total);
+        return ApiResponse.ok(result);
     }
 
 }

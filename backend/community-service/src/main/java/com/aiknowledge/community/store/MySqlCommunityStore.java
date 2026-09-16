@@ -409,20 +409,30 @@ public class MySqlCommunityStore implements CommunityStore {
         return draftMapper.delete(Wrappers.<PostDraftEntity>lambdaQuery().lt(PostDraftEntity::getUpdatedAt, cutoff));
     }
 
+    /**
+     * Optimizer hint for the analytics time windows. Left alone, MySQL reads every post with the status through
+     * idx_post_status_id and filters the dates afterwards; on a 300k-post table that was 3 to 10 times slower for
+     * 7 to 180 day windows and no faster for a full year. CommunitySchemaMigration creates the index, and MySQL
+     * ignores the hint with a warning if it is ever missing.
+     */
+    private static final String WINDOW_INDEX = "/*+ INDEX(post idx_post_status_created) */ ";
+
     @Override
     public PostAnalytics postAnalytics(LocalDateTime since) {
-        Long posts = postMapper.selectCount(Wrappers.<PostEntity>lambdaQuery()
-                .eq(PostEntity::getStatus, "PUBLISHED")
-                .ge(PostEntity::getCreatedAt, since));
+        List<Map<String, Object>> rows = postMapper.selectMaps(new QueryWrapper<PostEntity>()
+                .select(WINDOW_INDEX + "COUNT(*) AS post_count")
+                .eq("status", "PUBLISHED")
+                .ge("created_at", since));
+        long posts = rows.isEmpty() ? 0L : countValue(rows.get(0).get("post_count"));
         Long likes = likeMapper.selectCount(new QueryWrapper<PostLikeEntity>()
-                .apply("post_id IN (SELECT id FROM post WHERE status = 'PUBLISHED' AND created_at >= {0})", since));
-        return new PostAnalytics(posts == null ? 0L : posts, likes == null ? 0L : likes);
+                .apply("post_id IN (SELECT " + WINDOW_INDEX + "id FROM post WHERE status = 'PUBLISHED' AND created_at >= {0})", since));
+        return new PostAnalytics(posts, likes == null ? 0L : likes);
     }
 
     @Override
     public List<DailyCount> dailyPostCounts(LocalDateTime since) {
         return postMapper.selectMaps(new QueryWrapper<PostEntity>()
-                        .select("DATE(created_at) AS day", "COUNT(*) AS post_count")
+                        .select(WINDOW_INDEX + "DATE(created_at) AS day", "COUNT(*) AS post_count")
                         .eq("status", "PUBLISHED")
                         .ge("created_at", since)
                         .groupBy("DATE(created_at)")
@@ -469,6 +479,54 @@ public class MySqlCommunityStore implements CommunityStore {
 
     private static long countValue(Object value) {
         return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+
+    @Override
+    public PostTotals postTotals(Long authorUserId) {
+        QueryWrapper<PostEntity> wrapper = new QueryWrapper<PostEntity>()
+                .select("IFNULL(SUM(CASE WHEN status = 'PUBLISHED' THEN 1 ELSE 0 END), 0) AS published_count",
+                        "IFNULL(SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending_count",
+                        "IFNULL(SUM(CASE WHEN status = 'HIDDEN' THEN 1 ELSE 0 END), 0) AS hidden_count");
+        if (authorUserId != null) wrapper.eq("user_id", authorUserId);
+        List<Map<String, Object>> rows = postMapper.selectMaps(wrapper);
+        Map<String, Object> totals = rows.isEmpty() ? Map.of() : rows.get(0);
+        Long drafts = draftMapper.selectCount(Wrappers.<PostDraftEntity>lambdaQuery()
+                .eq(authorUserId != null, PostDraftEntity::getUserId, authorUserId));
+        return new PostTotals(
+                countValue(totals.get("published_count")),
+                countValue(totals.get("pending_count")),
+                countValue(totals.get("hidden_count")),
+                drafts == null ? 0L : drafts);
+    }
+
+
+    @Override
+    public List<PostEntity> pageAdminPosts(AdminPostQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return postMapper.selectList(adminPostFilter(query)
+                .lt(query.beforeId() != null, PostEntity::getId, query.beforeId())
+                .orderByDesc(PostEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countAdminPosts(AdminPostQuery query) {
+        Long count = postMapper.selectCount(adminPostFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<PostEntity> adminPostFilter(AdminPostQuery query) {
+        LambdaQueryWrapper<PostEntity> wrapper = Wrappers.<PostEntity>lambdaQuery()
+                .in(query.statuses() != null && !query.statuses().isEmpty(), PostEntity::getStatus, query.statuses());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // The queue searches by post and author id as well as by title, so ids are matched as text.
+            wrapper.and(match -> match.like(PostEntity::getTitle, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
     }
 
 }
