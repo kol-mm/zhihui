@@ -10,6 +10,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 
 public interface MessageStore {
     ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId);
@@ -103,4 +105,41 @@ public interface MessageStore {
     Optional<FeedbackTicketEntity> replyTicket(Long ticketId, String status, String reply);
 
     Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId);
+
+    /** Ticket totals behind the admin analytics page, for tickets created since the cutoff. */
+    record TicketAnalytics(long total, long bug, long suggestion, long support, long resolved) { }
+
+    /** One day of a trend series, keyed by ISO date. */
+    record DailyCount(String date, long count) { }
+
+    /**
+     * Aggregates feedback tickets created since {@code since}. MySQL answers this with grouped
+     * queries; the in-memory profile folds the same numbers over the ticket list.
+     */
+    default TicketAnalytics ticketAnalytics(LocalDateTime since) {
+        List<FeedbackTicketEntity> tickets = analyticsTickets(since);
+        return new TicketAnalytics(
+                tickets.size(),
+                tickets.stream().filter(ticket -> "BUG".equals(ticket.getType())).count(),
+                tickets.stream().filter(ticket -> "SUGGESTION".equals(ticket.getType())).count(),
+                tickets.stream().filter(ticket -> "SUPPORT".equals(ticket.getType())).count(),
+                tickets.stream().filter(ticket -> "RESOLVED".equals(ticket.getStatus())).count());
+    }
+
+    /** New tickets per day; days without tickets are left out and filled in by the caller. */
+    default List<DailyCount> dailyTicketCounts(LocalDateTime since) {
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        for (FeedbackTicketEntity ticket : analyticsTickets(since)) {
+            if (ticket.getCreatedAt() == null) continue;
+            perDay.merge(ticket.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+        }
+        return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
+    }
+
+    private List<FeedbackTicketEntity> analyticsTickets(LocalDateTime since) {
+        return listTickets(null).stream()
+                .filter(ticket -> ticket.getCreatedAt() == null || !ticket.getCreatedAt().isBefore(since))
+                .toList();
+    }
+
 }

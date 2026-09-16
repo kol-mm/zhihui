@@ -596,4 +596,54 @@ class KnowledgeControllerTest {
         assertFalse(controller.mine(userAuth, "LIKED", null).data().stream().anyMatch(item -> fileId.equals(item.get("id"))));
         assertEquals(500, controller.view(userAuth, Map.of("fileId", fileId)).code());
     }
+
+    @Test
+    void adminAnalyticsAggregatesApprovedFilesAndFillsTheTrend() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        // The in-memory store carries data from the other tests, so every total is asserted as a delta.
+        Map<String, Object> before = controller.adminAnalytics(adminAuth, 30).data();
+        long baseFiles = number(before.get("files"));
+        long baseViews = number(before.get("views"));
+        long baseLikes = number(before.get("likes"));
+
+        String title = "统计样本 " + System.nanoTime();
+        Long fileId = ((Number) controller.upload(userAuth, Map.of(
+                "title", title, "fileType", "pdf", "content", "统计内容")).data().get("id")).longValue();
+        controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+        controller.view(userAuth, Map.of("fileId", fileId));
+        controller.like(userAuth, Map.of("fileId", fileId));
+
+        Map<String, Object> after = controller.adminAnalytics(adminAuth, 30).data();
+        assertEquals(baseFiles + 1, number(after.get("files")));
+        assertEquals(baseViews + 1, number(after.get("views")));
+        assertEquals(baseLikes + 1, number(after.get("likes")));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
+        assertEquals(14, trend.size());
+        assertEquals(14, number(after.get("trendDays")));
+        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
+        assertEquals(java.time.LocalDate.now().minusDays(13).toString(), trend.get(0).get("date"));
+        assertTrue(number(trend.get(13).get("count")) >= 1);
+        // A shorter period asks for fewer bars but still one per day.
+        assertEquals(7, ((List<?>) controller.adminAnalytics(adminAuth, 7).data().get("trend")).size());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> top = (List<Map<String, Object>>) after.get("top");
+        assertTrue(top.size() <= 5);
+        assertTrue(top.stream().anyMatch(item -> title.equals(item.get("title"))));
+        long previous = Long.MAX_VALUE;
+        for (Map<String, Object> item : top) {
+            long score = number(item.get("views")) + number(item.get("downloads")) * 2 + number(item.get("likes")) * 2;
+            assertTrue(score <= previous, "ranking is not sorted by engagement");
+            previous = score;
+        }
+
+        assertEquals(500, controller.adminAnalytics(userAuth, 30).code());
+    }
+
+    private static long number(Object value) {
+        return value instanceof Number found ? found.longValue() : 0L;
+    }
+
 }

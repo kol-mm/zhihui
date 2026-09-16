@@ -29,6 +29,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Optional;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Objects;
 
 @Repository
 @Profile("mysql")
@@ -406,4 +408,67 @@ public class MySqlCommunityStore implements CommunityStore {
     public int removeDraftsBefore(LocalDateTime cutoff) {
         return draftMapper.delete(Wrappers.<PostDraftEntity>lambdaQuery().lt(PostDraftEntity::getUpdatedAt, cutoff));
     }
+
+    @Override
+    public PostAnalytics postAnalytics(LocalDateTime since) {
+        Long posts = postMapper.selectCount(Wrappers.<PostEntity>lambdaQuery()
+                .eq(PostEntity::getStatus, "PUBLISHED")
+                .ge(PostEntity::getCreatedAt, since));
+        Long likes = likeMapper.selectCount(new QueryWrapper<PostLikeEntity>()
+                .apply("post_id IN (SELECT id FROM post WHERE status = 'PUBLISHED' AND created_at >= {0})", since));
+        return new PostAnalytics(posts == null ? 0L : posts, likes == null ? 0L : likes);
+    }
+
+    @Override
+    public List<DailyCount> dailyPostCounts(LocalDateTime since) {
+        return postMapper.selectMaps(new QueryWrapper<PostEntity>()
+                        .select("DATE(created_at) AS day", "COUNT(*) AS post_count")
+                        .eq("status", "PUBLISHED")
+                        .ge("created_at", since)
+                        .groupBy("DATE(created_at)")
+                        .orderByAsc("DATE(created_at)"))
+                .stream()
+                .map(row -> new DailyCount(String.valueOf(row.get("day")), countValue(row.get("post_count"))))
+                .toList();
+    }
+
+    @Override
+    public List<PostEntity> topPosts(int limit) {
+        if (limit <= 0) return List.of();
+        List<Long> ranked = likeMapper.selectMaps(new QueryWrapper<PostLikeEntity>()
+                        .select("post_id AS post_id", "COUNT(*) AS like_count")
+                        .groupBy("post_id")
+                        .orderByDesc("COUNT(*)")
+                        .last("LIMIT " + Math.max(limit * 4, 20)))
+                .stream()
+                .map(row -> ((Number) row.get("post_id")).longValue())
+                .toList();
+        List<PostEntity> ordered = new ArrayList<>();
+        if (!ranked.isEmpty()) {
+            Map<Long, PostEntity> byId = new LinkedHashMap<>();
+            postMapper.selectBatchIds(ranked).stream()
+                    .filter(post -> "PUBLISHED".equals(post.getStatus()))
+                    .forEach(post -> byId.put(post.getId(), post));
+            ranked.stream().map(byId::get).filter(Objects::nonNull).forEach(ordered::add);
+        }
+        if (ordered.size() < limit) {
+            // Fewer liked posts than the ranking shows: pad with the newest published posts, the
+            // same way sorting the whole feed by like count used to.
+            Set<Long> taken = new HashSet<>();
+            ordered.forEach(post -> taken.add(post.getId()));
+            postMapper.selectList(Wrappers.<PostEntity>lambdaQuery()
+                            .eq(PostEntity::getStatus, "PUBLISHED")
+                            .orderByDesc(PostEntity::getId)
+                            .last("LIMIT " + limit * 2))
+                    .stream()
+                    .filter(post -> !taken.contains(post.getId()))
+                    .forEach(ordered::add);
+        }
+        return ordered.stream().limit(limit).toList();
+    }
+
+    private static long countValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
 }

@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 
 public interface KnowledgeStore {
     KnowledgeFileEntity saveFile(KnowledgeFileEntity file);
@@ -64,4 +67,63 @@ public interface KnowledgeStore {
     List<KnowledgeCategoryEntity> listCategories();
     KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category);
     boolean deleteCategory(Long categoryId);
+
+    /** Totals behind the admin analytics page: approved files created since the cutoff. */
+    record ContentAnalytics(long files, long views, long downloads, long likes) { }
+
+    /** One day of a trend series, keyed by ISO date. */
+    record DailyCount(String date, long count) { }
+
+    /**
+     * Aggregates approved files created since {@code since}. MySQL answers this with grouped
+     * queries; the in-memory profile folds the same numbers over the file list.
+     */
+    default ContentAnalytics analytics(LocalDateTime since) {
+        List<KnowledgeFileEntity> files = analyticsFiles(since);
+        Map<Long, Integer> likes = likeCounts(files.stream().map(KnowledgeFileEntity::getId).toList());
+        return new ContentAnalytics(
+                files.size(),
+                files.stream().mapToLong(file -> file.getViews() == null ? 0L : file.getViews()).sum(),
+                files.stream().mapToLong(file -> file.getDownloads() == null ? 0L : file.getDownloads()).sum(),
+                likes.values().stream().mapToLong(Integer::longValue).sum());
+    }
+
+    /** New approved files per day; days without uploads are left out and filled in by the caller. */
+    default List<DailyCount> dailyFileCounts(LocalDateTime since) {
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        for (KnowledgeFileEntity file : analyticsFiles(since)) {
+            if (file.getCreatedAt() == null) continue;
+            perDay.merge(file.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+        }
+        return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
+    }
+
+    /** The most engaging approved files, ranked the way the analytics page ranks them. */
+    default List<KnowledgeFileEntity> topFiles(int limit) {
+        if (limit <= 0) return List.of();
+        List<KnowledgeFileEntity> approved = listFiles().stream()
+                .filter(file -> "APPROVED".equals(file.getAuditStatus()))
+                .toList();
+        Map<Long, Integer> likes = likeCounts(approved.stream().map(KnowledgeFileEntity::getId).toList());
+        return approved.stream()
+                .sorted(Comparator.comparingLong(
+                        (KnowledgeFileEntity file) -> engagementScore(file, likes.getOrDefault(file.getId(), 0))).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private List<KnowledgeFileEntity> analyticsFiles(LocalDateTime since) {
+        return listFiles().stream()
+                .filter(file -> "APPROVED".equals(file.getAuditStatus()))
+                .filter(file -> file.getCreatedAt() == null || !file.getCreatedAt().isBefore(since))
+                .toList();
+    }
+
+    /** Views plus double weight for downloads and likes, matching the ranking the page shows. */
+    static long engagementScore(KnowledgeFileEntity file, int likes) {
+        long views = file.getViews() == null ? 0L : file.getViews();
+        long downloads = file.getDownloads() == null ? 0L : file.getDownloads();
+        return views + downloads * 2L + likes * 2L;
+    }
+
 }

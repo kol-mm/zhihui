@@ -529,4 +529,49 @@ class CommunityControllerTest {
         assertTrue(controller.squareCollections(secondUserAuth, null).data().stream().noneMatch(item -> postId.equals(item.get("id"))));
         assertEquals(500, controller.detail(userAuth, postId).code());
     }
+
+    @Test
+    void adminAnalyticsAggregatesPublishedPostsAndFillsTheTrend() {
+        // The in-memory store carries data from the other tests, so every total is asserted as a delta.
+        Map<String, Object> before = controller.adminAnalytics(adminAuth, 30).data();
+        long basePosts = analyticsNumber(before.get("posts"));
+        long baseLikes = analyticsNumber(before.get("likes"));
+
+        // A dedicated author keeps this post out of the following feed the other tests assert on.
+        String analyticsAuthor = "Bearer " + LocalAuth.issueToken("analytics-author", 4242L, "USER");
+        String title = "统计帖子 " + System.nanoTime();
+        Long postId = ((Number) controller.createPost(analyticsAuthor, Map.of(
+                "title", title, "content", "统计内容")).data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+        controller.likePost(userAuth, Map.of("postId", postId));
+
+        Map<String, Object> after = controller.adminAnalytics(adminAuth, 30).data();
+        assertEquals(basePosts + 1, analyticsNumber(after.get("posts")));
+        assertEquals(baseLikes + 1, analyticsNumber(after.get("likes")));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
+        assertEquals(14, trend.size());
+        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
+        assertTrue(analyticsNumber(trend.get(13).get("count")) >= 1);
+        assertEquals(7, ((List<?>) controller.adminAnalytics(adminAuth, 7).data().get("trend")).size());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> top = (List<Map<String, Object>>) after.get("top");
+        assertTrue(top.size() <= 5);
+        assertTrue(top.stream().anyMatch(item -> title.equals(item.get("title"))));
+        long previous = Long.MAX_VALUE;
+        for (Map<String, Object> item : top) {
+            long likes = analyticsNumber(item.get("likes"));
+            assertTrue(likes <= previous, "ranking is not sorted by likes");
+            previous = likes;
+        }
+
+        assertEquals(500, controller.adminAnalytics(userAuth, 30).code());
+    }
+
+    private static long analyticsNumber(Object value) {
+        return value instanceof Number found ? found.longValue() : 0L;
+    }
+
 }

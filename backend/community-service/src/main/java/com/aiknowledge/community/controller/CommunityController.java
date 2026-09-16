@@ -34,6 +34,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.aiknowledge.common.DailySeries;
+import java.time.LocalDate;
 
 @RestController
 public class CommunityController {
@@ -864,4 +866,48 @@ public class CommunityController {
                 || LocalAuth.isAdmin(authorization)
                 || (viewerUserId != null && viewerUserId.equals(post.getUserId()));
     }
+
+    private static final int ANALYTICS_MAX_DAYS = 365;
+    private static final int ANALYTICS_TREND_DAYS = 14;
+    private static final int ANALYTICS_TOP_LIMIT = 5;
+
+    /**
+     * Aggregated numbers for the admin analytics page. The page used to download the whole feed
+     * and count in the browser; the database groups the same rows here instead.
+     */
+    @GetMapping("/post/admin/analytics")
+    public ApiResponse<Map<String, Object>> adminAnalytics(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "days", defaultValue = "30") int days
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        int window = Math.min(Math.max(days, 1), ANALYTICS_MAX_DAYS);
+        int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
+        CommunityStore.PostAnalytics totals = communityStore.postAnalytics(LocalDateTime.now().minusDays(window));
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        communityStore.dailyPostCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+                .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
+        List<PostEntity> top = communityStore.topPosts(ANALYTICS_TOP_LIMIT);
+        Map<Long, Long> topLikes = communityStore.countPostLikes(top.stream().map(PostEntity::getId).toList());
+        List<Map<String, Object>> ranking = top.stream().map(post -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("id", post.getId());
+            view.put("userId", post.getUserId());
+            view.put("title", post.getTitle());
+            view.put("likes", topLikes.getOrDefault(post.getId(), 0L));
+            return view;
+        }).toList();
+        Map<String, Object> analytics = new LinkedHashMap<>();
+        analytics.put("days", window);
+        analytics.put("trendDays", trendDays);
+        analytics.put("posts", totals.posts());
+        analytics.put("likes", totals.likes());
+        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        analytics.put("top", ranking);
+        return ApiResponse.ok(analytics);
+    }
+
 }

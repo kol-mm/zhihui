@@ -40,6 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.aiknowledge.common.DailySeries;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @RestController
 @RequestMapping("/knowledge")
@@ -988,4 +991,51 @@ public class KnowledgeController {
         }
         return Long.valueOf(value.toString());
     }
+
+    private static final int ANALYTICS_MAX_DAYS = 365;
+    private static final int ANALYTICS_TREND_DAYS = 14;
+    private static final int ANALYTICS_TOP_LIMIT = 5;
+
+    /**
+     * Aggregated numbers for the admin analytics page. The page used to download every file and
+     * count in the browser; the database groups the same rows here instead.
+     */
+    @GetMapping("/admin/analytics")
+    public ApiResponse<Map<String, Object>> adminAnalytics(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "days", defaultValue = "30") int days
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        int window = Math.min(Math.max(days, 1), ANALYTICS_MAX_DAYS);
+        int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
+        KnowledgeStore.ContentAnalytics totals = knowledgeStore.analytics(LocalDateTime.now().minusDays(window));
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        knowledgeStore.dailyFileCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+                .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
+        List<KnowledgeFileEntity> top = knowledgeStore.topFiles(ANALYTICS_TOP_LIMIT);
+        Map<Long, Integer> topLikes = knowledgeStore.likeCounts(top.stream().map(KnowledgeFileEntity::getId).toList());
+        List<Map<String, Object>> ranking = top.stream().map(file -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("id", file.getId());
+            view.put("title", file.getTitle());
+            view.put("views", file.getViews() == null ? 0 : file.getViews());
+            view.put("downloads", file.getDownloads() == null ? 0 : file.getDownloads());
+            view.put("likes", topLikes.getOrDefault(file.getId(), 0));
+            return view;
+        }).toList();
+        Map<String, Object> analytics = new LinkedHashMap<>();
+        analytics.put("days", window);
+        analytics.put("trendDays", trendDays);
+        analytics.put("files", totals.files());
+        analytics.put("views", totals.views());
+        analytics.put("downloads", totals.downloads());
+        analytics.put("likes", totals.likes());
+        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        analytics.put("top", ranking);
+        return ApiResponse.ok(analytics);
+    }
+
 }

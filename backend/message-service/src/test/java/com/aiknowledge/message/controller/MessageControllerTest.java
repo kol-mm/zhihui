@@ -380,4 +380,40 @@ class MessageControllerTest {
         Map<Long, Map<String, Long>> workload = (Map<Long, Map<String, Long>>) overview.get("supportWorkload");
         assertEquals(1L, workload.get(2L).get("assigned"));
     }
+
+    @Test
+    void feedbackAnalyticsGroupsTicketsByTypeAndDay() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        // The in-memory store carries data from the other tests, so every total is asserted as a delta.
+        Map<String, Object> before = controller.feedbackAdminAnalytics(adminAuth, 30).data();
+        long baseTotal = analyticsNumber(before.get("total"));
+        long baseBug = analyticsNumber(before.get("bug"));
+        long baseSuggestion = analyticsNumber(before.get("suggestion"));
+        long baseResolved = analyticsNumber(before.get("resolved"));
+
+        controller.createTicket(userAuth, Map.of("type", "BUG", "content", "统计缺陷 " + System.nanoTime()));
+        Long ticketId = ((Number) controller.createTicket(userAuth, Map.of(
+                "type", "SUGGESTION", "content", "统计建议 " + System.nanoTime())).data().get("id")).longValue();
+        controller.replyTicket(adminAuth, Map.of("ticketId", ticketId, "status", "RESOLVED", "reply", "已处理"));
+
+        Map<String, Object> after = controller.feedbackAdminAnalytics(adminAuth, 30).data();
+        assertEquals(baseTotal + 2, analyticsNumber(after.get("total")));
+        assertEquals(baseBug + 1, analyticsNumber(after.get("bug")));
+        assertEquals(baseSuggestion + 1, analyticsNumber(after.get("suggestion")));
+        assertEquals(baseResolved + 1, analyticsNumber(after.get("resolved")));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
+        assertEquals(14, trend.size());
+        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
+        assertTrue(analyticsNumber(trend.get(13).get("count")) >= 2);
+        assertEquals(7, ((List<?>) controller.feedbackAdminAnalytics(adminAuth, 7).data().get("trend")).size());
+
+        assertEquals(500, controller.feedbackAdminAnalytics(userAuth, 30).code());
+    }
+
+    private static long analyticsNumber(Object value) {
+        return value instanceof Number found ? found.longValue() : 0L;
+    }
+
 }

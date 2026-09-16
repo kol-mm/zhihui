@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Optional;
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 
 public interface CommunityStore {
     PostEntity savePost(PostEntity post);
@@ -92,4 +94,51 @@ public interface CommunityStore {
     record PostPageQuery(Long authorUserId, Collection<Long> authorUserIds, Long viewerUserId, boolean includeAll, Long beforeId, int limit) { }
     record PostImageRecord(Long id, Long postId, String imageUrl, LocalDateTime createdAt) { }
     record PostLikeRecord(Long id, Long userId, Long postId, LocalDateTime createdAt) { }
+
+    /** Totals behind the admin analytics page: published posts created since the cutoff. */
+    record PostAnalytics(long posts, long likes) { }
+
+    /** One day of a trend series, keyed by ISO date. */
+    record DailyCount(String date, long count) { }
+
+    /**
+     * Aggregates published posts created since {@code since}. MySQL answers this with grouped
+     * queries; the in-memory profile folds the same numbers over the feed.
+     */
+    default PostAnalytics postAnalytics(LocalDateTime since) {
+        List<PostEntity> posts = analyticsPosts(since);
+        Map<Long, Long> likes = countPostLikes(posts.stream().map(PostEntity::getId).toList());
+        return new PostAnalytics(posts.size(), likes.values().stream().mapToLong(Long::longValue).sum());
+    }
+
+    /** New published posts per day; days without posts are left out and filled in by the caller. */
+    default List<DailyCount> dailyPostCounts(LocalDateTime since) {
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        for (PostEntity post : analyticsPosts(since)) {
+            if (post.getCreatedAt() == null) continue;
+            perDay.merge(post.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+        }
+        return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
+    }
+
+    /** The most liked published posts, in the order the analytics ranking shows them. */
+    default List<PostEntity> topPosts(int limit) {
+        if (limit <= 0) return List.of();
+        List<PostEntity> published = feed(null).stream()
+                .filter(post -> "PUBLISHED".equals(post.getStatus()))
+                .toList();
+        Map<Long, Long> likes = countPostLikes(published.stream().map(PostEntity::getId).toList());
+        return published.stream()
+                .sorted(Comparator.comparingLong((PostEntity post) -> likes.getOrDefault(post.getId(), 0L)).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private List<PostEntity> analyticsPosts(LocalDateTime since) {
+        return feed(null).stream()
+                .filter(post -> "PUBLISHED".equals(post.getStatus()))
+                .filter(post -> post.getCreatedAt() == null || !post.getCreatedAt().isBefore(since))
+                .toList();
+    }
+
 }

@@ -480,6 +480,10 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .status-list i.offline { box-shadow: 0 0 0 3px rgba(217, 83, 79, .15); animation: none; }
 .status-list span, .task-list button { border-bottom-color: var(--zh-divider); }
 .analytics-ranking article>b { background: var(--zh-primary-50); }
+/* Inline counter row: feedback structure on the analytics page and the governance dialog. */
+.governance-user-summary { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.governance-user-summary span { display: inline-flex; align-items: baseline; gap: 6px; }
+.governance-user-summary strong { font-variant-numeric: tabular-nums; color: var(--zh-ink-900); }
 .trend-bars i { border-radius: 4px 4px 0 0; }
 .runtime-mode-grid { border-color: var(--zh-divider); border-radius: 12px; overflow: hidden; }
 .config-status span { border-radius: 10px; }

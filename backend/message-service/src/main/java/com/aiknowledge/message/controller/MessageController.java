@@ -24,6 +24,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.aiknowledge.common.DailySeries;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @RestController
 public class MessageController {
@@ -689,4 +692,39 @@ public class MessageController {
         }
         return Long.valueOf(value.toString());
     }
+
+    private static final int ANALYTICS_MAX_DAYS = 365;
+    private static final int ANALYTICS_TREND_DAYS = 14;
+
+    /**
+     * Aggregated ticket numbers for the admin analytics page, replacing the full ticket download
+     * the page used to count in the browser.
+     */
+    @GetMapping("/feedback/admin/analytics")
+    public ApiResponse<Map<String, Object>> feedbackAdminAnalytics(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "days", defaultValue = "30") int days
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) {
+            return denied;
+        }
+        int window = Math.min(Math.max(days, 1), ANALYTICS_MAX_DAYS);
+        int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
+        MessageStore.TicketAnalytics totals = messageStore.ticketAnalytics(LocalDateTime.now().minusDays(window));
+        Map<String, Long> perDay = new LinkedHashMap<>();
+        messageStore.dailyTicketCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+                .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
+        Map<String, Object> analytics = new LinkedHashMap<>();
+        analytics.put("days", window);
+        analytics.put("trendDays", trendDays);
+        analytics.put("total", totals.total());
+        analytics.put("bug", totals.bug());
+        analytics.put("suggestion", totals.suggestion());
+        analytics.put("support", totals.support());
+        analytics.put("resolved", totals.resolved());
+        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        return ApiResponse.ok(analytics);
+    }
+
 }

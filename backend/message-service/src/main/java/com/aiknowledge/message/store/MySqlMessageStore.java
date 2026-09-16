@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.LinkedHashMap;
 
 @Repository
 @Profile("mysql")
@@ -280,4 +281,44 @@ public class MySqlMessageStore implements MessageStore {
         ticketMapper.updateById(ticket);
         return Optional.of(ticket);
     }
+
+    @Override
+    public TicketAnalytics ticketAnalytics(LocalDateTime since) {
+        Map<String, Long> byType = new LinkedHashMap<>();
+        long total = 0L;
+        for (Map<String, Object> row : ticketMapper.selectMaps(new QueryWrapper<FeedbackTicketEntity>()
+                .select("type AS ticket_type", "COUNT(*) AS ticket_count")
+                .ge("created_at", since)
+                .groupBy("type"))) {
+            long count = ticketCount(row.get("ticket_count"));
+            byType.put(String.valueOf(row.get("ticket_type")), count);
+            total += count;
+        }
+        Long resolved = ticketMapper.selectCount(Wrappers.<FeedbackTicketEntity>lambdaQuery()
+                .eq(FeedbackTicketEntity::getStatus, "RESOLVED")
+                .ge(FeedbackTicketEntity::getCreatedAt, since));
+        return new TicketAnalytics(
+                total,
+                byType.getOrDefault("BUG", 0L),
+                byType.getOrDefault("SUGGESTION", 0L),
+                byType.getOrDefault("SUPPORT", 0L),
+                resolved == null ? 0L : resolved);
+    }
+
+    @Override
+    public List<DailyCount> dailyTicketCounts(LocalDateTime since) {
+        return ticketMapper.selectMaps(new QueryWrapper<FeedbackTicketEntity>()
+                        .select("DATE(created_at) AS day", "COUNT(*) AS ticket_count")
+                        .ge("created_at", since)
+                        .groupBy("DATE(created_at)")
+                        .orderByAsc("DATE(created_at)"))
+                .stream()
+                .map(row -> new DailyCount(String.valueOf(row.get("day")), ticketCount(row.get("ticket_count"))))
+                .toList();
+    }
+
+    private static long ticketCount(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
 }

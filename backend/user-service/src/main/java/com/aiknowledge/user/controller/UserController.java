@@ -445,6 +445,7 @@ public class UserController {
         overview.put("activeUsers", users.stream().filter(user -> "ACTIVE".equals(user.getStatus())).count());
         overview.put("pendingAudits", 0);
         overview.put("riskUsers", users.stream().filter(user -> !"ACTIVE".equals(user.getStatus())).count());
+        overview.put("reports", userStore.listUserReports().size());
         overview.put("capabilities", java.util.List.of("资料审核", "账号状态管理", "关注关系查看", "个人内容追踪"));
         return ApiResponse.ok(overview);
     }

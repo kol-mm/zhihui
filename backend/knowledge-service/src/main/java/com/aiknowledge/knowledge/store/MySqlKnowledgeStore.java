@@ -31,6 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.Objects;
 
 @Repository
 @Profile("mysql")
@@ -484,4 +487,69 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
         view.put("createdAt", report.getCreatedAt());
         return view;
     }
+
+    @Override
+    public ContentAnalytics analytics(LocalDateTime since) {
+        List<Map<String, Object>> rows = fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
+                .select("COUNT(*) AS file_count", "IFNULL(SUM(views), 0) AS view_total", "IFNULL(SUM(downloads), 0) AS download_total")
+                .eq("audit_status", "APPROVED")
+                .ge("created_at", since));
+        Map<String, Object> totals = rows.isEmpty() ? Map.of() : rows.get(0);
+        Long likes = likeMapper.selectCount(new QueryWrapper<KnowledgeLikeEntity>()
+                .apply("file_id IN (SELECT id FROM knowledge_file WHERE audit_status = 'APPROVED' AND created_at >= {0})", since));
+        return new ContentAnalytics(
+                longValue(totals.get("file_count")),
+                longValue(totals.get("view_total")),
+                longValue(totals.get("download_total")),
+                likes == null ? 0L : likes);
+    }
+
+    @Override
+    public List<DailyCount> dailyFileCounts(LocalDateTime since) {
+        return fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
+                        .select("DATE(created_at) AS day", "COUNT(*) AS file_count")
+                        .eq("audit_status", "APPROVED")
+                        .ge("created_at", since)
+                        .groupBy("DATE(created_at)")
+                        .orderByAsc("DATE(created_at)"))
+                .stream()
+                .map(row -> new DailyCount(String.valueOf(row.get("day")), longValue(row.get("file_count"))))
+                .toList();
+    }
+
+    @Override
+    public List<KnowledgeFileEntity> topFiles(int limit) {
+        if (limit <= 0) return List.of();
+        // Candidates come from both ranking inputs, so a heavily liked file is not missed just
+        // because it has few views.
+        int candidates = Math.max(limit * 10, 50);
+        Set<Long> fileIds = new LinkedHashSet<>();
+        fileMapper.selectObjs(new QueryWrapper<KnowledgeFileEntity>()
+                        .select("id")
+                        .eq("audit_status", "APPROVED")
+                        .orderByDesc("IFNULL(views, 0) + IFNULL(downloads, 0) * 2")
+                        .last("LIMIT " + candidates))
+                .stream().filter(Objects::nonNull).forEach(value -> fileIds.add(((Number) value).longValue()));
+        likeMapper.selectMaps(new QueryWrapper<KnowledgeLikeEntity>()
+                        .select("file_id AS file_id", "COUNT(*) AS like_count")
+                        .groupBy("file_id")
+                        .orderByDesc("COUNT(*)")
+                        .last("LIMIT " + candidates))
+                .forEach(row -> fileIds.add(((Number) row.get("file_id")).longValue()));
+        if (fileIds.isEmpty()) return List.of();
+        List<KnowledgeFileEntity> files = fileMapper.selectBatchIds(fileIds).stream()
+                .filter(file -> "APPROVED".equals(file.getAuditStatus()))
+                .toList();
+        Map<Long, Integer> likes = likeCounts(files.stream().map(KnowledgeFileEntity::getId).toList());
+        return files.stream()
+                .sorted(Comparator.comparingLong((KnowledgeFileEntity file) ->
+                        KnowledgeStore.engagementScore(file, likes.getOrDefault(file.getId(), 0))).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    private static long longValue(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
 }
