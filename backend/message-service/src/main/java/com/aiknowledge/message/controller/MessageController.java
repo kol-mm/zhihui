@@ -27,6 +27,7 @@ import java.util.Map;
 
 @RestController
 public class MessageController {
+    private static final int NOTIFICATION_PAGE_MAX = 50;
     private final MessageStore messageStore;
     private final LocalEventBusService eventBus;
     private final PlatformConfigClient platformConfig;
@@ -259,6 +260,46 @@ public class MessageController {
         return ApiResponse.ok(messageStore.listNotifications(userId).stream().map(this::toNotificationView).toList());
     }
 
+    /** Newest-first page of notifications for the signed-in user (admins may read another user's). */
+    @GetMapping("/notification/page")
+    public ApiResponse<Map<String, Object>> notificationPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit,
+            @RequestParam(name = "unreadOnly", defaultValue = "false") boolean unreadOnly
+    ) {
+        Long authenticatedUserId = LocalAuth.userId(authorization);
+        if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (!notificationsEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("notifications feature is disabled");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        if (cursor != null && cursor < 0) return ApiResponse.fail("invalid notification cursor");
+        Long userId = LocalAuth.isAdmin(authorization) && requestedUserId != null ? requestedUserId : authenticatedUserId;
+        int pageSize = Math.max(1, Math.min(NOTIFICATION_PAGE_MAX, limit));
+        List<NotificationEntity> notifications = messageStore.pageNotifications(userId, cursor, pageSize + 1, unreadOnly);
+        boolean hasMore = notifications.size() > pageSize;
+        if (hasMore) notifications = notifications.subList(0, pageSize);
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("items", notifications.stream().map(this::toNotificationView).toList());
+        page.put("nextCursor", hasMore ? notifications.get(notifications.size() - 1).getId() : null);
+        page.put("hasMore", hasMore);
+        page.put("unread", messageStore.countUnreadNotifications(userId));
+        return ApiResponse.ok(page);
+    }
+
+    @GetMapping("/notification/unread-count")
+    public ApiResponse<Map<String, Object>> unreadNotificationCount(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "userId", required = false) Long requestedUserId
+    ) {
+        Long authenticatedUserId = LocalAuth.userId(authorization);
+        if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        if (!notificationsEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.ok(Map.of("unread", 0L));
+        Long userId = LocalAuth.isAdmin(authorization) && requestedUserId != null ? requestedUserId : authenticatedUserId;
+        return ApiResponse.ok(Map.of("unread", messageStore.countUnreadNotifications(userId)));
+    }
+
     @PostMapping("/notification/read")
     public ApiResponse<Map<String, Object>> markNotificationRead(
             @RequestHeader(name = "Authorization", required = false) String authorization,
@@ -269,7 +310,10 @@ public class MessageController {
         if (!notificationsEnabled()) return ApiResponse.fail("notifications feature is disabled");
         Long notificationId = number(request.get("notificationId"), 0L);
         return messageStore.markNotificationRead(userId, notificationId)
-                .map(item -> ApiResponse.ok(Map.of("notification", toNotificationView(item), "updated", true)))
+                .map(item -> ApiResponse.ok(Map.of(
+                        "notification", toNotificationView(item),
+                        "updated", true,
+                        "unread", messageStore.countUnreadNotifications(userId))))
                 .orElseGet(() -> ApiResponse.fail("notification not found"));
     }
 
@@ -280,7 +324,8 @@ public class MessageController {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!notificationsEnabled()) return ApiResponse.fail("notifications feature is disabled");
-        return ApiResponse.ok(Map.of("updated", messageStore.markAllNotificationsRead(userId)));
+        int updated = messageStore.markAllNotificationsRead(userId);
+        return ApiResponse.ok(Map.of("updated", updated, "unread", messageStore.countUnreadNotifications(userId)));
     }
 
     @GetMapping("/feedback/faqs")

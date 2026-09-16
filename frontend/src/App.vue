@@ -139,7 +139,7 @@
             <div class="metrics-grid">
               <div class="metric-tile"><span class="metric-icon green"><Files /></span><div><strong>{{ knowledgeFiles.length }}</strong><span>知识资源</span></div></div>
               <div class="metric-tile"><span class="metric-icon blue"><ChatDotRound /></span><div><strong>{{ communityPostCount }}</strong><span>社区动态</span></div></div>
-              <div class="metric-tile"><span class="metric-icon amber"><Bell /></span><div><strong>{{ notifications.length }}</strong><span>通知提醒</span></div></div>
+              <div class="metric-tile"><span class="metric-icon amber"><Bell /></span><div><strong>{{ notificationUnread }}</strong><span>未读通知</span></div></div>
               <div class="metric-tile"><span class="metric-icon red"><Tickets /></span><div><strong>{{ tickets.length }}</strong><span>反馈工单</span></div></div>
             </div>
             <div class="two-column">
@@ -330,7 +330,7 @@
       <template #footer><el-button :icon="Refresh" @click="loadGovernance">刷新数据</el-button><el-button type="primary" @click="governanceDialog = false">完成</el-button></template>
     </el-dialog>
     <el-dialog v-model="governancePreviewDialog" :title="governancePreviewKind" width="min(760px, 94vw)" top="6vh" destroy-on-close><div class="reader-header"><span class="file-type large">VIEW</span><div><h3>{{ governancePreviewTitle }}</h3></div></div><article class="knowledge-body governance-preview-body">{{ governancePreviewContent }}</article><template #footer><el-button type="primary" @click="governancePreviewDialog=false">关闭</el-button></template></el-dialog>
-    <el-dialog v-model="notificationsDialog" title="通知中心" width="min(620px, 92vw)"><div class="notification-list"><article v-for="notice in notifications" :key="notice.id"><span class="notification-symbol"><Bell /></span><div><strong>{{ notice.title }}</strong><p>{{ notice.content }}</p><small>{{ notificationTypeLabel(notice.type) }} · {{ formatDate(notice.createdAt || '') }}</small></div><el-button v-if="!notice.read" text type="primary" @click="markNotificationRead(notice)">标为已读</el-button><el-tag v-else type="info" size="small">已读</el-tag></article><el-empty v-if="!notifications.length" description="暂无通知" /></div><template #footer><el-button :icon="Refresh" @click="openNotifications">刷新</el-button><el-button :disabled="!notifications.some(notice => !notice.read)" @click="markAllNotificationsRead">全部已读</el-button><el-button type="primary" @click="notificationsDialog = false">关闭</el-button></template></el-dialog>
+    <el-dialog v-model="notificationsDialog" :title="notificationsDialogTitle" width="min(620px, 92vw)"><div class="notification-list"><article v-for="notice in notifications" :key="notice.id"><span class="notification-symbol"><Bell /></span><div><strong>{{ notice.title }}</strong><p>{{ notice.content }}</p><small>{{ notificationTypeLabel(notice.type) }} · {{ formatDate(notice.createdAt || '') }}</small></div><el-button v-if="!notice.read" text type="primary" @click="markNotificationRead(notice)">标为已读</el-button><el-tag v-else type="info" size="small">已读</el-tag></article><div v-if="notificationHasMore || notificationLoading || notificationError" class="notification-more"><el-button text type="primary" :loading="notificationLoading" @click="loadMoreNotifications">{{ notificationLoading ? '正在加载通知' : notificationError ? `${notificationError}，点击重试` : '加载更多通知' }}</el-button></div><el-empty v-if="!notifications.length" description="暂无通知" /></div><template #footer><el-button :icon="Refresh" @click="openNotifications">刷新</el-button><el-button :disabled="!notificationUnread" @click="markAllNotificationsRead">全部已读</el-button><el-button type="primary" @click="notificationsDialog = false">关闭</el-button></template></el-dialog>
     <el-dialog v-model="categoryDialog" title="知识分类管理" width="min(520px, 92vw)"><el-form inline @submit.prevent="saveCategory"><el-form-item><el-input v-model="categoryForm.name" placeholder="分类名称" /></el-form-item><el-form-item><el-input-number v-model="categoryForm.sortNo" :min="0" /></el-form-item><el-button type="primary" @click="saveCategory">{{ categoryForm.id ? '保存修改' : '新增分类' }}</el-button></el-form><div class="category-admin-list"><article v-for="category in knowledgeCategories" :key="category.id"><span>{{ category.name }}</span><small>排序 {{ category.sortNo || 0 }}</small><div><el-button text @click="editCategory(category)">编辑</el-button><el-button text type="danger" @click="removeCategory(category)">删除</el-button></div></article></div><template #footer><el-button @click="categoryDialog=false">关闭</el-button></template></el-dialog>
     <el-dialog v-model="knowledgeMetadataDialog" title="编辑知识资源" width="min(520px, 92vw)"><el-form label-position="top"><el-form-item label="标题"><el-input v-model="knowledgeMetadataForm.title" maxlength="255" /></el-form-item><el-form-item label="分类"><el-select v-model="knowledgeMetadataForm.categoryId" clearable><el-option v-for="category in knowledgeCategories" :key="category.id" :label="category.name" :value="category.id" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="knowledgeMetadataForm.auditStatus"><el-option label="待审核" value="PENDING" /><el-option label="已通过" value="APPROVED" /><el-option label="已驳回" value="REJECTED" /><el-option label="已下架" value="HIDDEN" /></el-select></el-form-item></el-form><template #footer><el-button @click="knowledgeMetadataDialog=false">取消</el-button><el-button type="primary" @click="saveKnowledgeMetadata">保存</el-button></template></el-dialog>
     <el-dialog v-model="userGovernanceDialog" title="用户资料与治理" width="min(880px, 94vw)" top="4vh"><el-tabs><el-tab-pane label="账号设置"><el-form label-position="top" class="governance-user-form"><div class="form-pair"><el-form-item label="昵称"><el-input v-model="userGovernanceForm.nickname" maxlength="64" /></el-form-item><el-form-item label="账号状态"><el-select v-model="userGovernanceForm.status"><el-option label="正常" value="ACTIVE" /><el-option label="禁用" value="DISABLED" /><el-option label="已删除" value="DELETED" /></el-select></el-form-item></div><div class="form-pair"><el-form-item label="角色"><el-select v-model="userGovernanceForm.role"><el-option label="社区用户" value="USER" /><el-option label="平台管理员" value="ADMIN" /></el-select></el-form-item><el-form-item label="发帖策略"><el-select v-model="userGovernanceForm.publishPolicy"><el-option label="标准审核" value="STANDARD" /><el-option label="强制预审" value="PRE_REVIEW" /><el-option label="禁止发布" value="BLOCKED" /></el-select></el-form-item></div><el-form-item label="允许私信"><el-switch v-model="userGovernanceForm.messagingEnabled" /></el-form-item><el-form-item label="头像地址"><el-input v-model="userGovernanceForm.avatarUrl" /></el-form-item><el-form-item label="个人签名"><el-input v-model="userGovernanceForm.signature" type="textarea" :rows="3" maxlength="500" /></el-form-item><el-form-item label="重置密码"><el-input v-model="userGovernanceForm.resetPassword" type="password" show-password placeholder="留空表示不修改，至少 8 位" /></el-form-item></el-form></el-tab-pane><el-tab-pane label="个人内容"><div class="governance-user-summary"><span>知识资源 <strong>{{ adminUserKnowledge.length }}</strong></span><span>帖子 <strong>{{ adminUserPosts.length }}</strong></span><span>草稿 <strong>{{ adminUserDrafts.length }}</strong></span><span>行为足迹 <strong>{{ adminUserBehaviors.length }}</strong></span></div><el-table :data="adminUserKnowledge" max-height="220"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="title" label="知识资源" min-width="220" /><el-table-column label="状态" width="100"><template #default="scope">{{ auditLabel(scope.row.auditStatus) }}</template></el-table-column></el-table><el-table :data="adminUserPosts" max-height="220"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="title" label="帖子" min-width="220" /><el-table-column label="状态" width="100"><template #default="scope">{{ postStatusLabel(scope.row.status) }}</template></el-table-column></el-table><div class="activity-list compact"><article v-for="item in adminUserBehaviors.slice(0,20)" :key="item.id"><span class="event-dot"></span><div><strong>{{ behaviorActionLabel(item.action) }} · {{ behaviorTargetLabel(item.targetType) }}</strong><small>{{ formatDate(item.createdAt) }}</small></div></article><el-empty v-if="!adminUserBehaviors.length" description="暂无行为足迹" /></div></el-tab-pane></el-tabs><template #footer><el-button @click="userGovernanceDialog=false">取消</el-button><el-button type="primary" @click="saveUserGovernance">保存治理设置</el-button></template></el-dialog>
@@ -368,6 +368,7 @@ type EventRecord = { id:number; type:string; aggregateId:string; status:string; 
 type AiSession = { id:number; user_id?:number; title:string; created_at:string };
 type Comment = { id:number; postId?:number; userId:number; parentId?:number; rootId?:number; content:string; status?:string; placeholder?:boolean };
 type CommentThreadPage = { items:Comment[]; nextCursor:number|null; hasMore:boolean; total:number };
+type NotificationPage = { items:Notice[]; nextCursor:number|null; hasMore:boolean; unread:number };
 type FeedPage = { items:Post[]; nextCursor:number|null; hasMore:boolean };
 type FeedMode = 'all'|'following'|'mine'|'author';
 type BehaviorRecord = { id:number; action:string; targetType:string; targetId:number; createdAt:string };
@@ -432,6 +433,8 @@ const userGovernanceForm = ref({ userId:0, nickname:'', avatarUrl:'', signature:
 const FEED_PAGE_SIZE = 10; const feedCursor = ref<number|null>(null); const feedHasMore = ref(false); const feedLoadingMore = ref(false); const feedLoadError = ref(''); const feedSentinelRef = ref<HTMLElement>();
 let feedRequestToken = 0; let feedPageMode: FeedMode = 'all'; let feedObserver: IntersectionObserver | undefined;
 const knowledgeFiles = ref<KnowledgeFile[]>([]); const feedPosts = ref<Post[]>([]); const communityPostCount = ref(0); const collectedPosts = ref<Post[]>([]); const tickets = ref<Ticket[]>([]); const adminTickets = ref<Ticket[]>([]);
+const NOTIFICATION_PAGE_SIZE = 20; const notificationUnread = ref(0); const notificationCursor = ref<number|null>(null);
+const notificationHasMore = ref(false); const notificationLoading = ref(false); const notificationError = ref('');
 const messages = ref<ChatMessage[]>([]); const notifications = ref<Notice[]>([]); const drafts = ref<Draft[]>([]); const sessions = ref<ChatSession[]>([]); const adminChatSessions = ref<ChatSession[]>([]); const adminChatMessages = ref<ChatMessage[]>([]);
 const adminUsers = ref<UserRecord[]>([]); const knowledgeReports = ref<Report[]>([]); const userReports = ref<Report[]>([]); const faqs = ref<Faq[]>([]); const adminEvents = ref<EventRecord[]>([]);
 const blockedUserIds = ref<number[]>([]); const behaviors = ref<BehaviorRecord[]>([]); const adminComments = ref<Comment[]>([]); const adminDrafts = ref<Draft[]>([]); const aiChunks = ref<AiChunk[]>([]); const aiAuditSessions = ref<AiSession[]>([]);
@@ -476,7 +479,7 @@ const currentNavigation = computed(() => portal.value === 'admin' ? adminWorkspa
   .filter(item => platformConfig.value.private_messages_enabled || item.key !== 'messages')
   .filter(item => platformConfig.value.notifications_enabled || item.key !== 'notifications')
   .filter(item => platformConfig.value.ai_chat_enabled || item.key !== 'ai')
-  .map(item => item.key === 'notifications' ? {...item,badge:notifications.value.filter(notice=>!notice.read).length || 0} : item));
+  .map(item => item.key === 'notifications' ? {...item,badge:notificationUnread.value || 0} : item));
 const mobileNavigation = computed(() => {
   const keys = portal.value === 'admin'
     ? ['dashboard','moderation','analytics','users','system']
@@ -486,6 +489,7 @@ const mobileNavigation = computed(() => {
     return item ? [item] : [];
   });
 });
+const notificationsDialogTitle = computed(() => notificationUnread.value ? `通知中心（${notificationUnread.value} 条未读）` : '通知中心');
 const currentTitle = computed(() => detailKnowledge.value?.title || detailPost.value?.title || currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
 const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
@@ -641,7 +645,7 @@ async function registerAccount(){
 }
 
 async function login(){if(busy.value)return;if(!loginForm.value.captchaAnswer.trim()){ElMessage.warning('请输入验证码');return;}busy.value=true;try{const result=await postData<AuthResult>('/user/login',loginForm.value);await completeAuthentication(result);ElMessage.success('登录成功');}catch(error){notifyError(error);invalidateCaptcha(true);captchaRefreshPending=false;await loadCaptcha({silent:true});}finally{busy.value=false;}}
-function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); messageDrafts.clear(); messageForm.value={sessionId:0,senderId:0,content:''}; resetMessagePaging(); sessions.value=[]; notifications.value=[]; authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
+function logout(){ ['ai-knowledge-local-token','ai-knowledge-username','ai-knowledge-name','ai-knowledge-role','ai-knowledge-user-id'].forEach(removeStoredValue); messageDrafts.clear(); messageForm.value={sessionId:0,senderId:0,content:''}; resetMessagePaging(); resetNotificationPaging(); sessions.value=[]; notifications.value=[]; authenticated.value=false; invalidateCaptcha(true); void loadCaptcha({silent:true}); }
 async function restoreSession(){try{const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;setStoredValue('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value={...platformConfig.value,...await getData<typeof platformConfig.value>('/ai/config/public')};}catch{/* 配置服务短暂不可用时继续使用安全默认值。 */}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
@@ -651,7 +655,7 @@ async function confirmDiscardAdminConfig(){if(!aiConfigDirty.value)return true;t
 async function switchPortal(value:'client'|'admin'){ if(value!==portal.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return;returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; await refreshCurrentView(); }
 async function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;await loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;await openNotifications();return;} if(key!==activeView.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return; returnToRoot();if(key==='forum')feedMode.value='all';if(key==='square')feedMode.value='following';activeView.value=key; mobileMenuOpen.value=false; mobileAiHistoryOpen.value=false; window.scrollTo({top:0,behavior:'smooth'}); await refreshCurrentView(); }
 function openAdminQueue(tab:string){moderationTab.value=tab;void selectView('moderation');}
-async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='analytics') await loadAnalytics(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(activeView.value==='home')await Promise.all([loadFeed('following'),loadCommunityPostCount()]);if(activeView.value==='forum')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'all');if(activeView.value==='square')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'following'); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=toUserMessage(error,'页面加载失败，请重试'); notifyError(error); } finally { viewLoading.value=false; } }
+async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; if(portal.value==='client')void refreshUnreadCount(); try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='analytics') await loadAnalytics(); else if(activeView.value==='users') adminUsers.value=await getData('/user/admin/users'); else if(activeView.value==='tickets') await loadTicketsAdmin(); else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(activeView.value==='home')await Promise.all([loadFeed('following'),loadCommunityPostCount()]);if(activeView.value==='forum')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'all');if(activeView.value==='square')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'following'); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=toUserMessage(error,'页面加载失败，请重试'); notifyError(error); } finally { viewLoading.value=false; } }
 async function refreshVisiblePage(){if(portal.value==='admin'&&activeView.value==='system'&&aiConfigDirty.value&&!await confirmDiscardAdminConfig())return;if(detailRoute.value)await loadDetailRoute();else await refreshCurrentView();}
 async function runGlobalSearch(){ returnToRoot();portal.value='client';activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
@@ -850,12 +854,12 @@ function selectMessageSession(sessionId:number){
 }
 function resetMessagePaging(){messages.value=[];loadedMessageSessionId=0;messageHasOlder.value=false;messageUnseenCount.value=0;}
 async function loadMessageData(options:{reloadMessages?:boolean}={}){
-  const [chatSessions,notices]=await Promise.all([
+  const [chatSessions,noticePage]=await Promise.all([
     getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),
-    getData<Notice[]>(`/notification/list?userId=${currentUserId.value}`).catch(()=>[] as Notice[])
+    getData<NotificationPage>(notificationPageUrl()).catch(()=>null)
   ]);
   sessions.value=chatSessions;
-  notifications.value=notices;
+  if(noticePage)applyNotificationPage(noticePage,true);
   await loadUserSummaries(chatSessions.map(session=>session.otherUserId));
   if(!chatSessions.some(session=>session.id===messageForm.value.sessionId)){
     const firstSessionId=window.matchMedia('(max-width: 820px)').matches?0:(chatSessions[0]?.id||0);
@@ -863,9 +867,32 @@ async function loadMessageData(options:{reloadMessages?:boolean}={}){
   }
   if(options.reloadMessages!==false||loadedMessageSessionId!==messageForm.value.sessionId)await loadMessages();
 }
-async function openNotifications(){notifications.value=await getData(`/notification/list?userId=${currentUserId.value}`);notificationsDialog.value=true;}
-async function markNotificationRead(notice:Notice){await postData('/notification/read',{notificationId:notice.id});notice.read=true;ElMessage.success('已标记为已读');}
-async function markAllNotificationsRead(){await postData('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));ElMessage.success('全部通知已读');}
+function notificationPageUrl(cursor?:number|null){const params=new URLSearchParams({userId:String(currentUserId.value),limit:String(NOTIFICATION_PAGE_SIZE)});if(cursor)params.set('cursor',String(cursor));return `/notification/page?${params}`;}
+function applyNotificationPage(page:NotificationPage,reset:boolean){
+  const known=new Set(reset?[]:notifications.value.map(notice=>notice.id));
+  notifications.value=reset?page.items:[...notifications.value,...page.items.filter(notice=>!known.has(notice.id))];
+  notificationCursor.value=page.nextCursor;
+  notificationHasMore.value=page.hasMore;
+  notificationUnread.value=page.unread;
+  notificationError.value='';
+}
+function resetNotificationPaging(){notifications.value=[];notificationCursor.value=null;notificationHasMore.value=false;notificationLoading.value=false;notificationError.value='';notificationUnread.value=0;}
+async function openNotifications(){applyNotificationPage(await getData<NotificationPage>(notificationPageUrl()),true);notificationsDialog.value=true;}
+async function loadMoreNotifications(){
+  if(!notificationHasMore.value||notificationLoading.value)return;
+  notificationLoading.value=true;
+  notificationError.value='';
+  try{applyNotificationPage(await getData<NotificationPage>(notificationPageUrl(notificationCursor.value)),false);}
+  catch(error){notificationError.value=toUserMessage(error,'通知加载失败');}
+  finally{notificationLoading.value=false;}
+}
+async function refreshUnreadCount(){
+  if(!authenticated.value)return;
+  try{notificationUnread.value=(await getData<{unread:number}>(`/notification/unread-count?userId=${currentUserId.value}`)).unread;}
+  catch{/* 通知服务短暂不可用时保留上一次的未读数。 */}
+}
+async function markNotificationRead(notice:Notice){const result=await postData<{unread:number}>('/notification/read',{notificationId:notice.id});notice.read=true;notificationUnread.value=result.unread;ElMessage.success('已标记为已读');}
+async function markAllNotificationsRead(){const result=await postData<{unread:number}>('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));notificationUnread.value=result.unread;ElMessage.success('全部通知已读');}
 function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}
 async function openSession(session:ChatSession){selectMessageSession(session.id);try{await loadMessages();}catch(error){notifyError(error);}}
 function closeMobileConversation(){selectMessageSession(0);}
@@ -949,7 +976,7 @@ function stopMessagePolling(){if(messagePollTimer!==undefined){window.clearInter
 watch(shouldPollMessages,(active,wasActive)=>{
   stopMessagePolling();
   if(!active)return;
-  messagePollTimer=window.setInterval(()=>{void fetchNewMessages().catch(()=>undefined);},MESSAGE_POLL_INTERVAL);
+  messagePollTimer=window.setInterval(()=>{void fetchNewMessages().catch(()=>undefined);void refreshUnreadCount();},MESSAGE_POLL_INTERVAL);
   if(wasActive===false)void fetchNewMessages().catch(()=>undefined);
 });
 function handleVisibilityChange(){pageVisible.value=document.visibilityState!=='hidden';}

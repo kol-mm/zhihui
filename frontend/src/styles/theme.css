@@ -703,3 +703,10 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
   background-image: linear-gradient(180deg, #e5b258, #dc9c30);
 }
 .el-button--warning.is-plain:not(.is-disabled) { color: #8a5f18; }
+
+.notification-more { display: flex; justify-content: center; padding: 10px 0 2px; }
+
+/* Paged notification list can get long: keep the desktop dialog a sane height and scroll inside it. */
+@media (min-width: 521px) {
+  .el-dialog .notification-list { max-height: min(56vh, 520px); overflow-y: auto; padding-right: 4px; }
+}

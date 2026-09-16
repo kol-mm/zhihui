@@ -68,6 +68,22 @@ public interface MessageStore {
 
     List<NotificationEntity> listNotifications(Long userId);
 
+    /** Newest-first page of notifications, optionally unread only; beforeId is the paging cursor. */
+    default List<NotificationEntity> pageNotifications(Long userId, Long beforeId, int limit, boolean unreadOnly) {
+        return listNotifications(userId).stream()
+                .filter(notification -> !unreadOnly || notification.getIsRead() == null || notification.getIsRead() == 0)
+                .filter(notification -> beforeId == null || beforeId <= 0 || notification.getId() < beforeId)
+                .sorted(java.util.Comparator.comparing(NotificationEntity::getId).reversed())
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    default long countUnreadNotifications(Long userId) {
+        return listNotifications(userId).stream()
+                .filter(notification -> notification.getIsRead() == null || notification.getIsRead() == 0)
+                .count();
+    }
+
     NotificationEntity saveNotification(NotificationEntity notification);
 
     Optional<NotificationEntity> markNotificationRead(Long userId, Long notificationId);

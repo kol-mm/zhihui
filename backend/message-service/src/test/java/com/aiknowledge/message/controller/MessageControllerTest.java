@@ -169,6 +169,49 @@ class MessageControllerTest {
     }
 
     @Test
+    void notificationsPageWithCursorAndTrackUnreadCount() {
+        InMemoryMessageStore store = new InMemoryMessageStore();
+        MessageController isolated = new MessageController(
+                store, new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events"));
+        String readerAuth = "Bearer " + LocalAuth.issueToken("notice-reader", 61L, "USER");
+        for (int i = 1; i <= 5; i++) {
+            NotificationEntity notification = new NotificationEntity();
+            notification.setUserId(61L);
+            notification.setType("SYSTEM");
+            notification.setTitle("通知 " + i);
+            notification.setContent("内容 " + i);
+            store.saveNotification(notification);
+        }
+        assertEquals(5L, ((Number) isolated.unreadNotificationCount(readerAuth, null).data().get("unread")).longValue());
+
+        Map<String, Object> first = isolated.notificationPage(readerAuth, null, null, 2, false).data();
+        List<Map<String, Object>> firstItems = itemsOf(first);
+        assertEquals(2, firstItems.size());
+        assertEquals("通知 5", firstItems.get(0).get("title"));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(5L, ((Number) first.get("unread")).longValue());
+
+        Map<String, Object> second = isolated.notificationPage(readerAuth, null, ((Number) first.get("nextCursor")).longValue(), 2, false).data();
+        assertEquals("通知 3", itemsOf(second).get(0).get("title"));
+        assertFalse(itemsOf(second).stream().anyMatch(item -> firstItems.stream().anyMatch(seen -> seen.get("id").equals(item.get("id")))));
+
+        Long readMe = ((Number) firstItems.get(0).get("id")).longValue();
+        assertEquals(4L, ((Number) isolated.markNotificationRead(readerAuth, Map.of("notificationId", readMe)).data().get("unread")).longValue());
+        assertEquals(4, itemsOf(isolated.notificationPage(readerAuth, null, null, 20, true).data()).size());
+
+        assertEquals(0L, ((Number) isolated.markAllNotificationsRead(readerAuth).data().get("unread")).longValue());
+        assertEquals(0, itemsOf(isolated.notificationPage(readerAuth, null, null, 20, true).data()).size());
+        assertEquals(5, itemsOf(isolated.notificationPage(readerAuth, null, null, 20, false).data()).size());
+        assertEquals(500, isolated.notificationPage("Bearer invalid", null, null, 20, false).code());
+        assertEquals(500, isolated.notificationPage(readerAuth, null, -1L, 20, false).code());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> itemsOf(Map<String, Object> page) {
+        return (List<Map<String, Object>>) page.get("items");
+    }
+
+    @Test
     void adminSessionListCountsMessagesPerSession() {
         Long busy = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 41L)).data().get("id")).longValue();
         Long quiet = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 42L)).data().get("id")).longValue();

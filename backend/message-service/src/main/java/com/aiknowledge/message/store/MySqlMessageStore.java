@@ -188,6 +188,24 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override
+    public List<NotificationEntity> pageNotifications(Long userId, Long beforeId, int limit, boolean unreadOnly) {
+        return notificationMapper.selectList(Wrappers.<NotificationEntity>lambdaQuery()
+                .eq(userId != null, NotificationEntity::getUserId, userId)
+                .eq(unreadOnly, NotificationEntity::getIsRead, 0)
+                .lt(beforeId != null && beforeId > 0, NotificationEntity::getId, beforeId)
+                .orderByDesc(NotificationEntity::getId)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
+
+    @Override
+    public long countUnreadNotifications(Long userId) {
+        Long count = notificationMapper.selectCount(Wrappers.<NotificationEntity>lambdaQuery()
+                .eq(userId != null, NotificationEntity::getUserId, userId)
+                .eq(NotificationEntity::getIsRead, 0));
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public NotificationEntity saveNotification(NotificationEntity notification) {
         notificationMapper.insert(notification);
         return notification;
