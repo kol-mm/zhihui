@@ -710,3 +710,5 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 @media (min-width: 521px) {
   .el-dialog .notification-list { max-height: min(56vh, 520px); overflow-y: auto; padding-right: 4px; }
 }
+
+.knowledge-load-more { display: flex; justify-content: center; padding: 14px 0 4px; }

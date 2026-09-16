@@ -137,7 +137,7 @@
               <el-button v-if="platformConfig.knowledge_upload_enabled" type="primary" :icon="Upload" @click="knowledgeDialog = true">上传知识</el-button>
             </div>
             <div class="metrics-grid">
-              <div class="metric-tile"><span class="metric-icon green"><Files /></span><div><strong>{{ knowledgeFiles.length }}</strong><span>知识资源</span></div></div>
+              <div class="metric-tile"><span class="metric-icon green"><Files /></span><div><strong>{{ knowledgeTotal }}</strong><span>知识资源</span></div></div>
               <div class="metric-tile"><span class="metric-icon blue"><ChatDotRound /></span><div><strong>{{ communityPostCount }}</strong><span>社区动态</span></div></div>
               <div class="metric-tile"><span class="metric-icon amber"><Bell /></span><div><strong>{{ notificationUnread }}</strong><span>未读通知</span></div></div>
               <div class="metric-tile"><span class="metric-icon red"><Tickets /></span><div><strong>{{ tickets.length }}</strong><span>反馈工单</span></div></div>
@@ -168,7 +168,7 @@
             <section class="surface">
               <div class="category-filter">
                 <el-radio-group v-model="knowledgeCategoryId" size="small">
-                  <el-radio-button :value="0">全部 {{ knowledgeFiles.length }}</el-radio-button>
+                  <el-radio-button :value="0">全部 {{ knowledgeSearchMode ? knowledgeFiles.length : knowledgeTotal }}</el-radio-button>
                   <el-radio-button v-for="category in knowledgeCategories" :key="category.id" :value="category.id">
                     {{ category.name }} {{ categoryCount(category.id) }}
                   </el-radio-button>
@@ -183,7 +183,8 @@
                   <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
                   <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.userId !== currentUserId" text :type="isFollowing(file.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(file.userId)">{{ isFollowing(file.userId) ? '取消关注' : '关注作者' }}</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">{{ file.liked ? '取消点赞' : '点赞' }}</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item v-if="file.userId === currentUserId" divided @click="deleteKnowledge(file)">删除资源</el-dropdown-item><el-dropdown-item v-else divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
                 </article>
-              </div><el-empty v-else description="没有匹配的知识资源" />
+              </div>              <div v-if="!knowledgeSearchMode && (knowledgeHasMore || knowledgeLoadingMore || knowledgeLoadError)" ref="knowledgeSentinelRef" class="knowledge-load-more"><el-button :loading="knowledgeLoadingMore" @click="loadMoreKnowledge">{{ knowledgeLoadingMore ? '正在加载资源' : knowledgeLoadError ? `${knowledgeLoadError}，点击重试` : '加载更多资源' }}</el-button></div>
+              <el-empty v-if="!filteredKnowledge.length" description="没有匹配的知识资源" />
             </section>
             <section v-if="platformConfig.user_ranking_enabled" class="surface"><div class="surface-head"><div><h3>知识贡献榜</h3><p>综合上传量、浏览量、下载量和违规频次排序</p></div><el-tag type="info">前 {{ knowledgeRanking.length }} 名</el-tag></div><div class="ranking-list"><article v-for="item in knowledgeRanking" :key="item.userId"><strong>{{ item.rank }}</strong><div class="mini-avatar">{{ communityUser(item.userId).nickname.slice(0,1) }}</div><span><b>{{ communityUser(item.userId).nickname }}</b><small>上传 {{ item.uploads }} · 浏览 {{ item.views }} · 下载 {{ item.downloads }} · 违规 {{ item.violations }}</small></span><em>{{ item.score }} 分</em></article></div><el-empty v-if="!knowledgeRanking.length" description="暂无榜单数据" /></section>
           </section>
@@ -369,6 +370,8 @@ type AiSession = { id:number; user_id?:number; title:string; created_at:string }
 type Comment = { id:number; postId?:number; userId:number; parentId?:number; rootId?:number; content:string; status?:string; placeholder?:boolean };
 type CommentThreadPage = { items:Comment[]; nextCursor:number|null; hasMore:boolean; total:number };
 type NotificationPage = { items:Notice[]; nextCursor:number|null; hasMore:boolean; unread:number };
+type KnowledgePage = { items:KnowledgeFile[]; nextCursor:number|null; hasMore:boolean; total:number };
+type KnowledgeCategoryCounts = { total:number; counts:{ categoryId:number; count:number }[] };
 type FeedPage = { items:Post[]; nextCursor:number|null; hasMore:boolean };
 type FeedMode = 'all'|'following'|'mine'|'author';
 type BehaviorRecord = { id:number; action:string; targetType:string; targetId:number; createdAt:string };
@@ -432,6 +435,10 @@ const userGovernanceForm = ref({ userId:0, nickname:'', avatarUrl:'', signature:
 
 const FEED_PAGE_SIZE = 10; const feedCursor = ref<number|null>(null); const feedHasMore = ref(false); const feedLoadingMore = ref(false); const feedLoadError = ref(''); const feedSentinelRef = ref<HTMLElement>();
 let feedRequestToken = 0; let feedPageMode: FeedMode = 'all'; let feedObserver: IntersectionObserver | undefined;
+const KNOWLEDGE_PAGE_SIZE = 12; const knowledgeTotal = ref(0); const knowledgeCursor = ref<number|null>(null);
+const knowledgeHasMore = ref(false); const knowledgeLoadingMore = ref(false); const knowledgeLoadError = ref(''); const knowledgeSearchMode = ref(false);
+const knowledgeCategoryCounts = ref<Record<number, number>>({}); const knowledgeSentinelRef = ref<HTMLElement>();
+let knowledgeRequestToken = 0; let knowledgeObserver: IntersectionObserver | undefined;
 const knowledgeFiles = ref<KnowledgeFile[]>([]); const feedPosts = ref<Post[]>([]); const communityPostCount = ref(0); const collectedPosts = ref<Post[]>([]); const tickets = ref<Ticket[]>([]); const adminTickets = ref<Ticket[]>([]);
 const NOTIFICATION_PAGE_SIZE = 20; const notificationUnread = ref(0); const notificationCursor = ref<number|null>(null);
 const notificationHasMore = ref(false); const notificationLoading = ref(false); const notificationError = ref('');
@@ -492,7 +499,10 @@ const mobileNavigation = computed(() => {
 const notificationsDialogTitle = computed(() => notificationUnread.value ? `通知中心（${notificationUnread.value} 条未读）` : '通知中心');
 const currentTitle = computed(() => detailKnowledge.value?.title || detailPost.value?.title || currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
 const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
-const filteredKnowledge = computed(() => knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value) && (!knowledgeKeyword.value || file.title.toLowerCase().includes(knowledgeKeyword.value.toLowerCase()))));
+// Paged results are already filtered by the server; full-text search results keep the client-side filters.
+const filteredKnowledge = computed(() => knowledgeSearchMode.value
+  ? knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value))
+  : knowledgeFiles.value);
 function adminMatches(keyword:string,...values:unknown[]){const query=keyword.trim().toLowerCase();return !query||values.some(value=>String(value??'').toLowerCase().includes(query));}
 const filteredAdminUsers = computed(() => adminUsers.value.filter(user => adminMatches(adminUserKeyword.value,user.id,user.username,user.nickname)&&(!adminUserRoleFilter.value||user.role===adminUserRoleFilter.value)&&(!adminUserStatusFilter.value||user.status===adminUserStatusFilter.value)));
 const adminMetrics = computed(() => [{label:'注册用户',value:metricValue('userAdmin','totalUsers'),hint:`${metricValue('userAdmin','activeUsers')} 个正常账号`,color:'green',icon:markRaw(UserFilled)},{label:'知识资源',value:metricValue('knowledgeAdmin','totalFiles'),hint:`${metricValue('knowledgeAdmin','pendingAudit')} 个待审核`,color:'blue',icon:markRaw(Files)},{label:'社区帖子',value:metricValue('forumAdmin','publishedPosts'),hint:'全站内容产出',color:'amber',icon:markRaw(ChatDotRound)},{label:'反馈工单',value:metricValue('feedbackAdmin','tickets'),hint:`${metricValue('feedbackAdmin','pendingTickets')} 个待处理`,color:'red',icon:markRaw(Tickets)}]);
@@ -565,7 +575,7 @@ const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => parseKnow
 function knowledgeTableRows(text?:string){return(text||'').split('\n').filter(Boolean).map(row=>row.split('\t'));}
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
-function categoryCount(categoryId:number){ return knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length; }
+function categoryCount(categoryId:number){ return knowledgeSearchMode.value ? knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length : (knowledgeCategoryCounts.value[categoryId] || 0); }
 function auditLabel(status:string){ return ({APPROVED:'已通过',PENDING:'待审核',REJECTED:'已驳回'} as Record<string,string>)[status] || status; }
 function postStatusLabel(status:string){ return ({PUBLISHED:'已发布',PENDING:'待审核',HIDDEN:'已隐藏'} as Record<string,string>)[status] || status; }
 function reportStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已结案',REJECTED:'已驳回'} as Record<string,string>)[status] || status; }
@@ -694,8 +704,86 @@ function handlePopState(){const route=parseDetailPath();if(route)void loadDetail
 async function loadFollowData(){followData.value=await getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`);}
 function isFollowing(userId:number){return Boolean(followData.value.followedUserIds?.includes(userId));}
 async function toggleFollowAuthor(userId:number){if(userId===currentUserId.value)return;const wasFollowing=isFollowing(userId);if(wasFollowing)await deleteData('/user/follow',{targetUserId:userId});else await postData('/user/follow',{targetUserId:userId});await loadFollowData();if(wasFollowing&&feedMode.value==='following')feedPosts.value=feedPosts.value.filter(post=>post.userId!==userId);ElMessage.success(wasFollowing?'已取消关注':'已关注作者');}
-async function loadKnowledge(){ const [files,categories,follows,ranking]=await Promise.all([getData<KnowledgeFile[]>('/knowledge/list'),getData<KnowledgeCategory[]>('/knowledge/categories'),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`),getData<KnowledgeRanking[]>('/knowledge/ranking')]); knowledgeFiles.value=files; knowledgeCategories.value=categories; followData.value=follows; knowledgeRanking.value=ranking; await loadUserSummaries([...files.map(file=>file.userId),...ranking.map(item=>item.userId)]); }
-async function searchKnowledge(){ const results=knowledgeKeyword.value?await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`):await getData<KnowledgeFile[]>('/knowledge/list'); knowledgeFiles.value=results; await loadUserSummaries(results.map(file=>file.userId)); }
+async function loadKnowledge(){
+  const token=++knowledgeRequestToken;
+  const [page,counts,categories,follows,ranking]=await Promise.all([
+    getData<KnowledgePage>(knowledgePageUrl()),
+    getData<KnowledgeCategoryCounts>(knowledgeCountsUrl()),
+    getData<KnowledgeCategory[]>('/knowledge/categories'),
+    getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`),
+    getData<KnowledgeRanking[]>('/knowledge/ranking')
+  ]);
+  if(token!==knowledgeRequestToken)return;
+  knowledgeSearchMode.value=false;
+  applyKnowledgePage(page,true);
+  applyCategoryCounts(counts);
+  knowledgeCategories.value=categories; followData.value=follows; knowledgeRanking.value=ranking;
+  await loadUserSummaries([...page.items.map(file=>file.userId),...ranking.map(item=>item.userId)]);
+}
+function knowledgePageUrl(cursor?:number|null){
+  const params=new URLSearchParams({limit:String(KNOWLEDGE_PAGE_SIZE)});
+  if(knowledgeCategoryId.value)params.set('categoryId',String(knowledgeCategoryId.value));
+  if(knowledgeType.value)params.set('fileType',knowledgeType.value);
+  if(cursor)params.set('cursor',String(cursor));
+  return `/knowledge/page?${params}`;
+}
+function knowledgeCountsUrl(){const params=new URLSearchParams();if(knowledgeType.value)params.set('fileType',knowledgeType.value);return `/knowledge/category-counts?${params}`;}
+function applyKnowledgePage(page:KnowledgePage,reset:boolean){
+  const known=new Set(reset?[]:knowledgeFiles.value.map(file=>file.id));
+  knowledgeFiles.value=reset?page.items:[...knowledgeFiles.value,...page.items.filter(file=>!known.has(file.id))];
+  knowledgeCursor.value=page.nextCursor;
+  knowledgeHasMore.value=page.hasMore;
+  // The 全部 tab keeps the unfiltered total, which comes from the counts endpoint.
+  knowledgeLoadError.value='';
+}
+function applyCategoryCounts(counts:KnowledgeCategoryCounts){
+  knowledgeCategoryCounts.value=Object.fromEntries(counts.counts.map(entry=>[entry.categoryId,entry.count]));
+  knowledgeTotal.value=counts.total;
+}
+async function reloadKnowledgePage(){
+  const token=++knowledgeRequestToken;
+  knowledgeLoadError.value='';
+  try{
+    const [page,counts]=await Promise.all([getData<KnowledgePage>(knowledgePageUrl()),getData<KnowledgeCategoryCounts>(knowledgeCountsUrl())]);
+    if(token!==knowledgeRequestToken)return;
+    knowledgeSearchMode.value=false;
+    applyKnowledgePage(page,true);
+    applyCategoryCounts(counts);
+    await loadUserSummaries(page.items.map(file=>file.userId));
+  }catch(error){notifyError(error);}
+}
+async function loadMoreKnowledge(){
+  if(knowledgeSearchMode.value||!knowledgeHasMore.value||knowledgeLoadingMore.value)return;
+  const token=knowledgeRequestToken;
+  knowledgeLoadingMore.value=true;
+  knowledgeLoadError.value='';
+  try{
+    const page=await getData<KnowledgePage>(knowledgePageUrl(knowledgeCursor.value));
+    if(token!==knowledgeRequestToken)return;
+    applyKnowledgePage(page,false);
+    await loadUserSummaries(page.items.map(file=>file.userId));
+  }catch(error){if(token===knowledgeRequestToken)knowledgeLoadError.value=toUserMessage(error,'资源加载失败');}
+  finally{knowledgeLoadingMore.value=false;}
+}
+watch([knowledgeCategoryId,knowledgeType],()=>{ if(activeView.value==='knowledge'&&!knowledgeSearchMode.value)void reloadKnowledgePage(); });
+watch(knowledgeSentinelRef,element=>{
+  knowledgeObserver?.disconnect();
+  knowledgeObserver=undefined;
+  if(!element||typeof IntersectionObserver==='undefined')return;
+  knowledgeObserver=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)&&!knowledgeLoadError.value)void loadMoreKnowledge();},{rootMargin:'240px 0px'});
+  knowledgeObserver.observe(element);
+});
+async function searchKnowledge(){
+  if(!knowledgeKeyword.value){await reloadKnowledgePage();return;}
+  const token=++knowledgeRequestToken;
+  const results=await getData<KnowledgeFile[]>(`/knowledge/search/fulltext?keyword=${encodeURIComponent(knowledgeKeyword.value)}`);
+  if(token!==knowledgeRequestToken)return;
+  knowledgeSearchMode.value=true;
+  knowledgeFiles.value=results;
+  knowledgeHasMore.value=false;
+  knowledgeCursor.value=null;
+  await loadUserSummaries(results.map(file=>file.userId));
+}
 function handleKnowledgeFile(file:UploadFile){if(file.size&&file.size>platformConfig.value.max_upload_mb*1024*1024){selectedKnowledgeFile.value=undefined;ElMessage.error(`文件不能超过 ${platformConfig.value.max_upload_mb} MB`);return;}selectedKnowledgeFile.value=file.raw;if(file.raw&&!knowledgeForm.value.title)knowledgeForm.value.title=file.name.replace(/\.[^.]+$/,'');}
 function clearKnowledgeFile(){selectedKnowledgeFile.value=undefined;}
 async function uploadKnowledge(){
@@ -1102,5 +1190,5 @@ function handleBeforeUnload(event:BeforeUnloadEvent){if(!aiConfigDirty.value)ret
 watch(mobileMenuOpen,open=>document.body.classList.toggle('mobile-menu-active',open));
 watch(moderationTab,()=>adminModerationStatus.value='');
 onMounted(async()=>{syncUserForms();window.addEventListener('popstate',handlePopState);window.addEventListener('keydown',handleGlobalKeydown);window.addEventListener('beforeunload',handleBeforeUnload);document.addEventListener('visibilitychange',handleVisibilityChange);await loadPublicConfig();if(authenticated.value)await restoreSession();else await loadCaptcha();});
-onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
+onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();knowledgeObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
 </script>

@@ -105,6 +105,62 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public List<KnowledgeFileEntity> pageFiles(FileQuery query) {
+        return matching(query)
+                .filter(file -> query.beforeId() == null || query.beforeId() <= 0 || file.getId() < query.beforeId())
+                .sorted(java.util.Comparator.comparing(KnowledgeFileEntity::getId).reversed())
+                .limit(Math.max(1, query.limit()))
+                .toList();
+    }
+
+    @Override
+    public long countFiles(FileQuery query) {
+        return matching(query).count();
+    }
+
+    @Override
+    public java.util.Map<Long, Long> countFilesByCategory(FileQuery query) {
+        java.util.Map<Long, Long> counts = new java.util.LinkedHashMap<>();
+        matching(query).forEach(file -> counts.merge(file.getCategoryId() == null ? 0L : file.getCategoryId(), 1L, Long::sum));
+        return counts;
+    }
+
+    private java.util.stream.Stream<KnowledgeFileEntity> matching(FileQuery query) {
+        return files.stream()
+                .filter(file -> query.includeAll() || "APPROVED".equals(file.getAuditStatus()))
+                .filter(file -> query.categoryId() == null || query.categoryId() <= 0 || query.categoryId().equals(file.getCategoryId()))
+                .filter(file -> query.fileType() == null || query.fileType().isBlank() || query.fileType().equalsIgnoreCase(file.getFileType()))
+                .filter(file -> query.keyword() == null || query.keyword().isBlank()
+                        || (file.getTitle() != null && file.getTitle().toLowerCase(java.util.Locale.ROOT).contains(query.keyword().toLowerCase(java.util.Locale.ROOT))));
+    }
+
+    @Override
+    public java.util.Map<Long, Integer> likeCounts(java.util.Collection<Long> fileIds) {
+        java.util.Map<Long, Integer> counts = new java.util.HashMap<>();
+        likes.stream().filter(record -> fileIds.contains(record.fileId()))
+                .forEach(record -> counts.merge(record.fileId(), 1, Integer::sum));
+        return counts;
+    }
+
+    @Override
+    public java.util.Set<Long> likedFileIds(Long userId, java.util.Collection<Long> fileIds) {
+        java.util.Set<Long> liked = new java.util.HashSet<>();
+        if (userId == null) return liked;
+        likes.stream().filter(record -> userId.equals(record.userId()) && fileIds.contains(record.fileId()))
+                .forEach(record -> liked.add(record.fileId()));
+        return liked;
+    }
+
+    @Override
+    public java.util.Set<Long> collectedFileIds(Long userId, java.util.Collection<Long> fileIds) {
+        java.util.Set<Long> collected = new java.util.HashSet<>();
+        if (userId == null) return collected;
+        collects.stream().filter(record -> userId.equals(record.userId()) && fileIds.contains(record.fileId()))
+                .forEach(record -> collected.add(record.fileId()));
+        return collected;
+    }
+
+    @Override
     public List<KnowledgeFileEntity> searchFiles(String keyword) {
         return files.stream()
                 .filter(file -> keyword == null || keyword.isBlank() || file.getTitle().contains(keyword))

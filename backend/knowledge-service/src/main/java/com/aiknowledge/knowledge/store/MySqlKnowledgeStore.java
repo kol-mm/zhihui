@@ -14,6 +14,8 @@ import com.aiknowledge.knowledge.mapper.KnowledgeReportMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeDownloadMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeForwardMapper;
 import com.aiknowledge.knowledge.mapper.KnowledgeCategoryMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DuplicateKeyException;
@@ -21,10 +23,14 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 @Profile("mysql")
@@ -65,6 +71,79 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     public List<KnowledgeFileEntity> listFiles() {
         return fileMapper.selectList(Wrappers.<KnowledgeFileEntity>lambdaQuery()
                 .orderByDesc(KnowledgeFileEntity::getCreatedAt));
+    }
+
+    @Override
+    public List<KnowledgeFileEntity> pageFiles(FileQuery query) {
+        return fileMapper.selectList(fileFilter(query)
+                .lt(query.beforeId() != null && query.beforeId() > 0, KnowledgeFileEntity::getId, query.beforeId())
+                .orderByDesc(KnowledgeFileEntity::getId)
+                .last("LIMIT " + Math.max(1, query.limit())));
+    }
+
+    @Override
+    public long countFiles(FileQuery query) {
+        Long count = fileMapper.selectCount(fileFilter(query));
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public Map<Long, Long> countFilesByCategory(FileQuery query) {
+        Map<Long, Long> counts = new LinkedHashMap<>();
+        QueryWrapper<KnowledgeFileEntity> wrapper = new QueryWrapper<>();
+        wrapper.select("IFNULL(category_id, 0) AS category_id", "COUNT(*) AS file_count");
+        if (!query.includeAll()) wrapper.eq("audit_status", "APPROVED");
+        if (query.categoryId() != null && query.categoryId() > 0) wrapper.eq("category_id", query.categoryId());
+        if (query.fileType() != null && !query.fileType().isBlank()) wrapper.eq("file_type", query.fileType());
+        if (query.keyword() != null && !query.keyword().isBlank()) wrapper.like("title", query.keyword());
+        wrapper.groupBy("IFNULL(category_id, 0)");
+        fileMapper.selectMaps(wrapper).forEach(row ->
+                counts.put(((Number) row.get("category_id")).longValue(), ((Number) row.get("file_count")).longValue()));
+        return counts;
+    }
+
+    private LambdaQueryWrapper<KnowledgeFileEntity> fileFilter(FileQuery query) {
+        return Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                .eq(!query.includeAll(), KnowledgeFileEntity::getAuditStatus, "APPROVED")
+                .eq(query.categoryId() != null && query.categoryId() > 0, KnowledgeFileEntity::getCategoryId, query.categoryId())
+                .eq(query.fileType() != null && !query.fileType().isBlank(), KnowledgeFileEntity::getFileType, query.fileType())
+                .like(query.keyword() != null && !query.keyword().isBlank(), KnowledgeFileEntity::getTitle, query.keyword());
+    }
+
+    @Override
+    public Map<Long, Integer> likeCounts(Collection<Long> fileIds) {
+        Map<Long, Integer> counts = new HashMap<>();
+        if (fileIds == null || fileIds.isEmpty()) return counts;
+        likeMapper.selectMaps(new QueryWrapper<KnowledgeLikeEntity>()
+                        .select("file_id AS file_id", "COUNT(*) AS like_count")
+                        .in("file_id", fileIds)
+                        .groupBy("file_id"))
+                .forEach(row -> counts.put(((Number) row.get("file_id")).longValue(), ((Number) row.get("like_count")).intValue()));
+        return counts;
+    }
+
+    @Override
+    public Set<Long> likedFileIds(Long userId, Collection<Long> fileIds) {
+        if (userId == null || fileIds == null || fileIds.isEmpty()) return Set.of();
+        Set<Long> liked = new HashSet<>();
+        likeMapper.selectList(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                        .select(KnowledgeLikeEntity::getFileId)
+                        .eq(KnowledgeLikeEntity::getUserId, userId)
+                        .in(KnowledgeLikeEntity::getFileId, fileIds))
+                .forEach(like -> liked.add(like.getFileId()));
+        return liked;
+    }
+
+    @Override
+    public Set<Long> collectedFileIds(Long userId, Collection<Long> fileIds) {
+        if (userId == null || fileIds == null || fileIds.isEmpty()) return Set.of();
+        Set<Long> collected = new HashSet<>();
+        collectMapper.selectList(Wrappers.<KnowledgeCollectEntity>lambdaQuery()
+                        .select(KnowledgeCollectEntity::getFileId)
+                        .eq(KnowledgeCollectEntity::getUserId, userId)
+                        .in(KnowledgeCollectEntity::getFileId, fileIds))
+                .forEach(collect -> collected.add(collect.getFileId()));
+        return collected;
     }
 
     @Override

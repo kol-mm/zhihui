@@ -44,6 +44,7 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/knowledge")
 public class KnowledgeController {
+    private static final int KNOWLEDGE_PAGE_MAX = 50;
     private static final Pattern IMAGE_MARKUP = Pattern.compile("!\\[([^]]*)]\\(((?:/knowledge/media/[A-Za-z0-9_-]+)|(?:https?://[^\\s)]+))\\)", Pattern.CASE_INSENSITIVE);
     private static final Pattern MARKDOWN_IMAGE_REFERENCE = Pattern.compile("!\\[[^]]*]\\([^)]*\\)");
 
@@ -305,9 +306,54 @@ public class KnowledgeController {
     ) {
         boolean canViewAll = includeAll && LocalAuth.isAdmin(authorization);
         Long viewerUserId = LocalAuth.userId(authorization);
-        return ApiResponse.ok(knowledgeStore.listFiles().stream()
-                .filter(file -> canViewAll || "APPROVED".equals(file.getAuditStatus()))
-                .map(file -> toView(file, viewerUserId)).toList());
+        return ApiResponse.ok(toViews(knowledgeStore.listFiles().stream()
+                .filter(file -> canViewAll || "APPROVED".equals(file.getAuditStatus())).toList(), viewerUserId));
+    }
+
+    /** Newest-first page of knowledge files; filters are applied in the query, not in the browser. */
+    @GetMapping("/page")
+    public ApiResponse<Map<String, Object>> page(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "12") int limit,
+            @RequestParam(name = "categoryId", required = false) Long categoryId,
+            @RequestParam(name = "fileType", required = false) String fileType,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "includeAll", defaultValue = "false") boolean includeAll
+    ) {
+        if (cursor != null && cursor < 0) return ApiResponse.fail("invalid knowledge cursor");
+        boolean canViewAll = includeAll && LocalAuth.isAdmin(authorization);
+        Long viewerUserId = LocalAuth.userId(authorization);
+        int pageSize = Math.max(1, Math.min(KNOWLEDGE_PAGE_MAX, limit));
+        KnowledgeStore.FileQuery query = new KnowledgeStore.FileQuery(categoryId, fileType, keyword, canViewAll, cursor, pageSize + 1);
+        List<KnowledgeFileEntity> files = knowledgeStore.pageFiles(query);
+        boolean hasMore = files.size() > pageSize;
+        if (hasMore) files = files.subList(0, pageSize);
+        Map<String, Object> page = new LinkedHashMap<>();
+        page.put("items", toViews(files, viewerUserId));
+        page.put("nextCursor", hasMore ? files.get(files.size() - 1).getId() : null);
+        page.put("hasMore", hasMore);
+        page.put("total", knowledgeStore.countFiles(new KnowledgeStore.FileQuery(categoryId, fileType, keyword, canViewAll, null, 1)));
+        return ApiResponse.ok(page);
+    }
+
+    /** Counts for the category filter, so the tabs stay accurate without loading every file. */
+    @GetMapping("/category-counts")
+    public ApiResponse<Map<String, Object>> categoryCounts(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "fileType", required = false) String fileType,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "includeAll", defaultValue = "false") boolean includeAll
+    ) {
+        boolean canViewAll = includeAll && LocalAuth.isAdmin(authorization);
+        KnowledgeStore.FileQuery query = new KnowledgeStore.FileQuery(null, fileType, keyword, canViewAll, null, 1);
+        Map<Long, Long> counts = knowledgeStore.countFilesByCategory(query);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("total", counts.values().stream().mapToLong(Long::longValue).sum());
+        view.put("counts", counts.entrySet().stream()
+                .map(entry -> Map.of("categoryId", entry.getKey(), "count", entry.getValue()))
+                .toList());
+        return ApiResponse.ok(view);
     }
 
     @GetMapping("/categories")
@@ -554,7 +600,7 @@ public class KnowledgeController {
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
         Long target = requestedUserId == null ? userId : requestedUserId;
         try {
-            return ApiResponse.ok(knowledgeStore.listUserFiles(target, type).stream().map(file -> toView(file, userId)).toList());
+            return ApiResponse.ok(toViews(knowledgeStore.listUserFiles(target, type), userId));
         } catch (IllegalArgumentException error) {
             return ApiResponse.fail(error.getMessage());
         }
@@ -717,6 +763,41 @@ public class KnowledgeController {
                     return ApiResponse.ok(toView(file));
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
+    }
+
+    /** Builds views for a list with a fixed number of queries instead of three per file. */
+    private List<Map<String, Object>> toViews(List<KnowledgeFileEntity> files, Long viewerUserId) {
+        if (files.isEmpty()) return List.of();
+        List<Long> fileIds = files.stream().map(KnowledgeFileEntity::getId).toList();
+        Map<Long, Integer> likeCounts = knowledgeStore.likeCounts(fileIds);
+        java.util.Set<Long> liked = knowledgeStore.likedFileIds(viewerUserId, fileIds);
+        java.util.Set<Long> collected = knowledgeStore.collectedFileIds(viewerUserId, fileIds);
+        return files.stream().map(file -> {
+            Map<String, Object> view = baseView(file);
+            view.put("likes", likeCounts.getOrDefault(file.getId(), 0));
+            view.put("liked", liked.contains(file.getId()));
+            view.put("collected", collected.contains(file.getId()));
+            List<String> imageUrls = imageUrls(file.getId());
+            view.put("imageUrls", imageUrls);
+            view.put("coverUrl", imageUrls.isEmpty() ? "" : imageUrls.get(0));
+            view.put("createdAt", file.getCreatedAt());
+            return view;
+        }).toList();
+    }
+
+    private Map<String, Object> baseView(KnowledgeFileEntity file) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("id", file.getId());
+        view.put("userId", file.getUserId());
+        view.put("categoryId", file.getCategoryId());
+        view.put("title", file.getTitle());
+        view.put("fileUrl", file.getFileUrl());
+        view.put("fileType", file.getFileType());
+        view.put("parseStatus", file.getParseStatus());
+        view.put("auditStatus", file.getAuditStatus());
+        view.put("views", file.getViews());
+        view.put("downloads", file.getDownloads());
+        return view;
     }
 
     private Map<String, Object> toView(KnowledgeFileEntity file) {

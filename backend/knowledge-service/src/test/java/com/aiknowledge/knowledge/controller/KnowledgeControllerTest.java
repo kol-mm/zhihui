@@ -51,6 +51,92 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void knowledgePagesByCursorAndFiltersServerSide() {
+        // The in-memory store is shared across tests, so every assertion is scoped by this marker.
+        String marker = "分页样本";
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        List<Long> approved = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            Long fileId = ((Number) controller.upload(userAuth, Map.of(
+                    "title", marker + " " + i, "fileType", i % 2 == 0 ? "pdf" : "txt", "content", "内容 " + i,
+                    "categoryId", i % 2 == 0 ? 2L : 1L)).data().get("id")).longValue();
+            controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+            approved.add(fileId);
+        }
+        Long pending = ((Number) controller.upload(userAuth, Map.of(
+                "title", marker + " 待审", "fileType", "pdf", "content", "待审内容")).data().get("id")).longValue();
+
+        Map<String, Object> first = controller.page(userAuth, null, 2, null, null, marker, false).data();
+        assertEquals(List.of(approved.get(4), approved.get(3)), idsOf(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(5L, ((Number) first.get("total")).longValue());
+        assertFalse(idsOf(first).contains(pending));
+
+        Map<String, Object> second = controller.page(userAuth, ((Number) first.get("nextCursor")).longValue(), 2, null, null, marker, false).data();
+        assertEquals(List.of(approved.get(2), approved.get(1)), idsOf(second));
+        Map<String, Object> third = controller.page(userAuth, ((Number) second.get("nextCursor")).longValue(), 2, null, null, marker, false).data();
+        assertEquals(List.of(approved.get(0)), idsOf(third));
+        assertEquals(false, third.get("hasMore"));
+
+        Map<String, Object> pdfOnly = controller.page(userAuth, null, 20, null, "pdf", marker, false).data();
+        assertEquals(2, itemsOf(pdfOnly).size());
+        assertTrue(itemsOf(pdfOnly).stream().allMatch(item -> "pdf".equals(item.get("fileType"))));
+        Map<String, Object> byCategory = controller.page(userAuth, null, 20, 1L, null, marker, false).data();
+        assertEquals(3, itemsOf(byCategory).size());
+        assertTrue(itemsOf(byCategory).stream().allMatch(item -> ((Number) item.get("categoryId")).longValue() == 1L));
+        assertEquals(1, itemsOf(controller.page(userAuth, null, 20, null, null, marker + " 3", false).data()).size());
+
+        // Files awaiting audit stay hidden from members even if they ask for everything.
+        assertFalse(idsOf(controller.page(userAuth, null, 50, null, null, marker, true).data()).contains(pending));
+        assertTrue(idsOf(controller.page(adminAuth, null, 50, null, null, marker, true).data()).contains(pending));
+        assertEquals(500, controller.page(userAuth, -1L, 20, null, null, null, false).code());
+
+        Map<String, Object> counts = controller.categoryCounts(userAuth, null, marker, false).data();
+        assertEquals(5L, ((Number) counts.get("total")).longValue());
+        assertEquals(3L, categoryCount(counts, 1L));
+        assertEquals(2L, categoryCount(counts, 2L));
+        assertEquals(6L, ((Number) controller.categoryCounts(adminAuth, null, marker, true).data().get("total")).longValue());
+    }
+
+    @Test
+    void listViewsCarryBatchedLikeAndCollectState() {
+        Long fileId = ((Number) controller.upload(userAuth, Map.of(
+                "title", "批量状态样本", "fileType", "txt", "content", "内容")).data().get("id")).longValue();
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+        controller.like(userAuth, Map.of("fileId", fileId));
+        controller.collect(userAuth, Map.of("fileId", fileId));
+
+        Map<String, Object> mine = itemsOf(controller.page(userAuth, null, 50, null, null, "批量状态样本", false).data()).get(0);
+        assertEquals(1, ((Number) mine.get("likes")).intValue());
+        assertEquals(true, mine.get("liked"));
+        assertEquals(true, mine.get("collected"));
+
+        String otherAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("other", 9L, "USER");
+        Map<String, Object> theirs = itemsOf(controller.page(otherAuth, null, 50, null, null, "批量状态样本", false).data()).get(0);
+        assertEquals(1, ((Number) theirs.get("likes")).intValue());
+        assertEquals(false, theirs.get("liked"));
+        assertEquals(false, theirs.get("collected"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> itemsOf(Map<String, Object> page) {
+        return (List<Map<String, Object>>) page.get("items");
+    }
+
+    private static List<Long> idsOf(Map<String, Object> page) {
+        return itemsOf(page).stream().map(item -> ((Number) item.get("id")).longValue()).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static long categoryCount(Map<String, Object> counts, long categoryId) {
+        return ((List<Map<String, Object>>) counts.get("counts")).stream()
+                .filter(entry -> ((Number) entry.get("categoryId")).longValue() == categoryId)
+                .mapToLong(entry -> ((Number) entry.get("count")).longValue())
+                .findFirst().orElse(0);
+    }
+
+    @Test
     void rankingIsCalculatedFromStoredKnowledgeActivity() {
         var uploaded = controller.upload(userAuth, Map.of(
                 "title", "Ranking source",
