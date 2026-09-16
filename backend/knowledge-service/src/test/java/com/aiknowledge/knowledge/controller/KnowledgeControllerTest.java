@@ -99,6 +99,46 @@ class KnowledgeControllerTest {
     }
 
     @Test
+    void knowledgeActivityPagesByCursorPerType() {
+        String ownerAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("activity-owner", 31L, "USER");
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        List<Long> uploads = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            Long fileId = ((Number) controller.upload(ownerAuth, Map.of(
+                    "title", "活动样本 " + i, "fileType", "txt", "content", "内容 " + i)).data().get("id")).longValue();
+            controller.audit(adminAuth, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+            uploads.add(fileId);
+        }
+
+        Map<String, Object> first = controller.minePage(ownerAuth, "UPLOADED", null, null, 2).data();
+        assertEquals(List.of(uploads.get(4), uploads.get(3)), idsOf(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(5L, ((Number) first.get("total")).longValue());
+        Map<String, Object> second = controller.minePage(ownerAuth, "UPLOADED", null, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(uploads.get(2), uploads.get(1)), idsOf(second));
+        Map<String, Object> third = controller.minePage(ownerAuth, "UPLOADED", null, ((Number) second.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(uploads.get(0)), idsOf(third));
+        assertEquals(false, third.get("hasMore"));
+
+        controller.collect(ownerAuth, Map.of("fileId", uploads.get(0)));
+        controller.collect(ownerAuth, Map.of("fileId", uploads.get(2)));
+        Map<String, Object> collected = controller.minePage(ownerAuth, "COLLECTED", null, null, 1).data();
+        assertEquals(1, itemsOf(collected).size());
+        assertEquals(2L, ((Number) collected.get("total")).longValue());
+        assertEquals(true, collected.get("hasMore"));
+        List<Long> collectedIds = new java.util.ArrayList<>(idsOf(collected));
+        collectedIds.addAll(idsOf(controller.minePage(ownerAuth, "COLLECTED", null, ((Number) collected.get("nextCursor")).longValue(), 5).data()));
+        assertEquals(2, new java.util.HashSet<>(collectedIds).size());
+        assertTrue(collectedIds.containsAll(List.of(uploads.get(0), uploads.get(2))));
+
+        assertEquals(0, itemsOf(controller.minePage(ownerAuth, "LIKED", null, null, 10).data()).size());
+        assertEquals(500, controller.minePage(ownerAuth, "SOMETHING", null, null, 10).code());
+        assertEquals(500, controller.minePage(ownerAuth, "UPLOADED", null, -1L, 10).code());
+        assertEquals(500, controller.minePage(ownerAuth, "UPLOADED", 99L, null, 10).code());
+        assertEquals(0, controller.minePage(adminAuth, "UPLOADED", 31L, null, 10).code());
+    }
+
+    @Test
     void listViewsCarryBatchedLikeAndCollectState() {
         Long fileId = ((Number) controller.upload(userAuth, Map.of(
                 "title", "批量状态样本", "fileType", "txt", "content", "内容")).data().get("id")).longValue();

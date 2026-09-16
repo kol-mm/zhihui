@@ -606,6 +606,34 @@ public class KnowledgeController {
         }
     }
 
+    /** Paged version of /mine: one page of the user's knowledge activity. */
+    @GetMapping("/mine/page")
+    public ApiResponse<Map<String, Object>> minePage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "type", defaultValue = "UPLOADED") String type,
+            @RequestParam(name = "userId", required = false) Long requestedUserId,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "12") int limit
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
+        if (cursor != null && cursor < 0) return ApiResponse.fail("invalid knowledge cursor");
+        Long target = requestedUserId == null ? userId : requestedUserId;
+        int pageSize = Math.max(1, Math.min(KNOWLEDGE_PAGE_MAX, limit));
+        try {
+            KnowledgeStore.UserFilePage page = knowledgeStore.pageUserFiles(target, type, cursor, pageSize);
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("items", toViews(page.files(), userId));
+            view.put("nextCursor", page.nextCursor());
+            view.put("hasMore", page.hasMore());
+            view.put("total", knowledgeStore.countUserFiles(target, type));
+            return ApiResponse.ok(view);
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail(error.getMessage());
+        }
+    }
+
     @PostMapping("/report")
     public ApiResponse<Map<String, Object>> report(
             @RequestHeader(name = "Authorization", required = false) String authorization,

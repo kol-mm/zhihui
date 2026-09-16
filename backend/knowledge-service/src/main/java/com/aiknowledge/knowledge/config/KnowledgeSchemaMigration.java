@@ -35,6 +35,12 @@ public class KnowledgeSchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "knowledge_file", "idx_file_category_audit", "category_id, audit_status, id");
             ensureIndex(connection, statement, "knowledge_like", "idx_file_like_file", "file_id");
             ensureIndex(connection, statement, "knowledge_collect", "idx_file_collect_file", "file_id");
+            // Activity lists page per user ordered by row id.
+            ensureIndex(connection, statement, "knowledge_file", "idx_file_user_id", "user_id, id");
+            ensureIndex(connection, statement, "knowledge_collect", "idx_collect_user_id", "user_id, id");
+            ensureIndex(connection, statement, "knowledge_like", "idx_like_user_id", "user_id, id");
+            ensureIndex(connection, statement, "knowledge_download", "idx_download_user_id", "user_id, id");
+            ensureIndex(connection, statement, "knowledge_forward", "idx_forward_user_id", "user_id, id");
         }
     }
 

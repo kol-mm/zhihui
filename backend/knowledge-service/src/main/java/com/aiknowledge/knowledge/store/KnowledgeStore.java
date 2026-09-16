@@ -39,6 +39,16 @@ public interface KnowledgeStore {
     Optional<KnowledgeFileEntity> download(Long userId, Long fileId);
     void forward(Long userId, Long fileId);
     List<KnowledgeFileEntity> listUserFiles(Long userId, String activityType);
+
+    /**
+     * One page of a user's knowledge activity (uploads, collects, likes, downloads, forwards), newest first.
+     * The cursor is the last row id of the underlying activity, so repeated files do not shift the page.
+     */
+    record UserFilePage(List<KnowledgeFileEntity> files, Long nextCursor, boolean hasMore) { }
+
+    UserFilePage pageUserFiles(Long userId, String activityType, Long beforeId, int limit);
+
+    long countUserFiles(Long userId, String activityType);
     boolean toggleLike(Long userId, Long fileId);
     boolean hasLike(Long userId, Long fileId);
     int likeCount(Long fileId);

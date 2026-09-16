@@ -220,6 +220,87 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public UserFilePage pageUserFiles(Long userId, String activityType, Long beforeId, int limit) {
+        String type = activityType == null ? "UPLOADED" : activityType.toUpperCase(java.util.Locale.ROOT);
+        int pageSize = Math.max(1, limit);
+        if ("UPLOADED".equals(type)) {
+            List<KnowledgeFileEntity> files = fileMapper.selectList(Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                    .eq(KnowledgeFileEntity::getUserId, userId)
+                    .lt(beforeId != null && beforeId > 0, KnowledgeFileEntity::getId, beforeId)
+                    .orderByDesc(KnowledgeFileEntity::getId)
+                    .last("LIMIT " + (pageSize + 1)));
+            boolean hasMore = files.size() > pageSize;
+            if (hasMore) files = files.subList(0, pageSize);
+            Long nextCursor = hasMore ? files.get(files.size() - 1).getId() : null;
+            return new UserFilePage(files, nextCursor, hasMore);
+        }
+        List<ActivityRow> rows = activityRows(userId, type, beforeId, pageSize + 1);
+        boolean hasMore = rows.size() > pageSize;
+        if (hasMore) rows = rows.subList(0, pageSize);
+        if (rows.isEmpty()) return new UserFilePage(List.of(), null, false);
+        Long nextCursor = hasMore ? rows.get(rows.size() - 1).rowId() : null;
+        List<Long> fileIds = rows.stream().map(ActivityRow::fileId).distinct().toList();
+        Map<Long, KnowledgeFileEntity> filesById = fileMapper.selectBatchIds(fileIds).stream()
+                .collect(java.util.stream.Collectors.toMap(KnowledgeFileEntity::getId, file -> file));
+        return new UserFilePage(fileIds.stream().map(filesById::get).filter(java.util.Objects::nonNull).toList(), nextCursor, hasMore);
+    }
+
+    @Override
+    public long countUserFiles(Long userId, String activityType) {
+        String type = activityType == null ? "UPLOADED" : activityType.toUpperCase(java.util.Locale.ROOT);
+        if ("UPLOADED".equals(type)) {
+            Long count = fileMapper.selectCount(Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                    .eq(KnowledgeFileEntity::getUserId, userId));
+            return count == null ? 0 : count;
+        }
+        // Downloads and forwards repeat, so the activity count is the number of distinct files.
+        QueryWrapper<?> wrapper = new QueryWrapper<>();
+        wrapper.select("COUNT(DISTINCT file_id) AS file_count").eq("user_id", userId);
+        List<Object> counts = switch (type) {
+            case "COLLECTED" -> collectMapper.selectObjs(castWrapper(wrapper));
+            case "LIKED" -> likeMapper.selectObjs(castWrapper(wrapper));
+            case "DOWNLOADED" -> downloadMapper.selectObjs(castWrapper(wrapper));
+            case "FORWARDED" -> forwardMapper.selectObjs(castWrapper(wrapper));
+            default -> throw new IllegalArgumentException("unsupported activity type");
+        };
+        Object value = counts.isEmpty() ? null : counts.get(0);
+        return value instanceof Number number ? number.longValue() : 0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> QueryWrapper<T> castWrapper(QueryWrapper<?> wrapper) {
+        return (QueryWrapper<T>) wrapper;
+    }
+
+    private record ActivityRow(Long rowId, Long fileId) { }
+
+    private List<ActivityRow> activityRows(Long userId, String type, Long beforeId, int limit) {
+        return switch (type) {
+            case "COLLECTED" -> collectMapper.selectList(Wrappers.<KnowledgeCollectEntity>lambdaQuery()
+                            .eq(KnowledgeCollectEntity::getUserId, userId)
+                            .lt(beforeId != null && beforeId > 0, KnowledgeCollectEntity::getId, beforeId)
+                            .orderByDesc(KnowledgeCollectEntity::getId).last("LIMIT " + limit))
+                    .stream().map(row -> new ActivityRow(row.getId(), row.getFileId())).toList();
+            case "LIKED" -> likeMapper.selectList(Wrappers.<KnowledgeLikeEntity>lambdaQuery()
+                            .eq(KnowledgeLikeEntity::getUserId, userId)
+                            .lt(beforeId != null && beforeId > 0, KnowledgeLikeEntity::getId, beforeId)
+                            .orderByDesc(KnowledgeLikeEntity::getId).last("LIMIT " + limit))
+                    .stream().map(row -> new ActivityRow(row.getId(), row.getFileId())).toList();
+            case "DOWNLOADED" -> downloadMapper.selectList(Wrappers.<KnowledgeDownloadEntity>lambdaQuery()
+                            .eq(KnowledgeDownloadEntity::getUserId, userId)
+                            .lt(beforeId != null && beforeId > 0, KnowledgeDownloadEntity::getId, beforeId)
+                            .orderByDesc(KnowledgeDownloadEntity::getId).last("LIMIT " + limit))
+                    .stream().map(row -> new ActivityRow(row.getId(), row.getFileId())).toList();
+            case "FORWARDED" -> forwardMapper.selectList(Wrappers.<KnowledgeForwardEntity>lambdaQuery()
+                            .eq(KnowledgeForwardEntity::getUserId, userId)
+                            .lt(beforeId != null && beforeId > 0, KnowledgeForwardEntity::getId, beforeId)
+                            .orderByDesc(KnowledgeForwardEntity::getId).last("LIMIT " + limit))
+                    .stream().map(row -> new ActivityRow(row.getId(), row.getFileId())).toList();
+            default -> throw new IllegalArgumentException("unsupported activity type");
+        };
+    }
+
+    @Override
     @Transactional
     public boolean toggleLike(Long userId, Long fileId) {
         if (fileMapper.selectById(fileId) == null) throw new IllegalArgumentException("knowledge file not found");

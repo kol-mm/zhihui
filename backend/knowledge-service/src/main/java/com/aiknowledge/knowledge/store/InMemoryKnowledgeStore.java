@@ -219,6 +219,28 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public UserFilePage pageUserFiles(Long userId, String activityType, Long beforeId, int limit) {
+        List<KnowledgeFileEntity> ordered = listUserFiles(userId, activityType).stream()
+                .sorted(java.util.Comparator.comparing(KnowledgeFileEntity::getId).reversed())
+                .toList();
+        int start = 0;
+        if (beforeId != null && beforeId > 0) {
+            for (int i = 0; i < ordered.size(); i++) {
+                if (ordered.get(i).getId().equals(beforeId)) { start = i + 1; break; }
+            }
+        }
+        int pageSize = Math.max(1, limit);
+        List<KnowledgeFileEntity> page = ordered.subList(Math.min(start, ordered.size()), Math.min(start + pageSize, ordered.size()));
+        boolean hasMore = start + pageSize < ordered.size();
+        return new UserFilePage(page, hasMore && !page.isEmpty() ? page.get(page.size() - 1).getId() : null, hasMore);
+    }
+
+    @Override
+    public long countUserFiles(Long userId, String activityType) {
+        return listUserFiles(userId, activityType).size();
+    }
+
+    @Override
     public synchronized boolean toggleLike(Long userId, Long fileId) {
         if (find(fileId).isEmpty()) throw new IllegalArgumentException("knowledge file not found");
         boolean removed = likes.removeIf(record -> record.userId().equals(userId) && record.fileId().equals(fileId));
