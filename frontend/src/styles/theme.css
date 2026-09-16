@@ -24,8 +24,8 @@
   --zh-ink-700: #34423b;
   --zh-ink-600: #4f5d56;
   --zh-ink-500: #6b7973;
-  --zh-ink-400: #8d9a94;
-  --zh-ink-300: #b3bdb8;
+  --zh-ink-400: #627069;   /* secondary text: 5.2:1 on white, 4.7:1 on tinted panels */
+  --zh-ink-300: #8d9a94;   /* decorative only: too light for text */
 
   --zh-page: #f3f6f4;
   --zh-surface: #ffffff;
@@ -641,3 +641,65 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
   .page-toolbar > div:not(:first-child) { display: flex; flex-wrap: wrap; gap: 8px; }
   .page-toolbar > div:not(:first-child) .el-button { flex: 1 1 auto; margin-left: 0; }
 }
+
+
+/* ================================================================ text contrast (WCAG AA)
+ * main.css sets many secondary greys between 2.6:1 and 4.4:1 on white; small text needs 4.5:1.
+ * These map onto the shared muted token (4.9:1). Sidebar greys sit on a dark panel and already pass.
+ */
+.message-bubble small, .message-history-state small, .post-author span, .notification-list small,
+.feed-mini small, .detail-comment-author span, .task-list small, .table-user small,
+.event-list p, .event-list small, .resource-list small, .conversation-head span, .ai-session-main small,
+.category-admin-list small, .post-detail-author span, .session-list small,
+.activity-list p, .activity-list small, .draft-row p, .ai-references button small,
+.config-switch-grid small, .runtime-mode-grid p, .reader-header p, .ranking-list small,
+.compact-user-list small, .profile-card p, .analytics-ranking small, .discussion-head p,
+.surface-head p, .card-stats span, .ai-heading p, .password-strength small, .detail-heading>div>span,
+.captcha-hint, .admin-mobile-cards p, .knowledge-card p, .relation-summary span, .trend-day,
+.site-record-footer, .admin-summary-strip span, .config-help, .governance-search span, .ai-empty p,
+.exact-user-result span, .config-status span, .pdf-mobile-hint, .ai-references>strong,
+.metric-tile span, .metric-tile small, .community-side p, .registration-rules span,
+.welcome-row p, .page-toolbar p, .topbar p,
+.mobile-bottom-nav button, .feed-tabs button, .detail-comment-item.is-placeholder strong,
+.detail-comment-list .detail-comment-item.is-placeholder p {
+  color: var(--zh-ink-400);
+}
+/* Non-text affordances only need 3:1. */
+.resource-list svg, .activity-arrow { color: #78857e; }
+.ranking-list article:nth-child(1)>strong { color: #a5750f; }
+.ranking-list article:nth-child(2)>strong { color: #6b7883; }
+.ranking-list article:nth-child(3)>strong { color: #9a5c2c; }
+.el-table { --el-table-header-text-color: var(--zh-ink-400); }
+
+/* Element Plus tag text: the plain tints are light, so the label needs a darker ink than the tag colour. */
+.el-tag--success, .el-tag--success .el-tag__content { color: #226b49; }
+.el-tag--warning, .el-tag--warning .el-tag__content { color: #8a5f18; }
+.el-tag--danger, .el-tag--danger .el-tag__content,
+.el-tag--error, .el-tag--error .el-tag__content { color: #a33b38; }
+.el-tag--info, .el-tag--info .el-tag__content { color: #5b6862; }
+.status-list strong { color: #1b6e4e; }
+.status-list strong.offline { color: #a33b38; }
+
+/* Element Plus alerts and coloured buttons: the accent colours are too light as text on their tints. */
+.el-alert--info .el-alert__title, .el-alert--info .el-alert__description { color: #4f5d56; }
+.el-alert--info .el-alert__icon { color: #5b6862; }
+.el-alert--warning .el-alert__title, .el-alert--warning .el-alert__description, .el-alert--warning .el-alert__icon { color: #8a5f18; }
+.el-alert--error .el-alert__title, .el-alert--error .el-alert__description, .el-alert--error .el-alert__icon { color: #a33b38; }
+.el-alert--success .el-alert__title, .el-alert--success .el-alert__description, .el-alert--success .el-alert__icon { color: #226b49; }
+
+.el-button--success.is-text:not(.is-disabled), .el-button--success.is-link:not(.is-disabled) { color: #226b49; }
+.el-button--warning.is-text:not(.is-disabled), .el-button--warning.is-link:not(.is-disabled) { color: #8a5f18; }
+.el-button--danger.is-text:not(.is-disabled), .el-button--danger.is-link:not(.is-disabled) { color: #a33b38; }
+.el-button--info.is-text:not(.is-disabled), .el-button--info.is-link:not(.is-disabled) { color: #5b6862; }
+
+/* White on amber reaches only 2.6:1, so the solid warning button carries dark ink instead. */
+.el-button--warning:not(.is-text):not(.is-link):not(.is-plain):not(.is-disabled) {
+  color: #3d2a06;
+  background-image: linear-gradient(180deg, #e0a94a, #d4942a);
+  border-color: #c9892199;
+}
+.el-button--warning:not(.is-text):not(.is-link):not(.is-plain):not(.is-disabled):hover {
+  color: #3d2a06;
+  background-image: linear-gradient(180deg, #e5b258, #dc9c30);
+}
+.el-button--warning.is-plain:not(.is-disabled) { color: #8a5f18; }

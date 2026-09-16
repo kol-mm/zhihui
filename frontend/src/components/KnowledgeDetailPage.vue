@@ -20,7 +20,7 @@
       <PdfViewer v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="detail-pdf" :src="pdfPreviewUrl" :document-id="file.id" />
       <div v-else class="detail-knowledge-body rich-knowledge-body">
         <template v-for="(block, index) in blocks" :key="`${block.type}-${index}`">
-          <img v-if="block.type === 'image'" class="knowledge-inline-image" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
+          <img v-if="block.type === 'image'" class="knowledge-inline-image" loading="lazy" decoding="async" :src="resolveApiUrl(block.url || '')" :alt="block.text || '知识插图'" />
           <h2 v-else-if="block.type === 'heading'">{{ block.text }}</h2>
           <div v-else-if="block.type === 'table'" class="knowledge-table-wrap"><table><tbody><tr v-for="(row, rowIndex) in tableRows(block.text)" :key="rowIndex"><td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cell }}</td></tr></tbody></table></div>
           <p v-else :class="{ 'knowledge-list-item': block.type === 'list' }">{{ block.text }}</p>

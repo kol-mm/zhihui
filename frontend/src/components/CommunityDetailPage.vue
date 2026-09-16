@@ -4,14 +4,14 @@
     <div class="community-detail-layout">
       <article class="detail-post">
         <header class="post-detail-author">
-          <div class="user-avatar"><img v-if="author.avatarUrl" :src="resolveApiUrl(author.avatarUrl)" alt="作者头像" /><span v-else>{{ author.nickname.slice(0, 1).toUpperCase() }}</span></div>
+          <div class="user-avatar"><img v-if="author.avatarUrl" loading="lazy" decoding="async" :src="resolveApiUrl(author.avatarUrl)" alt="作者头像" /><span v-else>{{ author.nickname.slice(0, 1).toUpperCase() }}</span></div>
           <div><strong>{{ author.nickname }}</strong><span>@{{ author.username }} · 帖子 #{{ post.id }}</span></div>
           <el-button v-if="post.userId !== currentUserId" text :type="following ? 'success' : 'primary'" @click="emit('follow', post.userId)">{{ following ? '取消关注' : '关注作者' }}</el-button>
           <el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ postStatusLabel(post.status) }}</el-tag>
         </header>
         <h1>{{ post.title }}</h1>
         <p class="post-detail-content">{{ post.content }}</p>
-        <div v-if="post.imageUrls?.length" class="post-images detail-post-images"><img v-for="image in post.imageUrls" :key="image" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
+        <div v-if="post.imageUrls?.length" class="post-images detail-post-images"><img v-for="image in post.imageUrls" :key="image" loading="lazy" decoding="async" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
         <footer class="detail-actions post-detail-actions">
           <el-button :type="post.liked ? 'primary' : 'default'" :plain="post.liked" :icon="Star" @click="emit('like', post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button>
           <el-button :type="post.collected ? 'primary' : 'default'" :plain="post.collected" :icon="CollectionTag" @click="emit('collect', post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button>
@@ -24,12 +24,12 @@
         <div class="detail-comment-list" @scroll.passive="handleCommentScroll">
           <section v-for="comment in rootComments" :key="comment.id" class="detail-comment-thread">
             <article class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === comment.id, 'is-placeholder': comment.placeholder }">
-              <div class="mini-avatar"><img v-if="!comment.placeholder && userFor(comment.userId).avatarUrl" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ comment.placeholder ? '·' : userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
+              <div class="mini-avatar"><img v-if="!comment.placeholder && userFor(comment.userId).avatarUrl" loading="lazy" decoding="async" :src="resolveApiUrl(userFor(comment.userId).avatarUrl || '')" alt="评论者头像" /><span v-else>{{ comment.placeholder ? '·' : userFor(comment.userId).nickname.slice(0, 1) }}</span></div>
               <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ commentAuthorName(comment) }}</strong></div><div v-if="!comment.placeholder"><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(comment)">回复</el-button><el-button v-if="comment.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', comment)">删除</el-button></div></div><p>{{ comment.placeholder ? '该评论已被隐藏' : comment.content }}</p></div>
             </article>
             <div v-if="threadReplies(comment.id).length" class="detail-comment-replies">
               <article v-for="reply in threadReplies(comment.id)" :key="reply.id" class="detail-comment-item" :class="{ 'is-reply-target': replyTarget?.id === reply.id, 'is-placeholder': reply.placeholder }">
-                <div class="mini-avatar"><img v-if="!reply.placeholder && userFor(reply.userId).avatarUrl" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ reply.placeholder ? '·' : userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
+                <div class="mini-avatar"><img v-if="!reply.placeholder && userFor(reply.userId).avatarUrl" loading="lazy" decoding="async" :src="resolveApiUrl(userFor(reply.userId).avatarUrl || '')" alt="回复者头像" /><span v-else>{{ reply.placeholder ? '·' : userFor(reply.userId).nickname.slice(0, 1) }}</span></div>
                 <div class="detail-comment-body"><div class="detail-comment-meta"><div class="detail-comment-author"><strong>{{ commentAuthorName(reply) }}</strong><span v-if="parentFor(reply)">回复 {{ parentAuthorName(reply) }}</span></div><div v-if="!reply.placeholder"><el-button v-if="commentsEnabled" text type="primary" size="small" @click="startReply(reply)">回复</el-button><el-button v-if="reply.userId === currentUserId" text type="danger" size="small" @click="emit('delete-comment', reply)">删除</el-button></div></div><p>{{ reply.placeholder ? '该回复已被隐藏' : reply.content }}</p></div>
               </article>
             </div>

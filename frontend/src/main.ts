@@ -1,6 +1,8 @@
 import { createApp } from 'vue';
+import { ElAlert } from 'element-plus/es/components/alert/index.mjs';
 import { ElBadge } from 'element-plus/es/components/badge/index.mjs';
 import { ElButton } from 'element-plus/es/components/button/index.mjs';
+import { ElCollapse, ElCollapseItem } from 'element-plus/es/components/collapse/index.mjs';
 import { ElDialog } from 'element-plus/es/components/dialog/index.mjs';
 import { ElDivider } from 'element-plus/es/components/divider/index.mjs';
 import { ElDrawer } from 'element-plus/es/components/drawer/index.mjs';
@@ -12,14 +14,18 @@ import { ElInput } from 'element-plus/es/components/input/index.mjs';
 import { ElInputNumber } from 'element-plus/es/components/input-number/index.mjs';
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index.mjs';
 import { ElRadio, ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index.mjs';
+import { ElSegmented } from 'element-plus/es/components/segmented/index.mjs';
 import { ElSlider } from 'element-plus/es/components/slider/index.mjs';
 import { ElSwitch } from 'element-plus/es/components/switch/index.mjs';
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index.mjs';
 import { ElTabPane, ElTabs } from 'element-plus/es/components/tabs/index.mjs';
 import { ElTag } from 'element-plus/es/components/tag/index.mjs';
 import { ElUpload } from 'element-plus/es/components/upload/index.mjs';
+import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/badge/style/css';
 import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/collapse/style/css';
+import 'element-plus/es/components/collapse-item/style/css';
 import 'element-plus/es/components/dialog/style/css';
 import 'element-plus/es/components/divider/style/css';
 import 'element-plus/es/components/drawer/style/css';
@@ -35,6 +41,7 @@ import 'element-plus/es/components/radio-button/style/css';
 import 'element-plus/es/components/radio-group/style/css';
 import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/option/style/css';
+import 'element-plus/es/components/segmented/style/css';
 import 'element-plus/es/components/slider/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/table/style/css';
@@ -53,8 +60,9 @@ import App from './App.vue';
 
 const app = createApp(App);
 [
-  ElBadge, ElButton, ElDialog, ElDivider, ElDrawer, ElDropdown, ElDropdownItem, ElDropdownMenu,
-  ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElOption, ElRadio, ElRadioButton,
-  ElRadioGroup, ElSelect, ElSlider, ElSwitch, ElTable, ElTableColumn, ElTabPane, ElTabs, ElTag, ElUpload
+  ElAlert, ElBadge, ElButton, ElCollapse, ElCollapseItem, ElDialog, ElDivider, ElDrawer, ElDropdown,
+  ElDropdownItem, ElDropdownMenu, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElOption,
+  ElRadio, ElRadioButton, ElRadioGroup, ElSegmented, ElSelect, ElSlider, ElSwitch, ElTable, ElTableColumn,
+  ElTabPane, ElTabs, ElTag, ElUpload
 ].forEach(component => app.use(component));
 app.mount('#app');
