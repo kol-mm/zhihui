@@ -289,4 +289,35 @@ public class MySqlUserStore implements UserStore {
         return count == null ? 0L : count;
     }
 
+
+    @Override
+    public List<UserReport> pageUserReports(AdminReportQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return reportMapper.selectList(userReportFilter(query)
+                        .lt(query.beforeId() != null, UserReportEntity::getId, query.beforeId())
+                        .orderByDesc(UserReportEntity::getId)
+                        .last("LIMIT " + query.limit()))
+                .stream()
+                .map(this::toReport)
+                .toList();
+    }
+
+    @Override
+    public long countUserReports(AdminReportQuery query) {
+        Long count = reportMapper.selectCount(userReportFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<UserReportEntity> userReportFilter(AdminReportQuery query) {
+        LambdaQueryWrapper<UserReportEntity> wrapper = Wrappers.<UserReportEntity>lambdaQuery()
+                .eq(query.status() != null && !query.status().isBlank(), UserReportEntity::getStatus, query.status());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            wrapper.and(match -> match.like(UserReportEntity::getReason, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(target_user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
 }

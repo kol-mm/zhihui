@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import com.aiknowledge.common.TimeCursor;
 
 public interface CommunityStore {
     PostEntity savePost(PostEntity post);
@@ -187,6 +188,69 @@ public interface CommunityStore {
                         || String.valueOf(post.getId()).contains(keyword)
                         || String.valueOf(post.getUserId()).contains(keyword)
                         || (post.getTitle() != null && post.getTitle().toLowerCase().contains(keyword)));
+    }
+
+
+    /**
+     * One page of the governance comment table, newest first, across every post and status.
+     *
+     * @param keyword  matches the comment, post or author id, or the text (optional)
+     * @param beforeId cursor: only comments with a smaller id (optional)
+     */
+    record AdminCommentQuery(String keyword, Long beforeId, int limit) { }
+
+    default List<CommentEntity> pageAdminComments(AdminCommentQuery query) {
+        return matchingAdminComments(query)
+                .filter(comment -> query.beforeId() == null || comment.getId() < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    default long countAdminComments(AdminCommentQuery query) {
+        return matchingAdminComments(query).count();
+    }
+
+    private java.util.stream.Stream<CommentEntity> matchingAdminComments(AdminCommentQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listComments(null).stream()
+                .sorted(Comparator.comparing(CommentEntity::getId).reversed())
+                .filter(comment -> keyword.isEmpty()
+                        || String.valueOf(comment.getId()).contains(keyword)
+                        || String.valueOf(comment.getPostId()).contains(keyword)
+                        || String.valueOf(comment.getUserId()).contains(keyword)
+                        || (comment.getContent() != null && comment.getContent().toLowerCase().contains(keyword)));
+    }
+
+    /**
+     * One page of the governance draft table, most recently edited first.
+     *
+     * @param keyword matches the draft or author id, the title or the text (optional)
+     * @param before  cursor: only drafts after this (updated_at, id) position (optional)
+     */
+    record AdminDraftQuery(String keyword, TimeCursor before, int limit) { }
+
+    default List<PostDraftEntity> pageAdminDrafts(AdminDraftQuery query) {
+        return matchingAdminDrafts(query)
+                .filter(draft -> query.before() == null || query.before().isAfter(draft.getUpdatedAt(), draft.getId()))
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    default long countAdminDrafts(AdminDraftQuery query) {
+        return matchingAdminDrafts(query).count();
+    }
+
+    private java.util.stream.Stream<PostDraftEntity> matchingAdminDrafts(AdminDraftQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listDrafts(null).stream()
+                .sorted(Comparator.comparing(PostDraftEntity::getUpdatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(PostDraftEntity::getId)
+                        .reversed())
+                .filter(draft -> keyword.isEmpty()
+                        || String.valueOf(draft.getId()).contains(keyword)
+                        || String.valueOf(draft.getUserId()).contains(keyword)
+                        || (draft.getTitle() != null && draft.getTitle().toLowerCase().contains(keyword))
+                        || (draft.getContent() != null && draft.getContent().toLowerCase().contains(keyword)));
     }
 
 }

@@ -27,6 +27,7 @@ import java.util.Map;
 import com.aiknowledge.common.DailySeries;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import com.aiknowledge.common.TimeCursor;
 
 @RestController
 public class MessageController {
@@ -749,6 +750,77 @@ public class MessageController {
                     : page.size();
         }
         result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
+
+    private static final int GOVERNANCE_PAGE_MAX = 100;
+    private static final int ADMIN_MESSAGE_PAGE_MAX = 100;
+
+    /**
+     * One page of the governance conversation table, most recently active first. The cursor is an opaque
+     * {@code time|id} token taken from {@code nextCursor}.
+     */
+    @GetMapping("/message/admin/sessions/page")
+    public ApiResponse<Map<String, Object>> adminSessionsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "cursor", required = false) String cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        TimeCursor before;
+        try {
+            before = TimeCursor.parse(cursor);
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail("invalid conversation cursor");
+        }
+        int size = Math.min(Math.max(limit, 1), GOVERNANCE_PAGE_MAX);
+        List<ChatSessionEntity> found = messageStore.pageAdminSessions(new MessageStore.AdminSessionQuery(keyword, before, size + 1));
+        boolean hasMore = found.size() > size;
+        List<ChatSessionEntity> page = hasMore ? found.subList(0, size) : found;
+        Long total = null;
+        if (before == null) {
+            total = hasMore ? messageStore.countAdminSessions(new MessageStore.AdminSessionQuery(keyword, null, size)) : page.size();
+        }
+        Map<Long, Long> counts = messageStore.countMessages(page.stream().map(ChatSessionEntity::getId).toList());
+        List<Map<String, Object>> views = toSessionViews(page, ChatSessionEntity::getUserAId);
+        views.forEach(view -> view.put("messageCount", counts.getOrDefault((Long) view.get("id"), 0L)));
+        ChatSessionEntity last = page.isEmpty() ? null : page.get(page.size() - 1);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", views);
+        result.put("nextCursor", last == null ? null : TimeCursor.format(last.getUpdatedAt(), last.getId()));
+        result.put("hasMore", hasMore);
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
+    /**
+     * The newest messages of one conversation for the moderation preview, oldest first within the page.
+     * {@code nextCursor} is the oldest message returned; pass it back to read further into the past.
+     */
+    @GetMapping("/message/admin/messages/page")
+    public ApiResponse<Map<String, Object>> adminMessagesPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam Long sessionId,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "30") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        if (messageStore.findSession(sessionId).isEmpty()) return ApiResponse.fail("chat session not found");
+        int size = Math.min(Math.max(limit, 1), ADMIN_MESSAGE_PAGE_MAX);
+        // One extra row tells whether older messages exist; the page is chronological, so it sits at the front.
+        List<ChatMessageEntity> found = messageStore.pageMessages(sessionId, cursor, null, size + 1);
+        boolean hasMore = found.size() > size;
+        List<ChatMessageEntity> page = hasMore ? found.subList(1, found.size()) : found;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page.stream().map(this::toMessageView).toList());
+        result.put("nextCursor", hasMore && !page.isEmpty() ? page.get(0).getId() : null);
+        result.put("hasMore", hasMore);
+        result.put("total", null);
         return ApiResponse.ok(result);
     }
 

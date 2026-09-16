@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.TreeMap;
+import com.aiknowledge.common.TimeCursor;
 
 public interface MessageStore {
     ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId);
@@ -225,6 +226,42 @@ public interface MessageStore {
                         || (ticket.getType() != null && ticket.getType().toLowerCase().contains(keyword))
                         || (ticket.getContent() != null && ticket.getContent().toLowerCase().contains(keyword))
                         || (ticket.getOfficialReply() != null && ticket.getOfficialReply().toLowerCase().contains(keyword)));
+    }
+
+
+    /**
+     * One page of the governance conversation table, most recently active first.
+     *
+     * @param keyword matches the conversation id, either participant id, the status, or text in any
+     *                message of the conversation (optional)
+     * @param before  cursor: only conversations after this (updated_at, id) position (optional)
+     */
+    record AdminSessionQuery(String keyword, TimeCursor before, int limit) { }
+
+    default List<ChatSessionEntity> pageAdminSessions(AdminSessionQuery query) {
+        return matchingAdminSessions(query)
+                .filter(session -> query.before() == null || query.before().isAfter(session.getUpdatedAt(), session.getId()))
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    default long countAdminSessions(AdminSessionQuery query) {
+        return matchingAdminSessions(query).count();
+    }
+
+    private java.util.stream.Stream<ChatSessionEntity> matchingAdminSessions(AdminSessionQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listSessions(null).stream()
+                .sorted(java.util.Comparator.comparing(ChatSessionEntity::getUpdatedAt, java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder()))
+                        .thenComparing(ChatSessionEntity::getId)
+                        .reversed())
+                .filter(session -> keyword.isEmpty()
+                        || String.valueOf(session.getId()).contains(keyword)
+                        || String.valueOf(session.getUserAId()).contains(keyword)
+                        || String.valueOf(session.getUserBId()).contains(keyword)
+                        || (session.getStatus() != null && session.getStatus().toLowerCase().contains(keyword))
+                        || listMessages(session.getId()).stream().anyMatch(message ->
+                                message.getContent() != null && message.getContent().toLowerCase().contains(keyword)));
     }
 
 }

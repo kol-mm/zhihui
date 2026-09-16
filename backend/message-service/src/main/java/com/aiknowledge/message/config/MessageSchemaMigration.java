@@ -44,6 +44,8 @@ public class MessageSchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_created", "created_at");
             // The feedback overview counts tickets by type and status from this index alone.
             ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_type_status", "type, status");
+            // Governance pages conversations by most recent activity.
+            ensureIndex(connection, statement, "chat_session", "idx_session_updated", "updated_at, id");
         }
     }
 

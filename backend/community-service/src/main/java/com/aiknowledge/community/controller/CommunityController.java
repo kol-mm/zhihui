@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Set;
 import com.aiknowledge.common.DailySeries;
 import java.time.LocalDate;
+import com.aiknowledge.common.TimeCursor;
 
 @RestController
 public class CommunityController {
@@ -514,6 +515,7 @@ public class CommunityController {
                 "pendingAudit", totals.pendingAudit(),
                 "hiddenPosts", totals.hidden(),
                 "draftsTracked", totals.drafts(),
+                "comments", communityStore.countAdminComments(new CommunityStore.AdminCommentQuery(null, null, 0)),
                 "squareMode", "仅展示已关注用户动态",
                 "capabilities", List.of("帖子审核", "评论管理", "草稿追踪", "广场互动管理")
         ));
@@ -955,6 +957,75 @@ public class CommunityController {
             total = hasMore ? communityStore.countAdminPosts(new CommunityStore.AdminPostQuery(statuses, keyword, null, size))
                     : page.size();
         }
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
+
+    private static final int GOVERNANCE_PAGE_MAX = 100;
+
+    /**
+     * One page of the governance comment table. The dialog used to download every comment on the site;
+     * the keyword and cursor are applied by the database here.
+     */
+    @GetMapping("/comment/admin/page")
+    public ApiResponse<Map<String, Object>> adminCommentsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        int size = Math.min(Math.max(limit, 1), GOVERNANCE_PAGE_MAX);
+        List<CommentEntity> found = communityStore.pageAdminComments(new CommunityStore.AdminCommentQuery(keyword, cursor, size + 1));
+        boolean hasMore = found.size() > size;
+        List<CommentEntity> page = hasMore ? found.subList(0, size) : found;
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? communityStore.countAdminComments(new CommunityStore.AdminCommentQuery(keyword, null, size)) : page.size();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page.stream().map(this::toCommentView).toList());
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).getId());
+        result.put("hasMore", hasMore);
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
+    /**
+     * One page of the governance draft table, most recently edited first. The cursor is an opaque
+     * {@code time|id} token taken from {@code nextCursor}.
+     */
+    @GetMapping("/post/admin/drafts/page")
+    public ApiResponse<Map<String, Object>> adminDraftsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "cursor", required = false) String cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        TimeCursor before;
+        try {
+            before = TimeCursor.parse(cursor);
+        } catch (IllegalArgumentException error) {
+            return ApiResponse.fail("invalid draft cursor");
+        }
+        int size = Math.min(Math.max(limit, 1), GOVERNANCE_PAGE_MAX);
+        List<PostDraftEntity> found = communityStore.pageAdminDrafts(new CommunityStore.AdminDraftQuery(keyword, before, size + 1));
+        boolean hasMore = found.size() > size;
+        List<PostDraftEntity> page = hasMore ? found.subList(0, size) : found;
+        Long total = null;
+        if (before == null) {
+            total = hasMore ? communityStore.countAdminDrafts(new CommunityStore.AdminDraftQuery(keyword, null, size)) : page.size();
+        }
+        PostDraftEntity last = page.isEmpty() ? null : page.get(page.size() - 1);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page.stream().map(this::toDraftView).toList());
+        result.put("nextCursor", last == null ? null : TimeCursor.format(last.getUpdatedAt(), last.getId()));
+        result.put("hasMore", hasMore);
         result.put("total", total);
         return ApiResponse.ok(result);
     }

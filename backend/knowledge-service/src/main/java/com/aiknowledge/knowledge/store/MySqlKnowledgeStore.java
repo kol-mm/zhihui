@@ -76,8 +76,37 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
                 .orderByDesc(KnowledgeFileEntity::getCreatedAt));
     }
 
+    /*
+     * With a keyword and no category, the approved-status filter matches nearly every file. Left alone, MySQL read
+     * those through idx_file_audit row by row, which on 300k files was about five times slower than scanning in id
+     * order (page) or scanning the table (count). A category filter is selective, so those pages keep the
+     * optimizer's own plan.
+     */
+    private static final String KEYWORD_PAGE_HINT = "/*+ INDEX(knowledge_file PRIMARY) */ ";
+    private static final String KEYWORD_COUNT_HINT = "/*+ NO_INDEX(knowledge_file) */ ";
+    private static final String FILE_COLUMNS =
+            "id, user_id, category_id, title, file_url, file_type, parse_status, audit_status, views, downloads, created_at";
+
+    private static boolean scansForKeyword(FileQuery query) {
+        return query.keyword() != null && !query.keyword().isBlank()
+                && (query.categoryId() == null || query.categoryId() <= 0);
+    }
+
+    private QueryWrapper<KnowledgeFileEntity> keywordScanFilter(FileQuery query, String select) {
+        QueryWrapper<KnowledgeFileEntity> wrapper = new QueryWrapper<KnowledgeFileEntity>().select(select);
+        if (!query.includeAll()) wrapper.eq("audit_status", "APPROVED");
+        if (query.fileType() != null && !query.fileType().isBlank()) wrapper.eq("file_type", query.fileType());
+        return wrapper.like("title", query.keyword());
+    }
+
     @Override
     public List<KnowledgeFileEntity> pageFiles(FileQuery query) {
+        if (scansForKeyword(query)) {
+            return fileMapper.selectList(keywordScanFilter(query, KEYWORD_PAGE_HINT + FILE_COLUMNS)
+                    .lt(query.beforeId() != null && query.beforeId() > 0, "id", query.beforeId())
+                    .orderByDesc("id")
+                    .last("LIMIT " + Math.max(1, query.limit())));
+        }
         return fileMapper.selectList(fileFilter(query)
                 .lt(query.beforeId() != null && query.beforeId() > 0, KnowledgeFileEntity::getId, query.beforeId())
                 .orderByDesc(KnowledgeFileEntity::getId)
@@ -86,6 +115,10 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
 
     @Override
     public long countFiles(FileQuery query) {
+        if (scansForKeyword(query)) {
+            List<Map<String, Object>> rows = fileMapper.selectMaps(keywordScanFilter(query, KEYWORD_COUNT_HINT + "COUNT(*) AS total"));
+            return rows.isEmpty() ? 0L : longValue(rows.get(0).get("total"));
+        }
         Long count = fileMapper.selectCount(fileFilter(query));
         return count == null ? 0 : count;
     }
@@ -619,6 +652,47 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
                 .and(open -> open.ne(KnowledgeReportEntity::getStatus, "RESOLVED")
                         .or().isNull(KnowledgeReportEntity::getStatus)));
         return count == null ? 0L : count;
+    }
+
+
+    @Override
+    public List<Map<String, Object>> pageAdminReports(AdminReportQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return reportMapper.selectList(adminReportFilter(query)
+                        .lt(query.beforeId() != null, KnowledgeReportEntity::getId, query.beforeId())
+                        .orderByDesc(KnowledgeReportEntity::getId)
+                        .last("LIMIT " + query.limit()))
+                .stream()
+                .map(this::reportView)
+                .toList();
+    }
+
+    @Override
+    public long countAdminReports(AdminReportQuery query) {
+        Long count = reportMapper.selectCount(adminReportFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<KnowledgeReportEntity> adminReportFilter(AdminReportQuery query) {
+        LambdaQueryWrapper<KnowledgeReportEntity> wrapper = Wrappers.<KnowledgeReportEntity>lambdaQuery()
+                .eq(query.status() != null && !query.status().isBlank(), KnowledgeReportEntity::getStatus, query.status());
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            wrapper.and(match -> match.like(KnowledgeReportEntity::getReason, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(file_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+
+    @Override
+    public List<KnowledgeFileEntity> findFiles(Collection<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) return List.of();
+        return fileMapper.selectList(Wrappers.<KnowledgeFileEntity>lambdaQuery()
+                .select(KnowledgeFileEntity::getId, KnowledgeFileEntity::getTitle, KnowledgeFileEntity::getAuditStatus,
+                        KnowledgeFileEntity::getFileType)
+                .in(KnowledgeFileEntity::getId, fileIds));
     }
 
 }

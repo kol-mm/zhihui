@@ -4,6 +4,7 @@ import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.user.store.InMemoryUserStore;
+import com.aiknowledge.user.store.UserStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -363,6 +364,42 @@ class UserControllerTest {
         Map<String, Object> after = controller.adminOverview(adminAuth).data();
         assertEquals(openBefore, overviewNumber(after.get("openReports")));
         assertEquals(allBefore + 1, overviewNumber(after.get("reports")));
+    }
+
+
+    @Test
+    void userReportQueuePagesNewestFirstWithStatusAndKeyword() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "用户举报队列" + System.nanoTime();
+        String username = "reporter-" + System.nanoTime();
+        Long reporterId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+                .data().get("user")).get("id")).longValue();
+        String reporterAuth = "Bearer " + LocalAuth.issueToken(username, reporterId, "USER");
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(controller.reportUser(reporterAuth, Map.of("targetUserId", 1L, "reason", marker + " " + i)).data().id());
+        }
+
+        Map<String, Object> first = controller.adminReportsPage(adminAuth, marker, null, null, 2).data();
+        assertEquals(List.of(created.get(2), created.get(1)), reportIds(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, overviewNumber(first.get("total")));
+        Map<String, Object> second = controller.adminReportsPage(
+                adminAuth, marker, null, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        assertEquals(List.of(created.get(0)), reportIds(second));
+        assertEquals(null, second.get("total"));
+
+        controller.resolveUserReport(adminAuth, Map.of("reportId", created.get(1), "status", "RESOLVED", "result", "已处理"));
+        assertEquals(List.of(created.get(1)), reportIds(controller.adminReportsPage(adminAuth, marker, "RESOLVED", null, 20).data()));
+        assertEquals(List.of(created.get(2)), reportIds(controller.adminReportsPage(adminAuth, marker + " 3", null, null, 20).data()));
+
+        assertEquals(500, controller.adminReportsPage(reporterAuth, marker, null, null, 20).code());
+        assertEquals(500, controller.adminReportsPage(adminAuth, marker, null, -1L, 20).code());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Long> reportIds(Map<String, Object> page) {
+        return ((List<UserStore.UserReport>) page.get("items")).stream().map(UserStore.UserReport::id).toList();
     }
 
 }

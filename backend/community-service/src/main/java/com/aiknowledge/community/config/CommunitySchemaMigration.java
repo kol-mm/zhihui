@@ -52,6 +52,8 @@ public class CommunitySchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "post", "idx_post_status_id", "status, id");
             // Analytics reads published posts created inside a time window.
             ensureIndex(connection, statement, "post", "idx_post_status_created", "status, created_at");
+            // Governance pages drafts by most recent edit.
+            ensureIndex(connection, statement, "post_draft", "idx_draft_updated", "updated_at, id");
             backfillCommentRootIds(connection, statement);
         }
     }

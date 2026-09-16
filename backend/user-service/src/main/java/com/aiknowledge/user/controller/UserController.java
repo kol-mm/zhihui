@@ -656,4 +656,35 @@ public class UserController {
         return ApiResponse.ok(result);
     }
 
+
+    private static final int ADMIN_REPORT_PAGE_MAX = 100;
+
+    /** One page of the report queue; replaces downloading every report for the moderation tab. */
+    @GetMapping("/admin/reports/page")
+    public ApiResponse<Map<String, Object>> adminReportsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        int size = Math.min(Math.max(limit, 1), ADMIN_REPORT_PAGE_MAX);
+        java.util.List<UserStore.UserReport> found = userStore.pageUserReports(new UserStore.AdminReportQuery(keyword, status, cursor, size + 1));
+        boolean hasMore = found.size() > size;
+        java.util.List<UserStore.UserReport> page = hasMore ? found.subList(0, size) : found;
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? userStore.countUserReports(new UserStore.AdminReportQuery(keyword, status, null, size)) : page.size();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page);
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).id());
+        result.put("hasMore", hasMore);
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
 }

@@ -117,4 +117,36 @@ public interface UserStore {
         return listUserReports().stream().filter(report -> !"RESOLVED".equals(report.status())).count();
     }
 
+
+    /**
+     * One page of the moderation report queue, newest first.
+     *
+     * @param keyword  matches the report id, the reported user id or the reason (optional)
+     * @param status   PENDING, PROCESSING or RESOLVED (optional)
+     * @param beforeId cursor: only reports with a smaller id (optional)
+     */
+    record AdminReportQuery(String keyword, String status, Long beforeId, int limit) { }
+
+    default List<UserReport> pageUserReports(AdminReportQuery query) {
+        return matchingUserReports(query)
+                .filter(report -> query.beforeId() == null || report.id() < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    default long countUserReports(AdminReportQuery query) {
+        return matchingUserReports(query).count();
+    }
+
+    private java.util.stream.Stream<UserReport> matchingUserReports(AdminReportQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listUserReports().stream()
+                .sorted(java.util.Comparator.comparing(UserReport::id).reversed())
+                .filter(report -> query.status() == null || query.status().isBlank() || query.status().equals(report.status()))
+                .filter(report -> keyword.isEmpty()
+                        || String.valueOf(report.id()).contains(keyword)
+                        || String.valueOf(report.targetUserId()).contains(keyword)
+                        || (report.reason() != null && report.reason().toLowerCase().contains(keyword)));
+    }
+
 }

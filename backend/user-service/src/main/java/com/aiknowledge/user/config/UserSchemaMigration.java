@@ -34,6 +34,8 @@ public class UserSchemaMigration implements InitializingBean {
             // The admin user table pages by id within a status or role filter.
             ensureIndex(connection, statement, "user", "idx_user_status_id", "status, id");
             ensureIndex(connection, statement, "user", "idx_user_role_id", "role, id");
+            // The moderation report queue pages by id within a status.
+            ensureIndex(connection, statement, "user_report", "idx_user_report_status_id", "status, id");
         }
     }
 

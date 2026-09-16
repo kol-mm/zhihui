@@ -714,4 +714,60 @@ class KnowledgeControllerTest {
         assertEquals(openBefore, number(controller.adminOverview(adminAuth).data().get("openReports")));
     }
 
+
+    @Test
+    void reportQueuePagesNewestFirstWithStatusAndKeyword() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "举报队列" + System.nanoTime();
+        Long fileId = ((Number) controller.upload(userAuth, Map.of(
+                "title", marker, "fileType", "txt", "content", "被举报的内容")).data().get("id")).longValue();
+        for (int i = 1; i <= 3; i++) {
+            controller.report(userAuth, Map.of("fileId", fileId, "reason", marker + " 原因 " + i));
+        }
+
+        Map<String, Object> first = controller.adminReportsPage(adminAuth, marker, null, null, 2).data();
+        List<Long> firstIds = idsOf(first);
+        assertEquals(2, firstIds.size());
+        assertTrue(firstIds.get(0) > firstIds.get(1));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, number(first.get("total")));
+        Map<String, Object> second = controller.adminReportsPage(
+                adminAuth, marker, null, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        List<Long> secondIds = idsOf(second);
+        assertEquals(1, secondIds.size());
+        assertTrue(secondIds.get(0) < firstIds.get(1));
+        assertEquals(null, second.get("total"));
+
+        controller.resolveReport(adminAuth, Map.of("reportId", firstIds.get(0), "status", "RESOLVED", "result", "已处理"));
+        assertEquals(List.of(firstIds.get(0)), idsOf(controller.adminReportsPage(adminAuth, marker, "RESOLVED", null, 20).data()));
+        assertEquals(2L, number(controller.adminReportsPage(adminAuth, marker, "PENDING", null, 20).data().get("total")));
+        // The reported file id is searchable too.
+        assertEquals(3, idsOf(controller.adminReportsPage(adminAuth, String.valueOf(fileId), null, null, 50).data()).stream()
+                .filter(id -> firstIds.contains(id) || secondIds.contains(id)).count());
+
+        assertEquals(500, controller.adminReportsPage(userAuth, marker, null, null, 20).code());
+        assertEquals(500, controller.adminReportsPage(adminAuth, marker, null, -1L, 20).code());
+    }
+
+
+    @Test
+    void adminCanLookUpFileTitlesById() {
+        String adminAuth = "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin", 2L, "ADMIN");
+        Long first = ((Number) controller.upload(userAuth, Map.of("title", "来源甲", "fileType", "txt", "content", "甲")).data().get("id")).longValue();
+        Long second = ((Number) controller.upload(userAuth, Map.of("title", "来源乙", "fileType", "txt", "content", "乙")).data().get("id")).longValue();
+
+        List<Map<String, Object>> found = controller.adminFilesByIds(adminAuth, first + ", " + second + ",987654321").data();
+        assertEquals(java.util.Set.of(first, second),
+                found.stream().map(item -> ((Number) item.get("id")).longValue()).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(found.stream().anyMatch(item -> "来源甲".equals(item.get("title"))));
+        assertTrue(controller.adminFilesByIds(adminAuth, "").data().isEmpty());
+
+        assertEquals(500, controller.adminFilesByIds(adminAuth, "1,abc").code());
+        assertEquals(500, controller.adminFilesByIds(adminAuth, "0").code());
+        String tooMany = java.util.stream.IntStream.rangeClosed(1, 201).mapToObj(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(","));
+        assertEquals(500, controller.adminFilesByIds(adminAuth, tooMany).code());
+        assertEquals(500, controller.adminFilesByIds(userAuth, String.valueOf(first)).code());
+    }
+
 }

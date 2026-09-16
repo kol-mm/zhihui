@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Objects;
+import com.aiknowledge.common.TimeCursor;
 
 @Repository
 @Profile("mysql")
@@ -523,6 +524,67 @@ public class MySqlCommunityStore implements CommunityStore {
         if (!keyword.isEmpty()) {
             // The queue searches by post and author id as well as by title, so ids are matched as text.
             wrapper.and(match -> match.like(PostEntity::getTitle, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+
+    @Override
+    public List<CommentEntity> pageAdminComments(AdminCommentQuery query) {
+        if (query.limit() <= 0) return List.of();
+        return commentMapper.selectList(adminCommentFilter(query)
+                .lt(query.beforeId() != null, CommentEntity::getId, query.beforeId())
+                .orderByDesc(CommentEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countAdminComments(AdminCommentQuery query) {
+        Long count = commentMapper.selectCount(adminCommentFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<CommentEntity> adminCommentFilter(AdminCommentQuery query) {
+        LambdaQueryWrapper<CommentEntity> wrapper = Wrappers.lambdaQuery();
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // Governance searches by comment, post and author id as well as by text, so ids are matched as text.
+            wrapper.and(match -> match.like(CommentEntity::getContent, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(post_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+    @Override
+    public List<PostDraftEntity> pageAdminDrafts(AdminDraftQuery query) {
+        if (query.limit() <= 0) return List.of();
+        LambdaQueryWrapper<PostDraftEntity> wrapper = adminDraftFilter(query);
+        TimeCursor before = query.before();
+        if (before != null) {
+            wrapper.and(after -> after.lt(PostDraftEntity::getUpdatedAt, before.time())
+                    .or(tie -> tie.eq(PostDraftEntity::getUpdatedAt, before.time()).lt(PostDraftEntity::getId, before.id())));
+        }
+        return draftMapper.selectList(wrapper
+                .orderByDesc(PostDraftEntity::getUpdatedAt, PostDraftEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countAdminDrafts(AdminDraftQuery query) {
+        Long count = draftMapper.selectCount(adminDraftFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<PostDraftEntity> adminDraftFilter(AdminDraftQuery query) {
+        LambdaQueryWrapper<PostDraftEntity> wrapper = Wrappers.lambdaQuery();
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            wrapper.and(match -> match.like(PostDraftEntity::getTitle, keyword)
+                    .or().like(PostDraftEntity::getContent, keyword)
                     .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
                     .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
         }

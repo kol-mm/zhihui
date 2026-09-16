@@ -638,4 +638,72 @@ class CommunityControllerTest {
         assertEquals(500, controller.adminPostsPage(adminAuth, "PENDING", null, -1L, 20).code());
     }
 
+
+    @Test
+    void governanceCommentPageSearchesEveryPostAndStatus() {
+        String author = "Bearer " + LocalAuth.issueToken("governance-author", 4245L, "USER");
+        Long postId = ((Number) controller.createPost(author, Map.of(
+                "title", "治理帖子 " + System.nanoTime(), "content", "正文")).data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+        long before = analyticsNumber(controller.adminOverview(adminAuth, null).data().get("comments"));
+
+        String marker = "治理评论" + System.nanoTime();
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(((Number) controller.createComment(userAuth, Map.of(
+                    "postId", postId, "content", marker + " " + i)).data().get("id")).longValue());
+        }
+        controller.updateCommentStatus(adminAuth, Map.of("commentId", created.get(0), "status", "HIDDEN"));
+        assertEquals(before + 3, analyticsNumber(controller.adminOverview(adminAuth, null).data().get("comments")));
+
+        Map<String, Object> first = controller.adminCommentsPage(adminAuth, marker, null, 2).data();
+        assertEquals(List.of(created.get(2), created.get(1)), ids(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, analyticsNumber(first.get("total")));
+        Map<String, Object> second = controller.adminCommentsPage(
+                adminAuth, marker, ((Number) first.get("nextCursor")).longValue(), 2).data();
+        // Hidden comments stay visible to moderators.
+        assertEquals(List.of(created.get(0)), ids(second));
+        assertEquals("HIDDEN", pageItems(second).get(0).get("status"));
+        assertEquals(null, second.get("total"));
+
+        // The post id is searchable too.
+        assertTrue(ids(controller.adminCommentsPage(adminAuth, String.valueOf(postId), null, 50).data()).containsAll(created));
+        assertEquals(500, controller.adminCommentsPage(userAuth, marker, null, 20).code());
+        assertEquals(500, controller.adminCommentsPage(adminAuth, marker, -1L, 20).code());
+    }
+
+    @Test
+    void governanceDraftPageOrdersByLastEdit() throws InterruptedException {
+        String marker = "治理草稿" + System.nanoTime();
+        List<Long> created = new java.util.ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            created.add(((Number) controller.saveDraft(userAuth, Map.of(
+                    "title", marker + " " + i, "content", "草稿内容")).data().get("id")).longValue());
+            Thread.sleep(5);
+        }
+        // Editing the oldest draft moves it to the front.
+        controller.updateDraft(userAuth, Map.of("id", created.get(0), "title", marker + " 1 已修改", "content", "改过"));
+
+        Map<String, Object> first = controller.adminDraftsPage(adminAuth, marker, null, 2).data();
+        assertEquals(List.of(created.get(0), created.get(2)), ids(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, analyticsNumber(first.get("total")));
+        String cursor = (String) first.get("nextCursor");
+        assertTrue(cursor.endsWith("|" + created.get(2)), cursor);
+        Map<String, Object> second = controller.adminDraftsPage(adminAuth, marker, cursor, 2).data();
+        assertEquals(List.of(created.get(1)), ids(second));
+        assertEquals(false, second.get("hasMore"));
+        assertEquals(null, second.get("total"));
+
+        assertEquals(List.of(created.get(0)), ids(controller.adminDraftsPage(adminAuth, "已修改", null, 20).data()));
+        assertEquals(500, controller.adminDraftsPage(adminAuth, marker, "not-a-cursor", 20).code());
+        assertEquals(500, controller.adminDraftsPage(userAuth, marker, null, 20).code());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> pageItems(Map<String, Object> page) {
+        return (List<Map<String, Object>>) page.get("items");
+    }
+
 }

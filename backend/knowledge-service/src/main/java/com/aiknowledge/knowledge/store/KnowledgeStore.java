@@ -185,4 +185,48 @@ public interface KnowledgeStore {
         return listReports(null).stream().filter(report -> !"RESOLVED".equals(report.get("status"))).count();
     }
 
+
+    /**
+     * One page of the moderation report queue, newest first.
+     *
+     * @param keyword  matches the report id, the reported file id or the reason (optional)
+     * @param status   PENDING, PROCESSING or RESOLVED (optional)
+     * @param beforeId cursor: only reports with a smaller id (optional)
+     */
+    record AdminReportQuery(String keyword, String status, Long beforeId, int limit) { }
+
+    default List<Map<String, Object>> pageAdminReports(AdminReportQuery query) {
+        return matchingAdminReports(query)
+                .filter(report -> query.beforeId() == null || reportId(report) < query.beforeId())
+                .limit(Math.max(query.limit(), 0))
+                .toList();
+    }
+
+    default long countAdminReports(AdminReportQuery query) {
+        return matchingAdminReports(query).count();
+    }
+
+    private java.util.stream.Stream<Map<String, Object>> matchingAdminReports(AdminReportQuery query) {
+        String keyword = query.keyword() == null ? "" : query.keyword().trim().toLowerCase();
+        return listReports(null).stream()
+                .sorted(Comparator.comparingLong(KnowledgeStore::reportId).reversed())
+                .filter(report -> query.status() == null || query.status().isBlank() || query.status().equals(report.get("status")))
+                .filter(report -> keyword.isEmpty()
+                        || String.valueOf(report.get("id")).contains(keyword)
+                        || String.valueOf(report.get("fileId")).contains(keyword)
+                        || String.valueOf(report.get("reason")).toLowerCase().contains(keyword));
+    }
+
+    private static long reportId(Map<String, Object> report) {
+        return report.get("id") instanceof Number number ? number.longValue() : 0L;
+    }
+
+
+    /** The files with these ids that still exist, in no particular order. */
+    default List<KnowledgeFileEntity> findFiles(Collection<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) return List.of();
+        java.util.Set<Long> wanted = new java.util.HashSet<>(fileIds);
+        return listFiles().stream().filter(file -> wanted.contains(file.getId())).toList();
+    }
+
 }

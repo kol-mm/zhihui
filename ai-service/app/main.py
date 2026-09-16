@@ -53,6 +53,8 @@ class TextRequest(BaseModel):
 
 class RebuildIndexRequest(BaseModel):
     documents: list[TextRequest] = Field(default_factory=list, max_length=1000)
+    # A rebuild arrives in batches: the first clears the index, the following ones only add to it.
+    reset: bool = True
 
 
 class ChatRequest(BaseModel):
@@ -162,7 +164,19 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+_initialized_databases: set[Path] = set()
+
+
 def init_db() -> None:
+    """Create the schema and drop legacy sensitive chunks, once per database file per process.
+
+    Every request path calls this. The purge reads every indexed chunk, so running it each time made each
+    request cost grow with the index (about 3 s per request at 200k chunks). New chunks are already filtered
+    when they are indexed and again when they are retrieved. A database file that disappears is set up again.
+    """
+    path = db_path()
+    if path in _initialized_databases and path.exists():
+        return
     with connect() as conn:
         conn.executescript(
             """
@@ -205,6 +219,7 @@ def init_db() -> None:
         if "embedding" not in columns:
             conn.execute("ALTER TABLE knowledge_chunk ADD COLUMN embedding TEXT")
         purge_sensitive_chunks(conn)
+    _initialized_databases.add(path)
 
 
 @asynccontextmanager
@@ -671,8 +686,11 @@ def retrieve(request: ChatRequest, authorization: str | None = Header(default=No
 def chat_history(
     user_id: int | None = None,
     session_id: int | None = None,
+    include_messages: bool = True,
     authorization: str | None = Header(default=None),
 ) -> ApiResponse:
+    """Sessions plus their messages. Pass include_messages=false to list sessions only: without a session_id
+    the messages cover every conversation in scope, which the session lists never display."""
     claims = require_user(authorization)
     authenticated_user_id = int(claims["uid"])
     if claims.get("role") != "ADMIN" and user_id is not None and user_id != authenticated_user_id:
@@ -689,7 +707,7 @@ def chat_history(
             "JOIN ai_chat_session s ON s.id = m.session_id "
             "WHERE (? IS NULL OR s.user_id = ?) AND (? IS NULL OR m.session_id = ?) ORDER BY m.id",
             (effective_user_id, effective_user_id, session_id, session_id),
-        ).fetchall()
+        ).fetchall() if include_messages else []
     public_messages = []
     for row in messages:
         item = row_to_dict(row)
@@ -761,13 +779,94 @@ def admin_chunks(authorization: str | None = Header(default=None)) -> ApiRespons
     return ApiResponse(data={"chunks": [row_to_dict(row) for row in rows]})
 
 
+ADMIN_PAGE_MAX = 100
+
+
+def admin_page(
+    conn: sqlite3.Connection,
+    table: str,
+    columns: str,
+    keyword_columns: tuple[str, ...],
+    keyword: str | None,
+    cursor: int | None,
+    limit: int,
+) -> dict[str, Any]:
+    """Newest-first keyset page for the governance tables.
+
+    table and columns are fixed by the callers, never taken from the request. The total is only counted for
+    a first page that is full: a short first page is its own total, and later pages send None.
+    """
+    size = min(max(limit, 1), ADMIN_PAGE_MAX)
+    conditions: list[str] = []
+    params: list[Any] = []
+    text = (keyword or "").strip()
+    if text:
+        conditions.append("(" + " OR ".join(f"CAST({column} AS TEXT) LIKE ?" for column in keyword_columns) + ")")
+        params.extend([f"%{text}%"] * len(keyword_columns))
+    page_conditions = [*conditions, *(["id < ?"] if cursor is not None else [])]
+    page_params = [*params, *([cursor] if cursor is not None else [])]
+    page_where = f" WHERE {' AND '.join(page_conditions)}" if page_conditions else ""
+    rows = conn.execute(
+        f"SELECT {columns} FROM {table}{page_where} ORDER BY id DESC LIMIT ?", (*page_params, size + 1)
+    ).fetchall()
+    has_more = len(rows) > size
+    items = [row_to_dict(row) for row in rows[:size]]
+    total = None
+    if cursor is None:
+        if has_more:
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            total = conn.execute(f"SELECT COUNT(*) AS count FROM {table}{where}", params).fetchone()["count"]
+        else:
+            total = len(items)
+    return {"items": items, "nextCursor": items[-1]["id"] if items else None, "hasMore": has_more, "total": total}
+
+
+@app.get("/ai/admin/sessions/page", response_model=ApiResponse)
+def admin_sessions_page(
+    keyword: str | None = None,
+    cursor: int | None = None,
+    limit: int = 20,
+    authorization: str | None = Header(default=None),
+) -> ApiResponse:
+    """One page of every user's AI conversations, newest first, without their messages."""
+    require_admin(authorization)
+    if cursor is not None and cursor < 0:
+        raise HTTPException(status_code=400, detail="cursor must not be negative")
+    init_db()
+    with connect() as conn:
+        # Timestamps are left out of the search: every one of them contains digits, so a search for an id
+        # or a user would match all sessions.
+        page = admin_page(conn, "ai_chat_session", "id, user_id, title, created_at",
+                          ("id", "user_id", "title"), keyword, cursor, limit)
+    return ApiResponse(data=page)
+
+
+@app.get("/ai/admin/chunks/page", response_model=ApiResponse)
+def admin_chunks_page(
+    keyword: str | None = None,
+    cursor: int | None = None,
+    limit: int = 20,
+    authorization: str | None = Header(default=None),
+) -> ApiResponse:
+    """One page of indexed knowledge chunks, newest first; unlike /ai/admin/chunks it reaches every chunk."""
+    require_admin(authorization)
+    if cursor is not None and cursor < 0:
+        raise HTTPException(status_code=400, detail="cursor must not be negative")
+    init_db()
+    with connect() as conn:
+        page = admin_page(conn, "knowledge_chunk", "id, file_id, title, content, created_at",
+                          ("id", "file_id", "title", "content"), keyword, cursor, limit)
+    return ApiResponse(data=page)
+
+
 @app.post("/ai/admin/index/rebuild", response_model=ApiResponse)
 def rebuild_index(request: RebuildIndexRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
     init_db()
     created: list[dict[str, Any]] = []
     with connect() as conn:
-        conn.execute("DELETE FROM knowledge_chunk")
+        if request.reset:
+            conn.execute("DELETE FROM knowledge_chunk")
         for document in request.documents:
             created.extend(index_document(conn, document))
     return ApiResponse(data={"documents": len(request.documents), "chunks": len(created)})

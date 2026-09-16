@@ -79,7 +79,7 @@
           <el-upload v-if="portal === 'client' && activeView === 'profile'" :show-file-list="false" :auto-upload="false" accept="image/jpeg,image/png,image/gif,image/webp" :on-change="handleAvatarFile"><el-button :icon="Upload">上传头像</el-button></el-upload>
           <el-input v-if="portal === 'client'" v-model="globalSearch" class="global-search" placeholder="搜索知识与内容" :prefix-icon="Search" clearable @keyup.enter="runGlobalSearch" />
           <el-button v-if="portal === 'admin' && activeView === 'moderation'" :icon="Setting" circle title="管理知识分类" @click="openCategoryManager" />
-          <el-button v-if="portal === 'admin' && activeView === 'system'" :icon="Refresh" :loading="aiIndexBusy" title="从已审核知识重建 AI 索引" @click="rebuildAiIndex">重建知识索引</el-button>
+          <el-button v-if="portal === 'admin' && activeView === 'system'" :icon="Refresh" :loading="aiIndexBusy" title="从已审核知识重建 AI 索引" @click="rebuildAiIndex">{{ aiIndexBusy && aiIndexProgress ? `已处理 ${aiIndexProgress} 份` : '重建知识索引' }}</el-button>
           <el-button class="topbar-refresh" :icon="Refresh" circle title="刷新当前数据" @click="refreshVisiblePage" />
         </div>
       </header>
@@ -251,8 +251,8 @@
               <div class="admin-filter-bar"><el-input v-model="adminModerationKeyword" :prefix-icon="Search" clearable placeholder="搜索标题、编号、用户或原因" /><el-select v-model="adminModerationStatus" clearable placeholder="全部状态"><el-option v-for="option in moderationStatusOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select><span>找到 <strong>{{ moderationResultCount }}</strong> 条</span></div>
               <el-tabs v-model="moderationTab">
               <el-tab-pane label="知识资源" name="knowledge"><el-table class="admin-desktop-table" :data="moderationKnowledge.items"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="title" label="标题" min-width="220" /><el-table-column prop="fileType" label="格式" width="90" /><el-table-column label="状态" width="110"><template #default="scope">{{ auditLabel(scope.row.auditStatus) }}</template></el-table-column><el-table-column label="操作" width="430"><template #default="scope"><el-button text type="primary" @click="reviewKnowledge(scope.row)">查看内容</el-button><el-button text @click="openKnowledgeMetadata(scope.row)">编辑</el-button><el-button v-if="['PENDING','REJECTED'].includes(scope.row.auditStatus)" text type="success" @click="auditKnowledge(scope.row, 'APPROVED')">{{ scope.row.auditStatus === 'PENDING' ? '通过' : '重新通过' }}</el-button><el-button v-else-if="scope.row.auditStatus === 'APPROVED'" text type="warning" @click="updateKnowledgeStatus(scope.row, 'HIDDEN')">下架</el-button><el-button v-else-if="scope.row.auditStatus === 'HIDDEN'" text type="success" @click="updateKnowledgeStatus(scope.row, 'APPROVED')">恢复</el-button><el-button text type="danger" @click="deleteAdminKnowledge(scope.row)">删除</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="file in moderationKnowledge.items" :key="file.id"><header><span class="file-type">{{ file.fileType?.toUpperCase() }}</span><el-tag size="small">{{ auditLabel(file.auditStatus) }}</el-tag></header><h4>{{ file.title }}</h4><p>资源 #{{ file.id }}</p><footer><el-button type="primary" plain @click="reviewKnowledge(file)">查看</el-button><el-button @click="openKnowledgeMetadata(file)">编辑</el-button><el-button v-if="['PENDING','REJECTED','HIDDEN'].includes(file.auditStatus)" type="success" plain @click="file.auditStatus === 'HIDDEN' ? updateKnowledgeStatus(file, 'APPROVED') : auditKnowledge(file, 'APPROVED')">{{ file.auditStatus === 'HIDDEN' ? '恢复' : '通过' }}</el-button><el-button v-else type="warning" plain @click="updateKnowledgeStatus(file, 'HIDDEN')">下架</el-button></footer></article><el-empty v-if="!moderationKnowledge.items.length" description="没有匹配的知识资源" /></div><div v-if="moderationKnowledge.hasMore" class="knowledge-load-more"><el-button :loading="moderationKnowledge.loading" @click="loadMoreModeration">加载更多资源</el-button></div></el-tab-pane>
-              <el-tab-pane :label="`知识举报 ${knowledgeReports.filter(item=>item.status!=='RESOLVED').length}`" name="reports"><el-table class="admin-desktop-table" :data="filteredKnowledgeReports"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="fileId" label="资源" width="90" /><el-table-column prop="reason" label="举报原因" min-width="240" /><el-table-column label="状态" width="110"><template #default="scope">{{ reportStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="190"><template #default="scope"><el-button text @click="reviewReportedKnowledge(scope.row)">查看资源</el-button><el-button text type="primary" :disabled="scope.row.status === 'RESOLVED'" @click="resolveKnowledgeReport(scope.row)">结案</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="report in filteredKnowledgeReports" :key="report.id"><header><strong>举报 #{{ report.id }}</strong><el-tag size="small">{{ reportStatusLabel(report.status) }}</el-tag></header><h4>{{ report.reason }}</h4><p>知识资源 #{{ report.fileId }}</p><footer><el-button @click="reviewReportedKnowledge(report)">查看资源</el-button><el-button type="primary" :disabled="report.status === 'RESOLVED'" @click="resolveKnowledgeReport(report)">结案</el-button></footer></article><el-empty v-if="!filteredKnowledgeReports.length" description="没有匹配的知识举报" /></div></el-tab-pane>
-              <el-tab-pane :label="`用户举报 ${userReports.filter(item=>item.status!=='RESOLVED').length}`" name="users"><el-table class="admin-desktop-table" :data="filteredUserReports"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="targetUserId" label="被举报用户" width="120" /><el-table-column prop="reason" label="原因" min-width="240" /><el-table-column label="状态" width="110"><template #default="scope">{{ reportStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="190"><template #default="scope"><el-button text @click="reviewReportedUser(scope.row)">查看用户</el-button><el-button text type="primary" :disabled="scope.row.status === 'RESOLVED'" @click="resolveUserReport(scope.row)">结案</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="report in filteredUserReports" :key="report.id"><header><strong>举报 #{{ report.id }}</strong><el-tag size="small">{{ reportStatusLabel(report.status) }}</el-tag></header><h4>{{ report.reason }}</h4><p>被举报用户 #{{ report.targetUserId }}</p><footer><el-button @click="reviewReportedUser(report)">查看用户</el-button><el-button type="primary" :disabled="report.status === 'RESOLVED'" @click="resolveUserReport(report)">结案</el-button></footer></article><el-empty v-if="!filteredUserReports.length" description="没有匹配的用户举报" /></div></el-tab-pane>
+              <el-tab-pane :label="`知识举报 ${metricValue('knowledgeAdmin','openReports')}`" name="reports"><el-table class="admin-desktop-table" :data="moderationKnowledgeReports.items"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="fileId" label="资源" width="90" /><el-table-column prop="reason" label="举报原因" min-width="240" /><el-table-column label="状态" width="110"><template #default="scope">{{ reportStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="190"><template #default="scope"><el-button text @click="reviewReportedKnowledge(scope.row)">查看资源</el-button><el-button text type="primary" :disabled="scope.row.status === 'RESOLVED'" @click="resolveKnowledgeReport(scope.row)">结案</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="report in moderationKnowledgeReports.items" :key="report.id"><header><strong>举报 #{{ report.id }}</strong><el-tag size="small">{{ reportStatusLabel(report.status) }}</el-tag></header><h4>{{ report.reason }}</h4><p>知识资源 #{{ report.fileId }}</p><footer><el-button @click="reviewReportedKnowledge(report)">查看资源</el-button><el-button type="primary" :disabled="report.status === 'RESOLVED'" @click="resolveKnowledgeReport(report)">结案</el-button></footer></article><el-empty v-if="!moderationKnowledgeReports.items.length" description="没有匹配的知识举报" /></div><div v-if="moderationKnowledgeReports.hasMore" class="knowledge-load-more"><el-button :loading="moderationKnowledgeReports.loading" @click="loadMoreModeration">加载更多举报</el-button></div></el-tab-pane>
+              <el-tab-pane :label="`用户举报 ${metricValue('userAdmin','openReports')}`" name="users"><el-table class="admin-desktop-table" :data="moderationUserReports.items"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="targetUserId" label="被举报用户" width="120" /><el-table-column prop="reason" label="原因" min-width="240" /><el-table-column label="状态" width="110"><template #default="scope">{{ reportStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="190"><template #default="scope"><el-button text @click="reviewReportedUser(scope.row)">查看用户</el-button><el-button text type="primary" :disabled="scope.row.status === 'RESOLVED'" @click="resolveUserReport(scope.row)">结案</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="report in moderationUserReports.items" :key="report.id"><header><strong>举报 #{{ report.id }}</strong><el-tag size="small">{{ reportStatusLabel(report.status) }}</el-tag></header><h4>{{ report.reason }}</h4><p>被举报用户 #{{ report.targetUserId }}</p><footer><el-button @click="reviewReportedUser(report)">查看用户</el-button><el-button type="primary" :disabled="report.status === 'RESOLVED'" @click="resolveUserReport(report)">结案</el-button></footer></article><el-empty v-if="!moderationUserReports.items.length" description="没有匹配的用户举报" /></div><div v-if="moderationUserReports.hasMore" class="knowledge-load-more"><el-button :loading="moderationUserReports.loading" @click="loadMoreModeration">加载更多举报</el-button></div></el-tab-pane>
               <el-tab-pane :label="`待审帖子 ${metricValue('forumAdmin','pendingAudit')}`" name="posts"><el-table class="admin-desktop-table" :data="moderationPendingPosts.items"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="title" label="标题" min-width="220" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column label="状态" width="110"><template #default="scope">{{ postStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="250"><template #default="scope"><el-button text type="primary" @click="reviewPost(scope.row)">查看内容</el-button><el-button text type="success" :loading="auditingPostId === scope.row.id" :disabled="auditingPostId !== 0" @click="auditPost(scope.row, 'PUBLISHED')">发布</el-button><el-button text type="danger" :loading="auditingPostId === scope.row.id" :disabled="auditingPostId !== 0" @click="auditPost(scope.row, 'HIDDEN')">驳回</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="post in moderationPendingPosts.items" :key="post.id"><header><strong>帖子 #{{ post.id }}</strong><el-tag size="small" type="warning">待审核</el-tag></header><h4>{{ post.title }}</h4><p>作者 #{{ post.userId }}</p><footer><el-button @click="reviewPost(post)">查看</el-button><el-button type="success" :loading="auditingPostId===post.id" @click="auditPost(post,'PUBLISHED')">发布</el-button><el-button type="danger" plain :loading="auditingPostId===post.id" @click="auditPost(post,'HIDDEN')">驳回</el-button></footer></article><el-empty v-if="!moderationPendingPosts.items.length" description="当前没有待审帖子" /></div><div v-if="moderationPendingPosts.hasMore" class="knowledge-load-more"><el-button :loading="moderationPendingPosts.loading" @click="loadMoreModeration">加载更多帖子</el-button></div></el-tab-pane>
               <el-tab-pane :label="`帖子管理 ${metricValue('forumAdmin','publishedPosts')+metricValue('forumAdmin','hiddenPosts')}`" name="post-management"><el-table class="admin-desktop-table" :data="moderationManagedPosts.items"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="title" label="标题" min-width="220" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column label="状态" width="110"><template #default="scope">{{ postStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column label="操作" width="220"><template #default="scope"><el-button text type="primary" @click="reviewPost(scope.row)">查看内容</el-button><el-button v-if="scope.row.status === 'PUBLISHED'" text type="warning" :loading="auditingPostId === scope.row.id" @click="auditPost(scope.row, 'HIDDEN')">隐藏</el-button><el-button v-else text type="success" :loading="auditingPostId === scope.row.id" @click="auditPost(scope.row, 'PUBLISHED')">恢复</el-button></template></el-table-column></el-table><div class="admin-mobile-cards"><article v-for="post in moderationManagedPosts.items" :key="post.id"><header><strong>帖子 #{{ post.id }}</strong><el-tag size="small" :type="post.status==='PUBLISHED'?'success':'info'">{{ postStatusLabel(post.status) }}</el-tag></header><h4>{{ post.title }}</h4><p>作者 #{{ post.userId }}</p><footer><el-button @click="reviewPost(post)">查看</el-button><el-button :type="post.status==='PUBLISHED'?'warning':'success'" plain :loading="auditingPostId===post.id" @click="auditPost(post,post.status==='PUBLISHED'?'HIDDEN':'PUBLISHED')">{{ post.status==='PUBLISHED'?'隐藏':'恢复' }}</el-button></footer></article><el-empty v-if="!moderationManagedPosts.items.length" description="没有匹配的帖子" /></div><div v-if="moderationManagedPosts.hasMore" class="knowledge-load-more"><el-button :loading="moderationManagedPosts.loading" @click="loadMoreModeration">加载更多帖子</el-button></div></el-tab-pane>
             </el-tabs></section>
@@ -275,7 +275,7 @@
             <div v-if="aiConfigDirty" class="admin-unsaved-notice"><span><Warning />当前页面有未保存的配置更改</span><el-button text type="primary" @click="discardAiConfig">撤销更改</el-button></div>
             <section class="surface runtime-mode-panel"><div class="surface-head"><div><h3>系统运行模式</h3><p>显示当前服务实际使用的数据与基础设施模式</p></div><el-tag :type="runtimeModeProblem ? 'warning' : 'success'">{{ runtimeModeSummary }}</el-tag></div><el-alert v-if="businessModeMismatch" title="业务数据模式不一致，长期运行前应统一切换为 MySQL" type="warning" :closable="false" show-icon /><div class="runtime-mode-grid"><article v-for="item in runtimeModes" :key="item.key"><div><strong>{{ item.label }}</strong><p>{{ item.detail }}</p></div><el-tag :type="modeTagType(item)" effect="plain">{{ !item.available ? '无法读取' : item.healthy === false ? `${runtimeModeLabel(item.mode)}（连接异常）` : runtimeModeLabel(item.mode) }}</el-tag></article></div></section>
             <section class="surface settings-form platform-settings"><div class="surface-head"><div><h3>平台运营配置</h3><p>修改后由各业务服务读取并执行，敏感部署参数不在网页中展示</p></div></div><el-form label-position="top"><div class="config-field-grid"><el-form-item label="平台名称"><el-input v-model="aiConfig.platform_name" maxlength="60" show-word-limit /></el-form-item><el-form-item label="新用户默认发帖策略"><el-select v-model="aiConfig.default_publish_policy"><el-option label="标准审核" value="STANDARD" /><el-option label="强制预审" value="PRE_REVIEW" /><el-option label="禁止发布" value="BLOCKED" /></el-select></el-form-item></div><el-form-item label="平台公告"><el-input v-model="aiConfig.platform_notice" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="留空则不展示公告" /></el-form-item><el-divider>功能开放</el-divider><div class="config-switch-grid"><label><span><strong>开放用户注册</strong><small>关闭后保留现有账号登录</small></span><el-switch v-model="aiConfig.registration_enabled" /></label><label><span><strong>AI 问答</strong><small>控制用户端 AI 会话入口</small></span><el-switch v-model="aiConfig.ai_chat_enabled" /></label><label><span><strong>用户上传知识</strong><small>管理员仍可维护资源</small></span><el-switch v-model="aiConfig.knowledge_upload_enabled" /></label><label><span><strong>知识贡献榜</strong><small>控制榜单展示与查询</small></span><el-switch v-model="aiConfig.user_ranking_enabled" /></label><label><span><strong>社区与广场</strong><small>关闭帖子浏览和发布</small></span><el-switch v-model="aiConfig.community_enabled" /></label><label><span><strong>评论互动</strong><small>管理员仍可审查历史评论</small></span><el-switch v-model="aiConfig.comments_enabled" /></label><label><span><strong>用户私信</strong><small>关闭新会话和消息发送</small></span><el-switch v-model="aiConfig.private_messages_enabled" /></label><label><span><strong>通知提醒</strong><small>关闭通知生成与用户入口</small></span><el-switch v-model="aiConfig.notifications_enabled" /></label><label><span><strong>反馈提交</strong><small>历史工单仍可查询和处理</small></span><el-switch v-model="aiConfig.feedback_enabled" /></label><label><span><strong>帖子发布前审核</strong><small>关闭后帖子与修改将直接发布</small></span><el-switch v-model="aiConfig.post_audit_required" /></label></div><el-divider>容量与保留规则</el-divider><div class="config-field-grid"><el-form-item label="知识文件上限（MB）"><el-input-number v-model="aiConfig.max_upload_mb" :min="1" :max="200" /></el-form-item><el-form-item label="帖子最多配图"><el-input-number v-model="aiConfig.max_post_images" :min="0" :max="9" /></el-form-item><el-form-item label="评论长度上限"><el-input-number v-model="aiConfig.max_comment_length" :min="100" :max="5000" /></el-form-item><el-form-item label="私信长度上限"><el-input-number v-model="aiConfig.max_message_length" :min="100" :max="5000" /></el-form-item><el-form-item label="草稿保留天数"><el-input-number v-model="aiConfig.draft_retention_days" :min="1" :max="3650" /></el-form-item></div></el-form></section>
-            <div class="two-column"><section class="surface settings-form"><h3>AI 检索配置</h3><el-form label-position="top"><el-form-item label="AI 提供商"><el-select v-model="aiConfig.provider"><el-option label="本地知识检索" value="local" /><el-option label="OpenAI 兼容接口" value="openai-compatible" /></el-select></el-form-item><el-form-item label="模型名称"><el-input v-model="aiConfig.model" /></el-form-item><el-form-item label="完整请求地址"><el-input v-model="aiConfig.request_url" :disabled="aiConfig.provider === 'local'" placeholder="例如 https://api.example.com/v1/chat/completions" /></el-form-item><el-form-item label="兼容接口基础地址（旧配置）"><el-input v-model="aiConfig.base_url" :disabled="aiConfig.provider === 'local'" placeholder="留空即可；仅用于兼容旧配置" /></el-form-item><el-form-item label="生成温度（0-1）"><el-slider v-model="aiConfig.temperature" :min="0" :max="1" :step="0.1" show-input /><div class="config-help">数值越低，回答越稳定严谨；数值越高，表达变化越多，但更容易偏离知识内容。知识库问答建议使用 0.1-0.3。</div></el-form-item><el-form-item label="知识数据源范围"><el-select v-model="aiConfig.data_source_scope"><el-option label="全部已审核知识" value="all-approved" /><el-option label="仅管理员指定" value="admin-selected" /></el-select></el-form-item><el-form-item v-if="aiConfig.data_source_scope === 'admin-selected'" label="指定知识来源"><el-select v-model="aiConfig.selected_file_ids" multiple filterable collapse-tags placeholder="选择允许 AI 调用的已审核资料"><el-option v-for="file in aiSourceFiles" :key="file.id" :label="file.title" :value="file.id" /></el-select><div class="config-help">未选中的资料不会进入 AI 检索结果。</div></el-form-item><el-form-item label="单次匹配片段数"><el-input-number v-model="aiConfig.match_limit" :min="1" :max="20" /></el-form-item><el-form-item label="回复合规规则"><el-select v-model="aiConfig.compliance_rule"><el-option label="回答并标注参考资料" value="answer-with-references" /><el-option label="严格事实模式" value="strict-factual" /><el-option label="简洁回答" value="concise" /></el-select><div class="config-help">规则会直接约束本地回答和外部兼容模型的系统提示。</div></el-form-item></el-form><div class="config-status"><span>已索引知识片段<strong>{{ aiOverview.chunk_count || 0 }}</strong></span><span>AI 对话会话<strong>{{ aiOverview.session_count || 0 }}</strong></span></div></section><section class="surface"><div class="surface-head"><div><h3>业务事件日志</h3><p>最近 50 条事件</p></div><el-tag type="info">{{ adminEvents.length }}</el-tag></div><div class="event-list"><article v-for="event in adminEvents" :key="event.id"><span class="event-dot"></span><div><strong>{{ eventTypeLabel(event.type) }}</strong><p>对象 {{ event.aggregateId }}</p><small>{{ formatDate(event.createdAt) }}</small></div><el-tag size="small" effect="plain">{{ eventStatusLabel(event.status) }}</el-tag></article></div><el-empty v-if="!adminEvents.length" description="暂无事件" /></section></div>
+            <div class="two-column"><section class="surface settings-form"><h3>AI 检索配置</h3><el-form label-position="top"><el-form-item label="AI 提供商"><el-select v-model="aiConfig.provider"><el-option label="本地知识检索" value="local" /><el-option label="OpenAI 兼容接口" value="openai-compatible" /></el-select></el-form-item><el-form-item label="模型名称"><el-input v-model="aiConfig.model" /></el-form-item><el-form-item label="完整请求地址"><el-input v-model="aiConfig.request_url" :disabled="aiConfig.provider === 'local'" placeholder="例如 https://api.example.com/v1/chat/completions" /></el-form-item><el-form-item label="兼容接口基础地址（旧配置）"><el-input v-model="aiConfig.base_url" :disabled="aiConfig.provider === 'local'" placeholder="留空即可；仅用于兼容旧配置" /></el-form-item><el-form-item label="生成温度（0-1）"><el-slider v-model="aiConfig.temperature" :min="0" :max="1" :step="0.1" show-input /><div class="config-help">数值越低，回答越稳定严谨；数值越高，表达变化越多，但更容易偏离知识内容。知识库问答建议使用 0.1-0.3。</div></el-form-item><el-form-item label="知识数据源范围"><el-select v-model="aiConfig.data_source_scope"><el-option label="全部已审核知识" value="all-approved" /><el-option label="仅管理员指定" value="admin-selected" /></el-select></el-form-item><el-form-item v-if="aiConfig.data_source_scope === 'admin-selected'" label="指定知识来源"><el-select v-model="aiConfig.selected_file_ids" multiple filterable remote :remote-method="searchAiSourceFiles" :loading="aiSourceSearching" collapse-tags placeholder="搜索并选择允许 AI 调用的已审核资料"><el-option v-for="file in aiSourceOptions" :key="file.id" :label="file.title" :value="file.id" /></el-select><div class="config-help">未选中的资料不会进入 AI 检索结果。</div></el-form-item><el-form-item label="单次匹配片段数"><el-input-number v-model="aiConfig.match_limit" :min="1" :max="20" /></el-form-item><el-form-item label="回复合规规则"><el-select v-model="aiConfig.compliance_rule"><el-option label="回答并标注参考资料" value="answer-with-references" /><el-option label="严格事实模式" value="strict-factual" /><el-option label="简洁回答" value="concise" /></el-select><div class="config-help">规则会直接约束本地回答和外部兼容模型的系统提示。</div></el-form-item></el-form><div class="config-status"><span>已索引知识片段<strong>{{ aiOverview.chunk_count || 0 }}</strong></span><span>AI 对话会话<strong>{{ aiOverview.session_count || 0 }}</strong></span></div></section><section class="surface"><div class="surface-head"><div><h3>业务事件日志</h3><p>最近 50 条事件</p></div><el-tag type="info">{{ adminEvents.length }}</el-tag></div><div class="event-list"><article v-for="event in adminEvents" :key="event.id"><span class="event-dot"></span><div><strong>{{ eventTypeLabel(event.type) }}</strong><p>对象 {{ event.aggregateId }}</p><small>{{ formatDate(event.createdAt) }}</small></div><el-tag size="small" effect="plain">{{ eventStatusLabel(event.status) }}</el-tag></article></div><el-empty v-if="!adminEvents.length" description="暂无事件" /></section></div>
           </section>
         </template>
       </main>
@@ -322,11 +322,11 @@
     <el-dialog v-model="governanceDialog" class="governance-dialog" title="深度内容审查" width="min(1000px, 94vw)" top="5vh">
       <div class="governance-search"><el-input v-model="governanceKeyword" :prefix-icon="Search" clearable placeholder="检索 ID、用户、标题或正文" /><span>{{ governanceResultCount }} 条结果</span></div>
       <el-tabs v-model="governanceTab">
-        <el-tab-pane label="私信监管" name="messages"><el-table :data="filteredAdminChatSessions" max-height="520" @row-click="loadAdminChatMessages"><el-table-column prop="id" label="会话" width="80" /><el-table-column prop="userAId" label="用户 A" width="90" /><el-table-column prop="userBId" label="用户 B" width="90" /><el-table-column prop="messageCount" label="消息数" width="90" /><el-table-column label="状态" width="100"><template #default="scope">{{ sessionStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column prop="updatedAt" label="更新时间" min-width="170" /><el-table-column label="操作" width="220"><template #default="scope"><el-button text type="warning" @click.stop="setAdminSessionStatus(scope.row, 'RESTRICTED')">限制</el-button><el-button text type="info" @click.stop="setAdminSessionStatus(scope.row, 'ARCHIVED')">封存</el-button><el-button text type="success" @click.stop="setAdminSessionStatus(scope.row, 'ACTIVE')">恢复</el-button></template></el-table-column></el-table><div v-if="adminChatMessages.length" class="admin-message-preview"><article v-for="message in adminChatMessages" :key="message.id"><strong>用户 {{ message.senderId }}</strong><span>{{ message.content }}</span><small>{{ formatDate(message.createdAt) }}</small></article></div><el-empty v-else description="选择会话查看消息" /></el-tab-pane>
-        <el-tab-pane :label="`评论 ${adminComments.length}`" name="comments"><el-table :data="filteredAdminComments" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="postId" label="帖子" width="80" /><el-table-column prop="userId" label="用户" width="80" /><el-table-column prop="content" label="评论内容" min-width="260" show-overflow-tooltip /><el-table-column label="状态" width="90"><template #default="scope">{{ scope.row.status === 'HIDDEN' ? '已隐藏' : '可见' }}</template></el-table-column><el-table-column label="操作" width="240"><template #default="scope"><el-button text type="primary" @click="previewGovernance('评论', `评论 #${scope.row.id}`, scope.row.content)">预览</el-button><el-button text :type="scope.row.status === 'HIDDEN' ? 'success' : 'warning'" @click="setAdminCommentStatus(scope.row, scope.row.status === 'HIDDEN' ? 'VISIBLE' : 'HIDDEN')">{{ scope.row.status === 'HIDDEN' ? '恢复' : '隐藏' }}</el-button><el-button text type="danger" @click="deleteAdminComment(scope.row)">删除</el-button></template></el-table-column></el-table></el-tab-pane>
-        <el-tab-pane :label="`草稿 ${adminDrafts.length}`" name="drafts"><div class="page-toolbar"><span>草稿仅管理员可进行治理操作</span><el-button type="danger" plain @click="cleanupExpiredDrafts">清理 {{ aiConfig.draft_retention_days }} 天前草稿</el-button></div><el-table :data="filteredAdminDrafts" max-height="470"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="content" label="内容" min-width="280" show-overflow-tooltip /><el-table-column label="操作" width="150"><template #default="scope"><el-button text type="primary" @click="previewGovernance('草稿', scope.row.title, scope.row.content)">预览</el-button><el-button text type="danger" @click="deleteAdminDraft(scope.row)">删除</el-button></template></el-table-column></el-table></el-tab-pane>
-        <el-tab-pane :label="`AI 会话 ${aiAuditSessions.length}`" name="sessions"><el-table :data="filteredAiAuditSessions" max-height="520"><el-table-column prop="id" label="ID" width="80" /><el-table-column prop="user_id" label="用户" width="100" /><el-table-column prop="title" label="会话标题" min-width="280" /><el-table-column prop="created_at" label="创建时间" min-width="180" /><el-table-column label="操作" width="90"><template #default="scope"><el-button text type="primary" @click="previewAiAuditSession(scope.row)">预览</el-button></template></el-table-column></el-table></el-tab-pane>
-        <el-tab-pane :label="`知识切片 ${aiChunks.length}`" name="chunks"><el-table :data="filteredAiChunks" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="file_id" label="文件" width="90" /><el-table-column prop="title" label="标题" min-width="180" /><el-table-column prop="content" label="切片内容" min-width="300" show-overflow-tooltip /><el-table-column label="操作" width="90"><template #default="scope"><el-button text type="primary" @click="previewGovernance('知识切片', scope.row.title, scope.row.content)">预览</el-button></template></el-table-column></el-table></el-tab-pane>
+        <el-tab-pane label="私信监管" name="messages"><el-table :data="governanceChats.items" max-height="520" @row-click="(row: ChatSession) => loadAdminChatMessages(row)"><el-table-column prop="id" label="会话" width="80" /><el-table-column prop="userAId" label="用户 A" width="90" /><el-table-column prop="userBId" label="用户 B" width="90" /><el-table-column prop="messageCount" label="消息数" width="90" /><el-table-column label="状态" width="100"><template #default="scope">{{ sessionStatusLabel(scope.row.status) }}</template></el-table-column><el-table-column prop="updatedAt" label="更新时间" min-width="170" /><el-table-column label="操作" width="220"><template #default="scope"><el-button text type="warning" @click.stop="setAdminSessionStatus(scope.row, 'RESTRICTED')">限制</el-button><el-button text type="info" @click.stop="setAdminSessionStatus(scope.row, 'ARCHIVED')">封存</el-button><el-button text type="success" @click.stop="setAdminSessionStatus(scope.row, 'ACTIVE')">恢复</el-button></template></el-table-column></el-table><div v-if="governanceChats.hasMore" class="knowledge-load-more"><el-button :loading="governanceChats.loading" @click="loadMoreGovernance">加载更多</el-button></div><div v-if="adminChatMessages.length" class="admin-message-preview"><div v-if="adminChatHasMore" class="knowledge-load-more"><el-button size="small" :loading="adminChatLoading" @click="adminChatSession && loadAdminChatMessages(adminChatSession, true)">加载更早消息</el-button></div><article v-for="message in adminChatMessages" :key="message.id"><strong>用户 {{ message.senderId }}</strong><span>{{ message.content }}</span><small>{{ formatDate(message.createdAt) }}</small></article></div><el-empty v-else description="选择会话查看消息" /></el-tab-pane>
+        <el-tab-pane :label="`评论 ${metricValue('forumAdmin','comments')}`" name="comments"><el-table :data="governanceComments.items" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="postId" label="帖子" width="80" /><el-table-column prop="userId" label="用户" width="80" /><el-table-column prop="content" label="评论内容" min-width="260" show-overflow-tooltip /><el-table-column label="状态" width="90"><template #default="scope">{{ scope.row.status === 'HIDDEN' ? '已隐藏' : '可见' }}</template></el-table-column><el-table-column label="操作" width="240"><template #default="scope"><el-button text type="primary" @click="previewGovernance('评论', `评论 #${scope.row.id}`, scope.row.content)">预览</el-button><el-button text :type="scope.row.status === 'HIDDEN' ? 'success' : 'warning'" @click="setAdminCommentStatus(scope.row, scope.row.status === 'HIDDEN' ? 'VISIBLE' : 'HIDDEN')">{{ scope.row.status === 'HIDDEN' ? '恢复' : '隐藏' }}</el-button><el-button text type="danger" @click="deleteAdminComment(scope.row)">删除</el-button></template></el-table-column></el-table><div v-if="governanceComments.hasMore" class="knowledge-load-more"><el-button :loading="governanceComments.loading" @click="loadMoreGovernance">加载更多</el-button></div></el-tab-pane>
+        <el-tab-pane :label="`草稿 ${metricValue('forumAdmin','draftsTracked')}`" name="drafts"><div class="page-toolbar"><span>草稿仅管理员可进行治理操作</span><el-button type="danger" plain @click="cleanupExpiredDrafts">清理 {{ aiConfig.draft_retention_days }} 天前草稿</el-button></div><el-table :data="governanceDrafts.items" max-height="470"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="userId" label="用户" width="90" /><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="content" label="内容" min-width="280" show-overflow-tooltip /><el-table-column label="操作" width="150"><template #default="scope"><el-button text type="primary" @click="previewGovernance('草稿', scope.row.title, scope.row.content)">预览</el-button><el-button text type="danger" @click="deleteAdminDraft(scope.row)">删除</el-button></template></el-table-column></el-table><div v-if="governanceDrafts.hasMore" class="knowledge-load-more"><el-button :loading="governanceDrafts.loading" @click="loadMoreGovernance">加载更多</el-button></div></el-tab-pane>
+        <el-tab-pane :label="`AI 会话 ${Number(aiOverview.session_count || 0)}`" name="sessions"><el-table :data="governanceAiSessions.items" max-height="520"><el-table-column prop="id" label="ID" width="80" /><el-table-column prop="user_id" label="用户" width="100" /><el-table-column prop="title" label="会话标题" min-width="280" /><el-table-column prop="created_at" label="创建时间" min-width="180" /><el-table-column label="操作" width="90"><template #default="scope"><el-button text type="primary" @click="previewAiAuditSession(scope.row)">预览</el-button></template></el-table-column></el-table><div v-if="governanceAiSessions.hasMore" class="knowledge-load-more"><el-button :loading="governanceAiSessions.loading" @click="loadMoreGovernance">加载更多</el-button></div></el-tab-pane>
+        <el-tab-pane :label="`知识切片 ${Number(aiOverview.chunk_count || 0)}`" name="chunks"><el-table :data="governanceChunks.items" max-height="520"><el-table-column prop="id" label="ID" width="70" /><el-table-column prop="file_id" label="文件" width="90" /><el-table-column prop="title" label="标题" min-width="180" /><el-table-column prop="content" label="切片内容" min-width="300" show-overflow-tooltip /><el-table-column label="操作" width="90"><template #default="scope"><el-button text type="primary" @click="previewGovernance('知识切片', scope.row.title, scope.row.content)">预览</el-button></template></el-table-column></el-table><div v-if="governanceChunks.hasMore" class="knowledge-load-more"><el-button :loading="governanceChunks.loading" @click="loadMoreGovernance">加载更多</el-button></div></el-tab-pane>
       </el-tabs>
       <template #footer><el-button :icon="Refresh" @click="loadGovernance">刷新数据</el-button><el-button type="primary" @click="governanceDialog = false">完成</el-button></template>
     </el-dialog>
@@ -396,8 +396,8 @@ const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
 const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const knowledgeCategoryId = ref(0); const adminUserKeyword = ref('');
 const adminModerationKeyword = ref(''); const adminModerationStatus = ref(''); const adminUserRoleFilter = ref(''); const adminUserStatusFilter = ref(''); const adminTicketKeyword = ref(''); const adminTicketStatus = ref('');
 const ADMIN_USER_PAGE_SIZE = 20; const ADMIN_TICKET_PAGE_SIZE = 20; const ADMIN_EXPORT_PAGE_SIZE = 100; const ADMIN_EXPORT_MAX_PAGES = 50;
-const adminUserTotal = ref(0); const adminUserCursor = ref<number|null>(null); const adminUserHasMore = ref(false); const adminUserLoading = ref(false); const adminUserExporting = ref(false); let adminUserToken = 0;
-const adminTicketTotal = ref(0); const adminTicketCursor = ref<number|null>(null); const adminTicketHasMore = ref(false); const adminTicketLoading = ref(false); let adminTicketToken = 0;
+const adminUserTotal = ref(0); const adminUserCursor = ref<number|string|null>(null); const adminUserHasMore = ref(false); const adminUserLoading = ref(false); const adminUserExporting = ref(false); let adminUserToken = 0;
+const adminTicketTotal = ref(0); const adminTicketCursor = ref<number|string|null>(null); const adminTicketHasMore = ref(false); const adminTicketLoading = ref(false); let adminTicketToken = 0;
 const assignableAdmins = ref<UserRecord[]>([]);
 const adminConfigSnapshot = ref('');
 const viewLoading = ref(false); const viewError = ref('');
@@ -435,7 +435,7 @@ type KnowledgeAnalytics = { days: number; trendDays: number; files: number; view
 type ForumAnalytics = { days: number; trendDays: number; posts: number; likes: number; trend: AnalyticsTrendPoint[]; top: { id: number; userId: number; title: string; likes: number }[] };
 type TicketAnalytics = { days: number; trendDays: number; total: number; bug: number; suggestion: number; support: number; resolved: number; trend: AnalyticsTrendPoint[] };
 const knowledgeAnalytics = ref<KnowledgeAnalytics>(); const forumAnalytics = ref<ForumAnalytics>(); const ticketAnalytics = ref<TicketAnalytics>(); let analyticsRequestToken = 0;
-const aiSourceFiles = ref<KnowledgeFile[]>([]);
+const aiSourceOptions = ref<{id:number;title:string}[]>([]); const aiSourceSearching = ref(false); let aiSourceToken = 0; const aiIndexProgress = ref('');
 const platformConfig = ref({ platform_name:'知汇', platform_notice:'', registration_enabled:true, ai_chat_enabled:true, knowledge_upload_enabled:true, user_ranking_enabled:true, community_enabled:true, comments_enabled:true, private_messages_enabled:true, notifications_enabled:true, feedback_enabled:true, post_audit_required:true, default_publish_policy:'STANDARD', max_upload_mb:25, max_post_images:9, max_comment_length:2000, max_message_length:2000, draft_retention_days:30 });
 const relationForm = ref({ username:'', targetUserId:0 });
 const categoryForm = ref({ id:0, name:'', sortNo:10 });
@@ -451,9 +451,9 @@ let knowledgeRequestToken = 0; let knowledgeObserver: IntersectionObserver | und
 const knowledgeFiles = ref<KnowledgeFile[]>([]); const feedPosts = ref<Post[]>([]); const communityPostCount = ref(0); const collectedPosts = ref<Post[]>([]); const tickets = ref<Ticket[]>([]); const adminTickets = ref<Ticket[]>([]);
 const NOTIFICATION_PAGE_SIZE = 20; const notificationUnread = ref(0); const notificationCursor = ref<number|null>(null);
 const notificationHasMore = ref(false); const notificationLoading = ref(false); const notificationError = ref('');
-const messages = ref<ChatMessage[]>([]); const notifications = ref<Notice[]>([]); const drafts = ref<Draft[]>([]); const sessions = ref<ChatSession[]>([]); const adminChatSessions = ref<ChatSession[]>([]); const adminChatMessages = ref<ChatMessage[]>([]);
-const adminUsers = ref<UserRecord[]>([]); const knowledgeReports = ref<Report[]>([]); const userReports = ref<Report[]>([]); const faqs = ref<Faq[]>([]); const adminEvents = ref<EventRecord[]>([]);
-const blockedUserIds = ref<number[]>([]); const behaviors = ref<BehaviorRecord[]>([]); const adminComments = ref<Comment[]>([]); const adminDrafts = ref<Draft[]>([]); const aiChunks = ref<AiChunk[]>([]); const aiAuditSessions = ref<AiSession[]>([]);
+const messages = ref<ChatMessage[]>([]); const notifications = ref<Notice[]>([]); const drafts = ref<Draft[]>([]); const sessions = ref<ChatSession[]>([]); const adminChatMessages = ref<ChatMessage[]>([]); const adminChatSession = ref<ChatSession>(); const adminChatCursor = ref<number|null>(null); const adminChatHasMore = ref(false); const adminChatLoading = ref(false); let adminChatToken = 0;
+const adminUsers = ref<UserRecord[]>([]); const faqs = ref<Faq[]>([]); const adminEvents = ref<EventRecord[]>([]);
+const blockedUserIds = ref<number[]>([]); const behaviors = ref<BehaviorRecord[]>([]);
 const adminUserKnowledge = ref<KnowledgeFile[]>([]); const adminUserPosts = ref<Post[]>([]); const adminUserDrafts = ref<Draft[]>([]); const adminUserBehaviors = ref<BehaviorRecord[]>([]);
 const MY_KNOWLEDGE_PAGE_SIZE = 12; const myKnowledgeTotal = ref(0); const myKnowledgeCursor = ref<number|null>(null);
 const myKnowledgeHasMore = ref(false); const myKnowledgeLoading = ref(false); const myKnowledgeError = ref(''); let myKnowledgeToken = 0;
@@ -514,7 +514,7 @@ const greeting = computed(() => { const hour = new Date().getHours(); return hou
 const filteredKnowledge = computed(() => knowledgeSearchMode.value
   ? knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value))
   : knowledgeFiles.value);
-function adminMatches(keyword:string,...values:unknown[]){const query=keyword.trim().toLowerCase();return !query||values.some(value=>String(value??'').toLowerCase().includes(query));}
+
 
 const adminMetrics = computed(() => [{label:'注册用户',value:metricValue('userAdmin','totalUsers'),hint:`${metricValue('userAdmin','activeUsers')} 个正常账号`,color:'green',icon:markRaw(UserFilled)},{label:'知识资源',value:metricValue('knowledgeAdmin','totalFiles'),hint:`${metricValue('knowledgeAdmin','pendingAudit')} 个待审核`,color:'blue',icon:markRaw(Files)},{label:'社区帖子',value:metricValue('forumAdmin','publishedPosts'),hint:'全站内容产出',color:'amber',icon:markRaw(ChatDotRound)},{label:'反馈工单',value:metricValue('feedbackAdmin','tickets'),hint:`${metricValue('feedbackAdmin','pendingTickets')} 个待处理`,color:'red',icon:markRaw(Tickets)}]);
 const healthItems = computed(() => [{label:'网关与用户服务',ok:systemHealth.value.user},{label:'知识与全文检索',ok:systemHealth.value.knowledge},{label:'社区与消息服务',ok:systemHealth.value.community&&systemHealth.value.message},{label:'AI 向量检索',ok:systemHealth.value.ai}]);
@@ -528,27 +528,34 @@ const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUs
 const followedUsers = computed(() => (followData.value.followedUserIds || []).map(communityUser));
 const followerUsers = computed(() => (followData.value.followerUserIds || []).map(communityUser));
 const filteredAiSessions = computed(() => {const keyword=aiHistoryKeyword.value.trim().toLowerCase();return keyword?aiSessions.value.filter(session=>session.title.toLowerCase().includes(keyword)):aiSessions.value;});
-const filteredAdminChatSessions = computed(() => adminChatSessions.value.filter(session => governanceMatches(session.id,session.userAId,session.userBId,session.status,session.lastMessage)));
-const filteredAdminComments = computed(() => adminComments.value.filter(comment => governanceMatches(comment.id,comment.postId,comment.userId,comment.content)));
-const filteredAdminDrafts = computed(() => adminDrafts.value.filter(draft => governanceMatches(draft.id,draft.userId,draft.title,draft.content)));
-const filteredAiAuditSessions = computed(() => aiAuditSessions.value.filter(session => governanceMatches(session.id,session.user_id,session.title,session.created_at)));
-const filteredAiChunks = computed(() => aiChunks.value.filter(chunk => governanceMatches(chunk.id,chunk.file_id,chunk.title,chunk.content)));
-const governanceResultCount = computed(() => ({ messages:filteredAdminChatSessions.value.length, comments:filteredAdminComments.value.length, drafts:filteredAdminDrafts.value.length, sessions:filteredAiAuditSessions.value.length, chunks:filteredAiChunks.value.length }[governanceTab.value] || 0));
 
 
-type ModerationList<T> = { items:T[]; cursor:number|null; hasMore:boolean; total:number; loading:boolean };
+
+
+
+const governanceResultCount = computed(() => ({ messages:governanceChats.value.total, comments:governanceComments.value.total, drafts:governanceDrafts.value.total, sessions:governanceAiSessions.value.total, chunks:governanceChunks.value.total }[governanceTab.value] || 0));
+
+
+type ModerationList<T> = { items:T[]; cursor:number|string|null; hasMore:boolean; total:number; loading:boolean };
 const emptyModerationList = <T,>():ModerationList<T> => ({items:[],cursor:null,hasMore:false,total:0,loading:false});
 const MODERATION_PAGE_SIZE = 20;
 const moderationKnowledge = ref<ModerationList<KnowledgeFile>>(emptyModerationList());
 const moderationPendingPosts = ref<ModerationList<Post>>(emptyModerationList());
 const moderationManagedPosts = ref<ModerationList<Post>>(emptyModerationList());
+const moderationKnowledgeReports = ref<ModerationList<Report>>(emptyModerationList());
+const moderationUserReports = ref<ModerationList<Report>>(emptyModerationList());
 const moderationTokens: Record<string, number> = {};
-const filteredKnowledgeReports = computed(() => knowledgeReports.value.filter(report=>adminMatches(adminModerationKeyword.value,report.id,report.fileId,report.reason)&&(!adminModerationStatus.value||report.status===adminModerationStatus.value)));
-const filteredUserReports = computed(() => userReports.value.filter(report=>adminMatches(adminModerationKeyword.value,report.id,report.targetUserId,report.reason)&&(!adminModerationStatus.value||report.status===adminModerationStatus.value)));
+const governanceChats = ref<ModerationList<ChatSession>>(emptyModerationList());
+const governanceComments = ref<ModerationList<Comment>>(emptyModerationList());
+const governanceDrafts = ref<ModerationList<Draft>>(emptyModerationList());
+const governanceAiSessions = ref<ModerationList<AiSession>>(emptyModerationList());
+const governanceChunks = ref<ModerationList<AiChunk>>(emptyModerationList());
+
+
 
 
 const moderationStatusOptions = computed(()=>['reports','users'].includes(moderationTab.value)?[{label:'待处理',value:'PENDING'},{label:'处理中',value:'PROCESSING'},{label:'已结案',value:'RESOLVED'}]:moderationTab.value==='post-management'?[{label:'已发布',value:'PUBLISHED'},{label:'已隐藏',value:'HIDDEN'}]:moderationTab.value==='posts'?[{label:'待审核',value:'PENDING'}]:[{label:'待审核',value:'PENDING'},{label:'已通过',value:'APPROVED'},{label:'已驳回',value:'REJECTED'},{label:'已下架',value:'HIDDEN'}]);
-const moderationResultCount = computed(()=>({knowledge:moderationKnowledge.value.total,reports:filteredKnowledgeReports.value.length,users:filteredUserReports.value.length,posts:moderationPendingPosts.value.total,'post-management':moderationManagedPosts.value.total}[moderationTab.value]||0));
+const moderationResultCount = computed(()=>({knowledge:moderationKnowledge.value.total,reports:moderationKnowledgeReports.value.total,users:moderationUserReports.value.total,posts:moderationPendingPosts.value.total,'post-management':moderationManagedPosts.value.total}[moderationTab.value]||0));
 
 const moderationOpenCount = computed(()=>metricValue('knowledgeAdmin','pendingAudit')+metricValue('forumAdmin','pendingAudit')+metricValue('knowledgeAdmin','openReports')+metricValue('userAdmin','openReports'));
 const ticketOpenCount = computed(()=>metricValue('feedbackAdmin','pendingTickets')+metricValue('feedbackAdmin','processingTickets'));
@@ -618,7 +625,7 @@ function behaviorActionLabel(action:string){return ({VIEW:'浏览',LIKE:'点赞'
 function behaviorTargetLabel(target:string){return ({KNOWLEDGE:'知识',POST:'帖子',COMMENT:'评论',USER:'用户'} as Record<string,string>)[target]||target;}
 function behaviorTargetCanOpen(item:BehaviorRecord){return item.targetId>0&&['KNOWLEDGE','POST'].includes(item.targetType);}
 function openBehaviorTarget(item:BehaviorRecord){if(!behaviorTargetCanOpen(item))return;if(item.targetType==='KNOWLEDGE')openKnowledge({id:item.targetId} as KnowledgeFile);else openPostDetail({id:item.targetId} as Post);}
-function governanceMatches(...values:unknown[]){const keyword=governanceKeyword.value.trim().toLocaleLowerCase();return !keyword||values.some(value=>String(value??'').toLocaleLowerCase().includes(keyword));}
+
 function formatDate(value:string){ return value ? new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
 function notifyError(error:unknown){ ElMessage.error(toUserMessage(error)); }
 function clearCaptchaCooldown(){captchaCooldownRemaining.value=0;if(captchaCooldownTimer){clearInterval(captchaCooldownTimer);captchaCooldownTimer=undefined;}}
@@ -1147,8 +1154,9 @@ async function deleteCurrentSession(){if(!messageForm.value.sessionId)return;awa
 async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});messages.value=messages.value.filter(item=>item.id!==message.id);await loadMessageData({reloadMessages:false});ElMessage.success('消息已删除');}
 
 async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string;references:AiReference[]}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;const references=[...new Map((result.references||[]).map(reference=>[reference.file_id,reference])).values()].slice(0,3);aiMessages.value.push({role:'assistant',content:result.answer,references});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}
-async function openAiReference(reference:AiReference){const files=await getData<KnowledgeFile[]>('/knowledge/list');const file=files.find(item=>item.id===reference.file_id);if(!file){ElMessage.warning('该知识来源当前不可访问');return;}openKnowledge(file);}
-async function loadAiHistory(){const history=await getData<{sessions:AiSession[]}> (`/ai/history?user_id=${currentUserId.value}`);aiSessions.value=history.sessions;}
+// The detail page loads the file by id and reports it when it is no longer available.
+function openAiReference(reference:AiReference){if(!reference.file_id){ElMessage.warning('该知识来源当前不可访问');return;}navigateToDetail('knowledge',reference.file_id);}
+async function loadAiHistory(){const history=await getData<{sessions:AiSession[]}> (`/ai/history?user_id=${currentUserId.value}&include_messages=false`);aiSessions.value=history.sessions;}
 async function loadAiSession(id:number){aiSessionId.value=id;const history=await getData<{messages:{role:'user'|'assistant';content:string}[]}>(`/ai/history?user_id=${currentUserId.value}&session_id=${id}`);aiMessages.value=history.messages;mobileAiHistoryOpen.value=false;}
 function newAiSession(){aiSessionId.value=undefined;aiMessages.value=[];aiQuestion.value='';mobileAiHistoryOpen.value=false;}
 async function renameAiSession(session:AiSession){const {value}=await ElMessageBox.prompt('请输入新的会话名称','重命名 AI 会话',{inputValue:session.title,inputPattern:/\S+/,inputErrorMessage:'会话名称不能为空',confirmButtonText:'保存'});const result=await putData<{id:number;title:string}>(`/ai/session/${session.id}`,{title:value});session.title=result.title;ElMessage.success('会话名称已更新');}
@@ -1171,23 +1179,24 @@ async function loadFeedback(){tickets.value=await getData(`/feedback/tickets?use
 async function createTicket(){if(!feedbackForm.value.content.trim())return;await postData('/feedback/ticket',feedbackForm.value);feedbackDialog.value=false;feedbackForm.value.content='';await loadFeedback();ElMessage.success('反馈已提交');}
 
 async function loadAdminDashboard(){const [userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin,checks]=await Promise.all([getData<Record<string,unknown>>('/user/admin/overview'),getData<Record<string,unknown>>('/knowledge/admin/overview'),getData<Record<string,unknown>>('/post/admin/overview'),getData<Record<string,unknown>>('/message/admin/overview?userId=1'),getData<Record<string,unknown>>('/feedback/admin/overview'),Promise.allSettled(['/user/health','/knowledge/health','/post/health','/message/health','/ai/health'].map(url=>getData(url)))]);adminOverview.value={userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin};systemHealth.value={user:checks[0].status==='fulfilled',knowledge:checks[1].status==='fulfilled',community:checks[2].status==='fulfilled',message:checks[3].status==='fulfilled',ai:checks[4].status==='fulfilled'};}
-function moderationPageUrl(tab:string,cursor:number|null){
+function moderationPageUrl(tab:string,cursor:number|string|null){
   const params=new URLSearchParams({limit:String(MODERATION_PAGE_SIZE)});
   if(cursor)params.set('cursor',String(cursor));
   const keyword=adminModerationKeyword.value.trim();
   if(keyword)params.set('keyword',keyword);
-  if(tab==='knowledge'){
+  if(tab==='knowledge'||tab==='reports'||tab==='users'){
     if(adminModerationStatus.value)params.set('status',adminModerationStatus.value);
-    return `/knowledge/admin/files/page?${params.toString()}`;
+    const base=({knowledge:'/knowledge/admin/files/page',reports:'/knowledge/admin/reports/page',users:'/user/admin/reports/page'} as Record<string,string>)[tab];
+    return `${base}?${params.toString()}`;
   }
   params.set('status',tab==='posts'?'PENDING':adminModerationStatus.value||'PUBLISHED,HIDDEN');
   return `/post/admin/posts/page?${params.toString()}`;
 }
-async function loadModerationList<T extends {id:number}>(tab:string,list:{value:ModerationList<T>},reset:boolean){
+async function loadModerationList<T extends {id:number}>(tab:string,list:{value:ModerationList<T>},reset:boolean,url:(cursor:number|string|null)=>string=cursor=>moderationPageUrl(tab,cursor)){
   const token=(moderationTokens[tab]||0)+1;moderationTokens[tab]=token;
   list.value={...list.value,loading:true};
   try{
-    const page=await getData<AdminPage<T>>(moderationPageUrl(tab,reset?null:list.value.cursor));
+    const page=await getData<AdminPage<T>>(url(reset?null:list.value.cursor));
     if(token!==moderationTokens[tab])return;
     const known=new Set(reset?[]:list.value.items.map(item=>item.id));
     list.value={items:reset?page.items:[...list.value.items,...page.items.filter(item=>!known.has(item.id))],cursor:page.nextCursor,hasMore:page.hasMore,total:page.total??list.value.total,loading:false};
@@ -1198,18 +1207,17 @@ async function loadModerationTab(tab=moderationTab.value,reset=true){
   if(tab==='knowledge')await loadModerationList(tab,moderationKnowledge,reset);
   else if(tab==='posts')await loadModerationList(tab,moderationPendingPosts,reset);
   else if(tab==='post-management')await loadModerationList(tab,moderationManagedPosts,reset);
+  else if(tab==='reports')await loadModerationList(tab,moderationKnowledgeReports,reset);
+  else if(tab==='users')await loadModerationList(tab,moderationUserReports,reset);
 }
 async function loadMoreModeration(){ await loadModerationTab(moderationTab.value,false); }
 async function loadModeration(){
-  const [knowledgeAdmin,forumAdmin,userAdmin,knowledgeReportList,userReportList]=await Promise.all([
+  const [knowledgeAdmin,forumAdmin,userAdmin]=await Promise.all([
     getData<Record<string,unknown>>('/knowledge/admin/overview'),
     getData<Record<string,unknown>>('/post/admin/overview'),
     getData<Record<string,unknown>>('/user/admin/overview'),
-    getData<Report[]>('/knowledge/admin/reports'),
-    getData<Report[]>('/user/admin/reports'),
     loadModerationTab(moderationTab.value,true)]);
   adminOverview.value={...adminOverview.value,knowledgeAdmin,forumAdmin,userAdmin};
-  knowledgeReports.value=knowledgeReportList;userReports.value=userReportList;
 }
 let moderationFilterTimer:ReturnType<typeof setTimeout>|undefined;
 watch([moderationTab,adminModerationKeyword,adminModerationStatus],([tab],[previousTab])=>{
@@ -1240,8 +1248,53 @@ async function reviewReportedUser(report:Report){
   const user=page.items[0];
   if(user)void openUserGovernance(user);else ElMessage.warning('未找到被举报用户');
 }
-async function loadGovernance(){const [commentsResult,draftsResult,chunksResult,historyResult,chatResult]=await Promise.all([getData<Comment[]>('/comment/list'),getData<Draft[]>('/post/drafts'),getData<{chunks:AiChunk[]}>('/ai/admin/chunks'),getData<{sessions:AiSession[]}>('/ai/history'),getData<ChatSession[]>('/message/admin/sessions')]);adminComments.value=commentsResult;adminDrafts.value=draftsResult;aiChunks.value=chunksResult.chunks;aiAuditSessions.value=historyResult.sessions;adminChatSessions.value=chatResult;adminChatMessages.value=[];}
-async function loadAdminChatMessages(session:ChatSession){adminChatMessages.value=await getData<ChatMessage[]>(`/message/admin/list?sessionId=${session.id}`);}
+const GOVERNANCE_PAGE_SIZE = 20;
+const GOVERNANCE_ENDPOINTS: Record<string, string> = {messages:'/message/admin/sessions/page',comments:'/comment/admin/page',drafts:'/post/admin/drafts/page',sessions:'/ai/admin/sessions/page',chunks:'/ai/admin/chunks/page'};
+function governancePageUrl(tab:string,cursor:number|string|null){
+  const params=new URLSearchParams({limit:String(GOVERNANCE_PAGE_SIZE)});
+  if(cursor!==null&&cursor!=='')params.set('cursor',String(cursor));
+  const keyword=governanceKeyword.value.trim();
+  if(keyword)params.set('keyword',keyword);
+  return `${GOVERNANCE_ENDPOINTS[tab]}?${params.toString()}`;
+}
+// Only the open tab is fetched; the shared keyword is applied by each service.
+async function loadGovernanceTab(tab=governanceTab.value,reset=true){
+  const url=(cursor:number|string|null)=>governancePageUrl(tab,cursor);
+  const key=`governance:${tab}`;
+  if(tab==='messages')await loadModerationList(key,governanceChats,reset,url);
+  else if(tab==='comments')await loadModerationList(key,governanceComments,reset,url);
+  else if(tab==='drafts')await loadModerationList(key,governanceDrafts,reset,url);
+  else if(tab==='sessions')await loadModerationList(key,governanceAiSessions,reset,url);
+  else if(tab==='chunks')await loadModerationList(key,governanceChunks,reset,url);
+}
+async function loadMoreGovernance(){ await loadGovernanceTab(governanceTab.value,false); }
+async function loadGovernance(){
+  adminChatToken++;adminChatMessages.value=[];adminChatSession.value=undefined;adminChatCursor.value=null;adminChatHasMore.value=false;adminChatLoading.value=false;
+  const [forumAdmin,aiStats]=await Promise.all([
+    getData<Record<string,unknown>>('/post/admin/overview'),
+    getData<Record<string,unknown>>('/ai/admin/overview'),
+    loadGovernanceTab(governanceTab.value,true)]);
+  adminOverview.value={...adminOverview.value,forumAdmin};aiOverview.value=aiStats;
+}
+let governanceFilterTimer:ReturnType<typeof setTimeout>|undefined;
+watch([governanceTab,governanceKeyword],([tab],[previousTab])=>{
+  if(!governanceDialog.value)return;
+  clearTimeout(governanceFilterTimer);
+  governanceFilterTimer=setTimeout(()=>void loadGovernanceTab(governanceTab.value,true).catch(notifyError),tab!==previousTab?0:250);
+});
+// The preview opens on the latest messages; older ones are prepended on request.
+async function loadAdminChatMessages(session:ChatSession,older=false){
+  const token=++adminChatToken;adminChatLoading.value=true;
+  try{
+    const params=new URLSearchParams({sessionId:String(session.id),limit:'30'});
+    if(older&&adminChatCursor.value)params.set('cursor',String(adminChatCursor.value));
+    const page=await getData<AdminPage<ChatMessage>>(`/message/admin/messages/page?${params.toString()}`);
+    if(token!==adminChatToken)return;
+    adminChatSession.value=session;
+    adminChatMessages.value=older?[...page.items,...adminChatMessages.value]:page.items;
+    adminChatCursor.value=typeof page.nextCursor==='number'?page.nextCursor:null;adminChatHasMore.value=page.hasMore;
+  } finally { if(token===adminChatToken)adminChatLoading.value=false; }
+}
 async function setAdminSessionStatus(session:ChatSession,status:string){await postData('/message/admin/session/status',{sessionId:session.id,status});await loadGovernance();ElMessage.success('会话状态已更新');}
 function previewGovernance(kind:string,title:string,content:string){governancePreviewKind.value=kind;governancePreviewTitle.value=title||'未命名内容';governancePreviewContent.value=content||'暂无正文';governancePreviewDialog.value=true;}
 async function previewAiAuditSession(session:AiSession){const history=await getData<{messages:{role:string;content:string;created_at?:string}[]}>(`/ai/history?user_id=${session.user_id}&session_id=${session.id}`);const content=history.messages.map(message=>`${message.role==='user'?'用户':'AI'}：${message.content}`).join('\n\n');previewGovernance('AI 会话',session.title,content);}
@@ -1258,7 +1311,7 @@ async function exportAdminUsers(){
   adminUserExporting.value=true;
   const matching:UserRecord[]=[];
   try{
-    let cursor:number|null=null;
+    let cursor:number|string|null=null;
     for(let round=0;round<ADMIN_EXPORT_MAX_PAGES;round++){
       const page:AdminPage<UserRecord>=await getData<AdminPage<UserRecord>>(adminUsersUrl(cursor,ADMIN_EXPORT_PAGE_SIZE));
       matching.push(...page.items);
@@ -1269,8 +1322,8 @@ async function exportAdminUsers(){
   if(!matching.length){ElMessage.warning('当前筛选条件下没有可导出的用户');return;}
   const rows=[['用户ID','用户名','昵称','角色','账号状态','发帖策略'],...matching.map(user=>[user.id,user.username,user.nickname,roleLabel(user.role),user.status==='ACTIVE'?'正常':'已停用',publishPolicyLabel(user.publishPolicy)])];const blob=new Blob([`\ufeff${rows.map(row=>row.map(csvValue).join(',')).join('\r\n')}`],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`zhihui-users-${new Date().toISOString().slice(0,10)}.csv`;link.click();URL.revokeObjectURL(url);ElMessage.success(`已导出 ${matching.length} 位用户`);}
 // total is only sent with the first page; later pages send null and the table keeps the first figure.
-type AdminPage<T> = { items:T[]; nextCursor:number|null; hasMore:boolean; total:number|null };
-function adminUsersUrl(cursor:number|null,limit=ADMIN_USER_PAGE_SIZE){
+type AdminPage<T> = { items:T[]; nextCursor:number|string|null; hasMore:boolean; total:number|null };
+function adminUsersUrl(cursor:number|string|null,limit=ADMIN_USER_PAGE_SIZE){
   const params=new URLSearchParams({limit:String(limit)});
   if(cursor)params.set('cursor',String(cursor));
   if(adminUserKeyword.value.trim())params.set('keyword',adminUserKeyword.value.trim());
@@ -1293,7 +1346,7 @@ async function loadAdminUsers(reset=true){
   } finally { if(token===adminUserToken)adminUserLoading.value=false; }
 }
 async function loadMoreAdminUsers(){ if(adminUserHasMore.value&&!adminUserLoading.value)await loadAdminUsers(false); }
-function adminTicketsUrl(cursor:number|null){
+function adminTicketsUrl(cursor:number|string|null){
   const params=new URLSearchParams({limit:String(ADMIN_TICKET_PAGE_SIZE)});
   if(cursor)params.set('cursor',String(cursor));
   if(adminTicketKeyword.value.trim())params.set('keyword',adminTicketKeyword.value.trim());
@@ -1375,10 +1428,58 @@ async function loadRuntimeModes(){
     {key:'discovery',label:'服务注册',mode:value(0,'discoveryMode'),detail:'微服务发现与路由',available:available(0)}
   ];
 }
-async function loadSystemAdmin(){const [overview,events,files]=await Promise.all([getData<Record<string,unknown>>('/ai/admin/overview'),getData<EventRecord[]>('/event/list?limit=50'),getData<KnowledgeFile[]>('/knowledge/list'),loadRuntimeModes()]);aiOverview.value=overview;adminEvents.value=events;aiSourceFiles.value=files.filter(file=>file.auditStatus==='APPROVED');const config=overview.configuration as typeof aiConfig.value|undefined;if(config)aiConfig.value={...aiConfig.value,...config,selected_file_ids:Array.isArray(config.selected_file_ids)?config.selected_file_ids:[]};adminConfigSnapshot.value=JSON.stringify(aiConfig.value);}
+async function loadSystemAdmin(){const [overview,events]=await Promise.all([getData<Record<string,unknown>>('/ai/admin/overview'),getData<EventRecord[]>('/event/list?limit=50'),loadRuntimeModes()]);aiOverview.value=overview;adminEvents.value=events;const config=overview.configuration as typeof aiConfig.value|undefined;if(config)aiConfig.value={...aiConfig.value,...config,selected_file_ids:Array.isArray(config.selected_file_ids)?config.selected_file_ids:[]};adminConfigSnapshot.value=JSON.stringify(aiConfig.value);await Promise.all([loadSelectedAiSources(),searchAiSourceFiles('')]);}
+// The source picker searches the approved library on the server; chosen files keep their labels between searches.
+const AI_SOURCE_LOOKUP_BATCH = 200;
+async function loadSelectedAiSources(){
+  const ids=[...new Set(aiConfig.value.selected_file_ids)];
+  const found:{id:number;title:string}[]=[];
+  for(let start=0;start<ids.length;start+=AI_SOURCE_LOOKUP_BATCH){
+    found.push(...await getData<{id:number;title:string}[]>(`/knowledge/admin/files/by-ids?ids=${ids.slice(start,start+AI_SOURCE_LOOKUP_BATCH).join(',')}`));
+  }
+  const known=new Map(aiSourceOptions.value.map(file=>[file.id,file]));
+  found.forEach(file=>known.set(file.id,{id:file.id,title:file.title}));
+  aiSourceOptions.value=[...known.values()];
+}
+async function searchAiSourceFiles(keyword:string){
+  const token=++aiSourceToken;aiSourceSearching.value=true;
+  try{
+    const params=new URLSearchParams({limit:'20'});
+    if(keyword.trim())params.set('keyword',keyword.trim());
+    const page=await getData<AdminPage<KnowledgeFile>>(`/knowledge/page?${params.toString()}`);
+    if(token!==aiSourceToken)return;
+    const selected=new Set(aiConfig.value.selected_file_ids);
+    aiSourceOptions.value=[...aiSourceOptions.value.filter(file=>selected.has(file.id)),...page.items.filter(file=>!selected.has(file.id)).map(file=>({id:file.id,title:file.title}))];
+  } finally { if(token===aiSourceToken)aiSourceSearching.value=false; }
+}
+async function mapWithConcurrency<T,R>(items:T[],limit:number,task:(item:T)=>Promise<R>):Promise<R[]>{
+  const results:R[]=new Array(items.length);let next=0;
+  await Promise.all(Array.from({length:Math.min(limit,items.length)},async()=>{while(next<items.length){const index=next++;results[index]=await task(items[index]);}}));
+  return results;
+}
 async function discardAiConfig(){await loadSystemAdmin();ElMessage.success('已恢复为当前生效配置');}
 async function saveAiConfig(){if(!aiConfig.value.platform_name.trim()){ElMessage.warning('平台名称不能为空');return;}if(aiConfig.value.data_source_scope==='admin-selected'&&!aiConfig.value.selected_file_ids.length){ElMessage.warning('请至少选择一个 AI 知识来源');return;}await postData('/ai/admin/config',aiConfig.value);await Promise.all([loadSystemAdmin(),loadPublicConfig()]);ElMessage.success('平台配置已保存并开始生效');}
-async function rebuildAiIndex(){aiIndexBusy.value=true;try{const files=(await getData<KnowledgeFile[]>('/knowledge/list')).filter(file=>file.auditStatus==='APPROVED');const documents:{file_id:number;title:string;text:string}[]=[];for(const file of files){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);if(detail.content?.trim())documents.push({file_id:file.id,title:detail.title,text:detail.content});}const result=await postData<{documents:number;chunks:number}>('/ai/admin/index/rebuild',{documents});await loadSystemAdmin();ElMessage.success(`已重建 ${result.documents} 个文档、${result.chunks} 个知识切片`);}catch(error){notifyError(error);}finally{aiIndexBusy.value=false;}}
+// Rebuilds page through the approved library and index it in batches; the first batch clears the old index.
+const AI_REBUILD_BATCH = 50;
+async function rebuildAiIndex(){
+  aiIndexBusy.value=true;aiIndexProgress.value='';
+  try{
+    let cursor:number|string|null=null;let first=true;let scanned=0;let documentsTotal=0;let chunksTotal=0;
+    do{
+      const params=new URLSearchParams({limit:String(AI_REBUILD_BATCH)});
+      if(cursor!==null)params.set('cursor',String(cursor));
+      const page:AdminPage<KnowledgeFile>=await getData<AdminPage<KnowledgeFile>>(`/knowledge/page?${params.toString()}`);
+      const details=await mapWithConcurrency(page.items,4,file=>getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`));
+      const documents=details.filter(detail=>detail.content?.trim()).map(detail=>({file_id:detail.id,title:detail.title,text:detail.content as string}));
+      const result=await postData<{documents:number;chunks:number}>('/ai/admin/index/rebuild',{documents,reset:first});
+      first=false;scanned+=page.items.length;documentsTotal+=result.documents;chunksTotal+=result.chunks;
+      aiIndexProgress.value=String(scanned);
+      cursor=page.hasMore?page.nextCursor:null;
+    }while(cursor!==null);
+    await loadSystemAdmin();
+    ElMessage.success(`已重建 ${documentsTotal} 个文档、${chunksTotal} 个知识切片`);
+  }catch(error){notifyError(error);}finally{aiIndexBusy.value=false;aiIndexProgress.value='';}
+}
 
 function handleGlobalKeydown(event:KeyboardEvent){if(event.key==='Escape')mobileMenuOpen.value=false;}
 function handleBeforeUnload(event:BeforeUnloadEvent){if(!aiConfigDirty.value)return;event.preventDefault();event.returnValue='';}

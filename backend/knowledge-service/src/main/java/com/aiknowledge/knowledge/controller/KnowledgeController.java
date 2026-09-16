@@ -1078,4 +1078,71 @@ public class KnowledgeController {
         return ApiResponse.ok(result);
     }
 
+
+    private static final int ADMIN_REPORT_PAGE_MAX = 100;
+
+    /** One page of the report queue; replaces downloading every report for the moderation tab. */
+    @GetMapping("/admin/reports/page")
+    public ApiResponse<Map<String, Object>> adminReportsPage(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "cursor", required = false) Long cursor,
+            @RequestParam(name = "limit", defaultValue = "20") int limit
+    ) {
+        ApiResponse<Map<String, Object>> denied = LocalAuth.requireAdmin(authorization);
+        if (denied != null) return denied;
+        if (cursor != null && cursor < 0) return ApiResponse.fail("cursor must not be negative");
+        int size = Math.min(Math.max(limit, 1), ADMIN_REPORT_PAGE_MAX);
+        List<Map<String, Object>> found = knowledgeStore.pageAdminReports(new KnowledgeStore.AdminReportQuery(keyword, status, cursor, size + 1));
+        boolean hasMore = found.size() > size;
+        List<Map<String, Object>> page = hasMore ? found.subList(0, size) : found;
+        Long total = null;
+        if (cursor == null) {
+            total = hasMore ? knowledgeStore.countAdminReports(new KnowledgeStore.AdminReportQuery(keyword, status, null, size)) : page.size();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", page);
+        result.put("nextCursor", page.isEmpty() ? null : page.get(page.size() - 1).get("id"));
+        result.put("hasMore", hasMore);
+        result.put("total", total);
+        return ApiResponse.ok(result);
+    }
+
+
+    private static final int FILE_LOOKUP_MAX = 200;
+
+    /**
+     * Titles for a set of file ids, so the AI source picker can label the files an admin already chose without
+     * downloading the whole library. Ids that no longer exist are left out.
+     */
+    @GetMapping("/admin/files/by-ids")
+    public ApiResponse<List<Map<String, Object>>> adminFilesByIds(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "ids", defaultValue = "") String ids
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        java.util.LinkedHashSet<Long> wanted = new java.util.LinkedHashSet<>();
+        for (String part : ids.split(",")) {
+            String value = part.trim();
+            if (value.isEmpty()) continue;
+            try {
+                long id = Long.parseLong(value);
+                if (id <= 0) return ApiResponse.fail("invalid file id");
+                wanted.add(id);
+            } catch (NumberFormatException error) {
+                return ApiResponse.fail("invalid file id");
+            }
+        }
+        if (wanted.size() > FILE_LOOKUP_MAX) return ApiResponse.fail("too many file ids");
+        return ApiResponse.ok(knowledgeStore.findFiles(wanted).stream().map(file -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("id", file.getId());
+            view.put("title", file.getTitle());
+            view.put("auditStatus", file.getAuditStatus());
+            view.put("fileType", file.getFileType());
+            return view;
+        }).toList());
+    }
+
 }

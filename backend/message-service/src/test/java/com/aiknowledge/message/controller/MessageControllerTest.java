@@ -490,4 +490,70 @@ class MessageControllerTest {
                 .map(item -> ((Number) item.get("id")).longValue()).toList();
     }
 
+
+    @Test
+    void governanceSessionPageOrdersByActivityAndSearchesMessages() throws InterruptedException {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String marker = "治理私信" + System.nanoTime();
+        List<Long> sessions = new java.util.ArrayList<>();
+        for (long target = 801L; target <= 803L; target++) {
+            Long sessionId = ((Number) controller.createSession(userAuth, Map.of("userId", 1L, "targetUserId", target))
+                    .data().get("id")).longValue();
+            controller.send(userAuth, Map.of("sessionId", sessionId, "senderId", 1L, "content", marker + " 开场 " + target));
+            sessions.add(sessionId);
+            Thread.sleep(5);
+        }
+        // New activity in the first conversation brings it back to the top.
+        controller.send(userAuth, Map.of("sessionId", sessions.get(0), "senderId", 1L, "content", marker + " 追问"));
+
+        Map<String, Object> first = controller.adminSessionsPage(adminAuth, marker, null, 2).data();
+        assertEquals(List.of(sessions.get(0), sessions.get(2)), ids(first));
+        assertEquals(true, first.get("hasMore"));
+        assertEquals(3L, analyticsNumber(first.get("total")));
+        assertEquals(2L, analyticsNumber(items(first).get(0).get("messageCount")));
+        Map<String, Object> second = controller.adminSessionsPage(adminAuth, marker, (String) first.get("nextCursor"), 2).data();
+        assertEquals(List.of(sessions.get(1)), ids(second));
+        assertEquals(null, second.get("total"));
+
+        // Text from any message in the conversation finds it, not just the latest one.
+        assertEquals(List.of(sessions.get(1)), ids(controller.adminSessionsPage(adminAuth, marker + " 开场 802", null, 20).data()));
+        assertEquals(500, controller.adminSessionsPage(adminAuth, marker, "garbage", 20).code());
+        assertEquals(500, controller.adminSessionsPage(userAuth, marker, null, 20).code());
+    }
+
+    @Test
+    void governanceMessagePageReadsBackwardsInChronologicalPages() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        Long sessionId = ((Number) controller.createSession(userAuth, Map.of("userId", 1L, "targetUserId", 810L))
+                .data().get("id")).longValue();
+        List<Long> sent = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            sent.add(((Number) controller.send(userAuth, Map.of("sessionId", sessionId, "senderId", 1L, "content", "第 " + i + " 条"))
+                    .data().get("id")).longValue());
+        }
+
+        Map<String, Object> latest = controller.adminMessagesPage(adminAuth, sessionId, null, 2).data();
+        assertEquals(List.of(sent.get(3), sent.get(4)), ids(latest));
+        assertEquals(true, latest.get("hasMore"));
+        assertEquals(sent.get(3), ((Number) latest.get("nextCursor")).longValue());
+        Map<String, Object> earlier = controller.adminMessagesPage(adminAuth, sessionId, sent.get(3), 2).data();
+        assertEquals(List.of(sent.get(1), sent.get(2)), ids(earlier));
+        Map<String, Object> oldest = controller.adminMessagesPage(adminAuth, sessionId, sent.get(1), 2).data();
+        assertEquals(List.of(sent.get(0)), ids(oldest));
+        assertEquals(false, oldest.get("hasMore"));
+        assertEquals(null, oldest.get("nextCursor"));
+
+        assertEquals(500, controller.adminMessagesPage(adminAuth, 987654L, null, 2).code());
+        assertEquals(500, controller.adminMessagesPage(userAuth, sessionId, null, 2).code());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> items(Map<String, Object> page) {
+        return (List<Map<String, Object>>) page.get("items");
+    }
+
+    private static List<Long> ids(Map<String, Object> page) {
+        return items(page).stream().map(item -> ((Number) item.get("id")).longValue()).toList();
+    }
+
 }

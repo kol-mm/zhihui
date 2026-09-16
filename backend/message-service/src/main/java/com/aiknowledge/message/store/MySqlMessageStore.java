@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.LinkedHashMap;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.aiknowledge.common.TimeCursor;
 
 @Repository
 @Profile("mysql")
@@ -415,6 +416,44 @@ public class MySqlMessageStore implements MessageStore {
                     .or().like(FeedbackTicketEntity::getType, keyword)
                     .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
                     .or().apply("CAST(user_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
+        }
+        return wrapper;
+    }
+
+
+    @Override
+    public List<ChatSessionEntity> pageAdminSessions(AdminSessionQuery query) {
+        if (query.limit() <= 0) return List.of();
+        LambdaQueryWrapper<ChatSessionEntity> wrapper = adminSessionFilter(query);
+        TimeCursor before = query.before();
+        if (before != null) {
+            wrapper.and(after -> after.lt(ChatSessionEntity::getUpdatedAt, before.time())
+                    .or(tie -> tie.eq(ChatSessionEntity::getUpdatedAt, before.time()).lt(ChatSessionEntity::getId, before.id())));
+        }
+        return sessionMapper.selectList(wrapper
+                .orderByDesc(ChatSessionEntity::getUpdatedAt, ChatSessionEntity::getId)
+                .last("LIMIT " + query.limit()));
+    }
+
+    @Override
+    public long countAdminSessions(AdminSessionQuery query) {
+        Long count = sessionMapper.selectCount(adminSessionFilter(query));
+        return count == null ? 0L : count;
+    }
+
+    private LambdaQueryWrapper<ChatSessionEntity> adminSessionFilter(AdminSessionQuery query) {
+        LambdaQueryWrapper<ChatSessionEntity> wrapper = Wrappers.lambdaQuery();
+        String keyword = query.keyword() == null ? "" : query.keyword().trim();
+        if (!keyword.isEmpty()) {
+            // Moderators look for conversations by participant or by what was said anywhere in them. The hint makes
+            // MySQL scan the messages once and keep the matching conversation ids; left alone it probed every
+            // conversation's messages in turn, which took about three times as long on 600k messages.
+            wrapper.and(match -> match.like(ChatSessionEntity::getStatus, keyword)
+                    .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_a_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("CAST(user_b_id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword)
+                    .or().apply("id IN (SELECT /*+ SUBQUERY(MATERIALIZATION) */ session_id FROM chat_message "
+                            + "WHERE content LIKE CONCAT('%', {0}, '%'))", keyword));
         }
         return wrapper;
     }

@@ -92,6 +92,97 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(len(history.data["sessions"]), 1)
         self.assertEqual(len(history.data["messages"]), 2)
 
+    def test_index_rebuild_can_arrive_in_batches(self) -> None:
+        admin = self.issue_token("admin", 2, "ADMIN")
+        stale = self.main.parse_document(self.main.TextRequest(text="旧的索引内容", file_id=90), authorization=admin)
+        self.assertGreaterEqual(stale.data["count"], 1)
+
+        first = self.main.rebuild_index(self.main.RebuildIndexRequest(
+            documents=[self.main.TextRequest(text="第一批文档内容", file_id=91, title="第一批")]), authorization=admin)
+        second = self.main.rebuild_index(self.main.RebuildIndexRequest(
+            documents=[self.main.TextRequest(text="第二批文档内容", file_id=92, title="第二批")], reset=False), authorization=admin)
+        self.assertEqual(first.data["documents"], 1)
+        self.assertEqual(second.data["documents"], 1)
+
+        with self.main.connect() as conn:
+            files = sorted(row["file_id"] for row in conn.execute("SELECT DISTINCT file_id FROM knowledge_chunk").fetchall())
+        # The first batch replaced the stale index; the second one added to it.
+        self.assertEqual(files, [91, 92])
+
+    def test_chunk_purge_runs_once_per_database(self) -> None:
+        with mock.patch.object(self.main, "purge_sensitive_chunks", wraps=self.main.purge_sensitive_chunks) as purge:
+            for _ in range(3):
+                self.main.chat_history(user_id=1, authorization=self.user_auth)
+                self.main.health()
+            self.assertEqual(purge.call_count, 0)
+
+            # A different database file is set up, and purged, on first use.
+            os.environ["AI_DB_PATH"] = os.path.join(self.tmpdir.name, "second.db")
+            self.main.health()
+            self.main.health()
+            self.assertEqual(purge.call_count, 1)
+
+            # A file that disappears is set up again rather than assumed to exist.
+            os.remove(os.environ["AI_DB_PATH"])
+            self.main.health()
+            self.assertEqual(purge.call_count, 2)
+
+    def test_history_can_list_sessions_without_messages(self) -> None:
+        self.main.chat(self.main.ChatRequest(question="只看会话列表"), authorization=self.user_auth)
+        full = self.main.chat_history(user_id=1, authorization=self.user_auth)
+        self.assertEqual(len(full.data["messages"]), 2)
+        listing = self.main.chat_history(user_id=1, include_messages=False, authorization=self.user_auth)
+        self.assertEqual(len(listing.data["sessions"]), 1)
+        self.assertEqual(listing.data["messages"], [])
+
+    def test_admin_pages_sessions_and_chunks_newest_first(self) -> None:
+        admin = self.issue_token("admin", 2, "ADMIN")
+        with self.main.connect() as conn:
+            for index in range(1, 6):
+                conn.execute(
+                    "INSERT INTO ai_chat_session (user_id, title, created_at) VALUES (?, ?, ?)",
+                    (index % 2 + 1, f"会话 {index}", self.main.now_iso()),
+                )
+            for index in range(1, 4):
+                conn.execute(
+                    "INSERT INTO knowledge_chunk (file_id, title, content, created_at) VALUES (?, ?, ?, ?)",
+                    (40 + index, f"切片 {index}", f"内容 {index} RAG", self.main.now_iso()),
+                )
+
+        def ids(page: dict) -> list[int]:
+            return [item["id"] for item in page["items"]]
+
+        first = self.main.admin_sessions_page(limit=2, authorization=admin).data
+        self.assertEqual(ids(first), [5, 4])
+        self.assertTrue(first["hasMore"])
+        self.assertEqual(first["total"], 5)
+        second = self.main.admin_sessions_page(cursor=first["nextCursor"], limit=2, authorization=admin).data
+        self.assertEqual(ids(second), [3, 2])
+        self.assertIsNone(second["total"])
+        last = self.main.admin_sessions_page(cursor=second["nextCursor"], limit=2, authorization=admin).data
+        self.assertEqual(ids(last), [1])
+        self.assertFalse(last["hasMore"])
+        self.assertNotIn("messages", first)
+
+        self.assertEqual(ids(self.main.admin_sessions_page(keyword="会话 3", authorization=admin).data), [3])
+        # "2" matches session 2 and every session of user 2 (the odd ones).
+        by_user = self.main.admin_sessions_page(keyword="2", authorization=admin).data
+        self.assertEqual(ids(by_user), [5, 3, 2, 1])
+        self.assertEqual(by_user["total"], 4)
+
+        chunks = self.main.admin_chunks_page(authorization=admin).data
+        self.assertEqual(ids(chunks), [3, 2, 1])
+        self.assertEqual(chunks["total"], 3)
+        self.assertEqual(ids(self.main.admin_chunks_page(keyword="42", authorization=admin).data), [2])
+        self.assertEqual(self.main.admin_chunks_page(keyword="rag", authorization=admin).data["total"], 3)
+
+        with self.assertRaises(self.main.HTTPException) as denied:
+            self.main.admin_sessions_page(authorization=self.user_auth)
+        self.assertEqual(denied.exception.status_code, 403)
+        with self.assertRaises(self.main.HTTPException) as invalid:
+            self.main.admin_chunks_page(cursor=-1, authorization=admin)
+        self.assertEqual(invalid.exception.status_code, 400)
+
     def test_user_can_rename_and_delete_own_chat_session(self) -> None:
         created = self.main.chat(
             self.main.ChatRequest(question="session lifecycle"), authorization=self.user_auth
