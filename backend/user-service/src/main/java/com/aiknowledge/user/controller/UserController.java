@@ -7,6 +7,11 @@ import com.aiknowledge.user.entity.UserEntity;
 import com.aiknowledge.user.store.UserStore;
 import com.aiknowledge.user.storage.UserAvatarStorageService;
 import com.aiknowledge.user.security.CaptchaService;
+import com.aiknowledge.user.security.LoginAttemptGuard;
+import com.aiknowledge.user.security.NicknamePolicy;
+import com.aiknowledge.user.security.PasswordRules;
+import com.aiknowledge.user.security.SessionCookies;
+import com.aiknowledge.user.security.TokenRevocations;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
@@ -37,15 +42,36 @@ public class UserController {
     private final UserAvatarStorageService avatarStorage;
     private final CaptchaService captchaService;
     private final PlatformConfigClient platformConfig;
+    private final LoginAttemptGuard loginAttemptGuard;
+    private final TokenRevocations tokenRevocations;
+    private volatile String timingPaddingHash;
+
+    /** Names new accounts may not take, compared case-insensitively. Existing accounts are unaffected. */
+    private static final java.util.Set<String> RESERVED_USERNAMES = java.util.Set.of(
+            "admin", "administrator", "root", "system", "sysadmin", "superuser", "moderator", "support",
+            "official", "service", "security", "null", "undefined");
 
     @Autowired
     public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage,
-                          CaptchaService captchaService, PlatformConfigClient platformConfig) {
+                          CaptchaService captchaService, PlatformConfigClient platformConfig, LoginAttemptGuard loginAttemptGuard,
+                          TokenRevocations tokenRevocations) {
         this.userStore = userStore;
         this.passwordEncoder = passwordEncoder;
         this.avatarStorage = avatarStorage;
         this.captchaService = captchaService;
         this.platformConfig = platformConfig;
+        this.loginAttemptGuard = loginAttemptGuard;
+        this.tokenRevocations = tokenRevocations;
+    }
+
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage,
+                          CaptchaService captchaService, PlatformConfigClient platformConfig, LoginAttemptGuard loginAttemptGuard) {
+        this(userStore, passwordEncoder, avatarStorage, captchaService, platformConfig, loginAttemptGuard, TokenRevocations.inMemory());
+    }
+
+    public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage,
+                          CaptchaService captchaService, PlatformConfigClient platformConfig) {
+        this(userStore, passwordEncoder, avatarStorage, captchaService, platformConfig, new LoginAttemptGuard());
     }
 
     public UserController(UserStore userStore, PasswordEncoder passwordEncoder, UserAvatarStorageService avatarStorage) {
@@ -115,8 +141,9 @@ public class UserController {
 
     @PostMapping("/register")
     public ApiResponse<Map<String, Object>> registerRequest(@RequestBody Map<String, String> request,
-                                                             HttpServletRequest servletRequest) {
-        return register(request, captchaClientKey(servletRequest));
+                                                             HttpServletRequest servletRequest,
+                                                             HttpServletResponse servletResponse) {
+        return startSession(register(request, captchaClientKey(servletRequest)), servletRequest, servletResponse);
     }
 
     public ApiResponse<Map<String, Object>> register(Map<String, String> request) {
@@ -131,25 +158,22 @@ public class UserController {
         if (!username.matches("[A-Za-z0-9_-]{3,32}")) {
             return ApiResponse.fail("username must contain 3-32 letters, numbers, underscores or hyphens");
         }
-        if ("admin".equalsIgnoreCase(username)) {
+        if (RESERVED_USERNAMES.contains(username.toLowerCase(java.util.Locale.ROOT))) {
             return ApiResponse.fail("this username is reserved");
         }
         String password = request.getOrDefault("password", "");
-        if (password.length() < 8 || password.length() > 128) {
-            return ApiResponse.fail("password must contain between 8 and 128 characters");
-        }
-        if (!password.matches(".*[A-Za-z].*") || !password.matches(".*[0-9].*")) {
-            return ApiResponse.fail("password must contain letters and numbers");
-        }
-        if (password.chars().anyMatch(Character::isWhitespace)) {
-            return ApiResponse.fail("password must not contain whitespace");
-        }
-        if (password.equalsIgnoreCase(username)) {
-            return ApiResponse.fail("password must differ from username");
+        String passwordProblem = PasswordRules.problem(password, username);
+        if (passwordProblem != null) {
+            return ApiResponse.fail(passwordProblem);
         }
         String nickname = request.getOrDefault("nickname", username).trim();
         if (nickname.length() > 64) {
             return ApiResponse.fail("nickname must not exceed 64 characters");
+        }
+        // A blank nickname shows the username instead, so that is what gets checked then.
+        if (NicknamePolicy.impersonatesStaff(nickname.isBlank() ? username : nickname, platformName())) {
+            return ApiResponse.fail(nickname.isBlank() || nickname.equals(username)
+                    ? "this username is reserved" : "this nickname is reserved for platform staff");
         }
         if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         if (userStore.findByUsername(username).isPresent()) {
@@ -171,8 +195,9 @@ public class UserController {
 
     @PostMapping("/login")
     public ApiResponse<Map<String, Object>> loginRequest(@RequestBody Map<String, String> request,
-                                                          HttpServletRequest servletRequest) {
-        return login(request, captchaClientKey(servletRequest));
+                                                          HttpServletRequest servletRequest,
+                                                          HttpServletResponse servletResponse) {
+        return startSession(login(request, captchaClientKey(servletRequest)), servletRequest, servletResponse);
     }
 
     public ApiResponse<Map<String, Object>> login(Map<String, String> request) {
@@ -183,12 +208,27 @@ public class UserController {
         if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         String password = request.getOrDefault("password", "");
+        if (username.isEmpty() || password.isEmpty()) return ApiResponse.fail("username and password are required");
         if (username.length() > 32 || password.length() > 128) return ApiResponse.fail("invalid username or password");
+        long lockedSeconds = loginAttemptGuard.lockedForSeconds(username);
+        if (lockedSeconds > 0) {
+            return ApiResponse.fail("登录失败次数过多，请 " + Math.max(1, (lockedSeconds + 59) / 60) + " 分钟后再试");
+        }
         UserEntity user = userStore.findByUsername(username).orElse(null);
-        if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
+        boolean matches;
+        if (user == null) {
+            // Unknown names still pay for one hash check, so response time does not reveal which accounts exist.
+            passwordEncoder.matches(password, timingPaddingHash());
+            matches = false;
+        } else {
+            matches = passwordEncoder.matches(password, user.getPasswordHash());
+        }
+        if (!matches) {
+            loginAttemptGuard.recordFailure(username);
             return ApiResponse.fail("invalid username or password");
         }
         if (!"ACTIVE".equals(user.getStatus())) return ApiResponse.fail("user account is disabled");
+        loginAttemptGuard.recordSuccess(username);
         return ApiResponse.ok(authResult(user));
     }
 
@@ -227,11 +267,57 @@ public class UserController {
         return ApiResponse.ok(LocalAuth.session(authorization));
     }
 
+    /** Ends this browser session: the token is revoked at the gateway and the cookie is dropped. */
+    @PostMapping("/logout")
+    public ApiResponse<Map<String, Object>> logout(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse
+    ) {
+        LocalAuth.TokenInfo token = LocalAuth.tokenInfo(authorization);
+        if (token != null) tokenRevocations.revokeToken(token.tokenId(), token.expiresAt());
+        SessionCookies.clear(servletRequest, servletResponse);
+        return ApiResponse.ok(Map.of("loggedOut", true));
+    }
+
+    /**
+     * Moves a session that an earlier version of the site kept in localStorage into the httpOnly cookie, so
+     * members signed in before the switch stay signed in. The page deletes its copy afterwards.
+     */
+    @PostMapping("/session/adopt")
+    public ApiResponse<Map<String, Object>> adoptSession(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse
+    ) {
+        LocalAuth.TokenInfo token = LocalAuth.tokenInfo(authorization);
+        if (token == null || tokenRevocations.isRevoked(token)) {
+            return ApiResponse.fail("valid user authorization is required");
+        }
+        SessionCookies.write(servletRequest, servletResponse, authorization.trim().substring(7).trim(),
+                java.time.Duration.ofSeconds(token.expiresAt() - Instant.now().getEpochSecond()));
+        return ApiResponse.ok(LocalAuth.session(authorization));
+    }
+
+    /**
+     * Looks a user up by username. Signed-in callers only: other members get the public card (and only for active
+     * accounts), while the account itself and admins also see status, role and publishing settings.
+     */
     @GetMapping("/info")
-    public ApiResponse<Map<String, Object>> info(@RequestParam(name = "username", defaultValue = "demo") String username) {
-        return userStore.findByUsername(username)
-                .map(user -> ApiResponse.ok(toView(user)))
-                .orElseGet(() -> ApiResponse.fail("user not found"));
+    public ApiResponse<Map<String, Object>> info(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "username", defaultValue = "") String username
+    ) {
+        if (!LocalAuth.isAuthenticated(authorization)) return ApiResponse.fail("valid user authorization is required");
+        UserEntity user = userStore.findByUsername(username.trim()).orElse(null);
+        if (user == null) return ApiResponse.fail("user not found");
+        boolean fullView = LocalAuth.isAdmin(authorization) || user.getId().equals(LocalAuth.userId(authorization));
+        if (fullView) return ApiResponse.ok(toView(user));
+        if (!"ACTIVE".equals(user.getStatus())) return ApiResponse.fail("user not found");
+        Map<String, Object> card = toPublicSummary(user);
+        card.remove("status");
+        card.put("signature", user.getSignature());
+        return ApiResponse.ok(card);
     }
 
     @GetMapping("/directory")
@@ -293,16 +379,30 @@ public class UserController {
         if (nickname.length() > 64 || signature.length() > 500 || avatarUrl.length() > 2000) {
             return ApiResponse.fail("profile fields exceed the allowed length");
         }
+        UserEntity current = userStore.findById(userId).orElse(null);
+        if (current == null) return ApiResponse.fail("user not found");
+        // Only a changed nickname is checked, so members whose name predates the rule can still edit the rest.
+        if (!LocalAuth.isAdmin(authorization) && !nickname.equals(current.getNickname())
+                && NicknamePolicy.impersonatesStaff(nickname, platformName())) {
+            return ApiResponse.fail("this nickname is reserved for platform staff");
+        }
         return userStore.updateProfile(userId, nickname, avatarUrl, signature)
                 .map(user -> ApiResponse.ok(toView(user)))
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
+    /** Changing the password signs out every other session; this one continues on a fresh cookie. */
     @PostMapping("/password")
-    public ApiResponse<Map<String, Object>> changePassword(
+    public ApiResponse<Map<String, Object>> changePasswordRequest(
             @RequestHeader(name = "Authorization", required = false) String authorization,
-            @RequestBody Map<String, String> request
+            @RequestBody Map<String, String> request,
+            HttpServletRequest servletRequest,
+            HttpServletResponse servletResponse
     ) {
+        return startSession(changePassword(authorization, request), servletRequest, servletResponse);
+    }
+
+    public ApiResponse<Map<String, Object>> changePassword(String authorization, Map<String, String> request) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         String current = request.getOrDefault("currentPassword", "");
@@ -311,11 +411,20 @@ public class UserController {
         if (user == null || !passwordEncoder.matches(current, user.getPasswordHash())) {
             return ApiResponse.fail("current password is incorrect");
         }
-        if (next.length() < 8 || next.length() > 128) {
-            return ApiResponse.fail("new password must contain between 8 and 128 characters");
+        String passwordProblem = PasswordRules.problem(next, user.getUsername());
+        if (passwordProblem != null) {
+            return ApiResponse.fail(passwordProblem);
+        }
+        if (next.equals(current)) {
+            return ApiResponse.fail("new password must differ from the current password");
         }
         userStore.updatePassword(userId, passwordEncoder.encode(next));
-        return ApiResponse.ok(Map.of("updated", true));
+        tokenRevocations.revokeUser(userId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("updated", true);
+        // Issued after the revocation, so it stays valid (tokens issued earlier than that second are revoked).
+        result.put("token", LocalAuth.issueToken(user.getUsername(), user.getId(), role(user)));
+        return ApiResponse.ok(result);
     }
 
     @PostMapping("/follow")
@@ -495,10 +604,14 @@ public class UserController {
         Long userId = number(request.get("userId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "ACTIVE"));
         return userStore.updateStatus(userId, status)
-                .map(user -> ApiResponse.ok(Map.of(
-                        "user", toView(user),
-                        "updated", true
-                )))
+                .map(user -> {
+                    // A suspended member is signed out everywhere at once, not when the token runs out.
+                    if (!"ACTIVE".equals(user.getStatus())) tokenRevocations.revokeUser(userId);
+                    return ApiResponse.ok(Map.<String, Object>of(
+                            "user", toView(user),
+                            "updated", true
+                    ));
+                })
                 .orElseGet(() -> ApiResponse.fail("user not found"));
     }
 
@@ -523,14 +636,21 @@ public class UserController {
         String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl()));
         String signature = String.valueOf(request.getOrDefault("signature", user.getSignature() == null ? "" : user.getSignature())).trim();
         if (nickname.length() > 64 || signature.length() > 500 || avatarUrl.length() > 2000) return ApiResponse.fail("profile fields exceed the allowed length");
+        String resetPassword = String.valueOf(request.getOrDefault("resetPassword", ""));
+        // Checked before anything is written, so a rejected password does not leave half the changes applied.
+        if (!resetPassword.isBlank()) {
+            String passwordProblem = PasswordRules.problem(resetPassword, user.getUsername());
+            if (passwordProblem != null) return ApiResponse.fail(passwordProblem);
+        }
+        boolean signOut = !"ACTIVE".equals(status) || !role.equals(role(user)) || !resetPassword.isBlank();
         userStore.updateProfile(userId, nickname, avatarUrl, signature);
         userStore.updateStatus(userId, status);
         userStore.updateGovernance(userId, role, publishPolicy, messagingEnabled);
-        String resetPassword = String.valueOf(request.getOrDefault("resetPassword", ""));
         if (!resetPassword.isBlank()) {
-            if (resetPassword.length() < 8 || resetPassword.length() > 128) return ApiResponse.fail("reset password must contain between 8 and 128 characters");
             userStore.updatePassword(userId, passwordEncoder.encode(resetPassword));
         }
+        // Tokens carry the role, and a suspension or new password should apply right away: end open sessions.
+        if (signOut) tokenRevocations.revokeUser(userId);
         return ApiResponse.ok(toView(userStore.findById(userId).orElseThrow()));
     }
 
@@ -566,6 +686,30 @@ public class UserController {
         view.put("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl());
         view.put("status", user.getStatus());
         return view;
+    }
+
+    /** Moves the token of a successful sign-in into the session cookie; the page never receives it. */
+    private static ApiResponse<Map<String, Object>> startSession(ApiResponse<Map<String, Object>> result,
+                                                                 HttpServletRequest servletRequest,
+                                                                 HttpServletResponse servletResponse) {
+        if (result.code() != 0 || result.data() == null) return result;
+        Map<String, Object> body = new LinkedHashMap<>(result.data());
+        Object token = body.remove("token");
+        if (token != null) SessionCookies.write(servletRequest, servletResponse, token.toString());
+        return ApiResponse.ok(body);
+    }
+
+    private String platformName() {
+        return platformConfig == null ? "" : platformConfig.text("platform_name", "");
+    }
+
+    private String timingPaddingHash() {
+        String hash = timingPaddingHash;
+        if (hash == null) {
+            hash = passwordEncoder.encode(java.util.UUID.randomUUID().toString());
+            timingPaddingHash = hash;
+        }
+        return hash;
     }
 
     private boolean verifyCaptcha(Map<String, String> request, String clientKey) {

@@ -41,6 +41,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import com.aiknowledge.common.DailySeries;
+import com.aiknowledge.common.ExpiringValue;
+import java.time.Duration;
+import java.util.Collections;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -57,6 +60,12 @@ public class KnowledgeController {
     private final DocumentTextExtractor textExtractor;
     private final PlatformConfigClient platformConfig;
     private final KnowledgeMediaStorageService mediaStorage;
+    /**
+     * The all-time ranking on the analytics page. It sorts the whole file table and groups every like, a few
+     * hundred milliseconds on a large library, and is the same for every period the page asks for, so it is
+     * kept for a minute. Deleting, reviewing or editing a file drops it at once, so a removed file never lingers.
+     */
+    private final ExpiringValue<List<Map<String, Object>>> analyticsRanking = new ExpiringValue<>(Duration.ofSeconds(60));
 
     @Autowired
     public KnowledgeController(
@@ -495,6 +504,7 @@ public class KnowledgeController {
         }
         List<String> mediaUrls = imageUrls(fileId);
         boolean removed = knowledgeStore.deleteFile(fileId);
+        analyticsRanking.invalidate();
         if (!removed) return ApiResponse.fail("knowledge file not found");
         boolean indexRemoved = fullTextSearch.remove(fileId);
         boolean storageRemoved = false;
@@ -756,7 +766,9 @@ public class KnowledgeController {
         if (!validTransition) {
             return ApiResponse.fail("当前状态不支持此审核操作");
         }
-        return knowledgeStore.auditFile(fileId, auditStatus, reason)
+        var audited = knowledgeStore.auditFile(fileId, auditStatus, reason);
+        analyticsRanking.invalidate();
+        return audited
                 .map(file -> ApiResponse.ok(Map.of(
                         "file", toView(file),
                         "reason", reason,
@@ -784,7 +796,9 @@ public class KnowledgeController {
         if (categoryId != null && knowledgeStore.listCategories().stream().noneMatch(item -> categoryId.equals(item.getId()))) {
             return ApiResponse.fail("knowledge category not found");
         }
-        return knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus)
+        var updated = knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus);
+        analyticsRanking.invalidate();
+        return updated
                 .map(file -> {
                     fullTextSearch.find(fileId).ifPresent(document ->
                             fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl(),
@@ -1013,17 +1027,7 @@ public class KnowledgeController {
         Map<String, Long> perDay = new LinkedHashMap<>();
         knowledgeStore.dailyFileCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
                 .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
-        List<KnowledgeFileEntity> top = knowledgeStore.topFiles(ANALYTICS_TOP_LIMIT);
-        Map<Long, Integer> topLikes = knowledgeStore.likeCounts(top.stream().map(KnowledgeFileEntity::getId).toList());
-        List<Map<String, Object>> ranking = top.stream().map(file -> {
-            Map<String, Object> view = new LinkedHashMap<>();
-            view.put("id", file.getId());
-            view.put("title", file.getTitle());
-            view.put("views", file.getViews() == null ? 0 : file.getViews());
-            view.put("downloads", file.getDownloads() == null ? 0 : file.getDownloads());
-            view.put("likes", topLikes.getOrDefault(file.getId(), 0));
-            return view;
-        }).toList();
+        List<Map<String, Object>> ranking = analyticsRanking.get(this::loadAnalyticsRanking);
         Map<String, Object> analytics = new LinkedHashMap<>();
         analytics.put("days", window);
         analytics.put("trendDays", trendDays);
@@ -1034,6 +1038,20 @@ public class KnowledgeController {
         analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
         analytics.put("top", ranking);
         return ApiResponse.ok(analytics);
+    }
+
+    private List<Map<String, Object>> loadAnalyticsRanking() {
+        List<KnowledgeFileEntity> top = knowledgeStore.topFiles(ANALYTICS_TOP_LIMIT);
+        Map<Long, Integer> topLikes = knowledgeStore.likeCounts(top.stream().map(KnowledgeFileEntity::getId).toList());
+        return top.stream().map(file -> {
+            Map<String, Object> view = new LinkedHashMap<>();
+            view.put("id", file.getId());
+            view.put("title", file.getTitle());
+            view.put("views", file.getViews() == null ? 0 : file.getViews());
+            view.put("downloads", file.getDownloads() == null ? 0 : file.getDownloads());
+            view.put("likes", topLikes.getOrDefault(file.getId(), 0));
+            return Collections.unmodifiableMap(view);
+        }).toList();
     }
 
 

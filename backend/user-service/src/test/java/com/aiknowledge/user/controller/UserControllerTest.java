@@ -5,7 +5,13 @@ import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.user.store.InMemoryUserStore;
 import com.aiknowledge.user.store.UserStore;
+import com.aiknowledge.user.security.CaptchaService;
+import com.aiknowledge.user.security.LoginAttemptGuard;
+import com.aiknowledge.user.security.TokenRevocations;
+import com.aiknowledge.user.storage.UserAvatarStorageService;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -16,6 +22,7 @@ import java.util.HashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -116,9 +123,9 @@ class UserControllerTest {
     @Test
     void authenticatedUserCanChangePassword() {
         String auth = "Bearer " + LocalAuth.issueToken("demo");
-        var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass"));
+        var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass1"));
         assertEquals(0, changed.code());
-        assertEquals(0, controller.login(credentials("demo", "new-demo-pass")).code());
+        assertEquals(0, controller.login(credentials("demo", "new-demo-pass1")).code());
     }
 
     @Test
@@ -402,4 +409,255 @@ class UserControllerTest {
         return ((List<UserStore.UserReport>) page.get("items")).stream().map(UserStore.UserReport::id).toList();
     }
 
+
+    @Test
+    void repeatedFailedLoginsLockTheAccountForAWhile() {
+        for (int i = 0; i < 5; i++) {
+            assertEquals("用户名或密码错误", controller.login(credentials("demo", "wrong-pass" + i)).message());
+        }
+        ApiResponse<Map<String, Object>> locked = controller.login(credentials("demo", "demo"));
+        assertEquals(500, locked.code());
+        assertTrue(locked.message().contains("登录失败次数过多"), locked.message());
+
+        // Other accounts keep working.
+        assertEquals(0, controller.login(credentials("admin", "admin123")).code());
+
+        // Unknown names lock the same way, so a lock says nothing about whether an account exists.
+        String ghost = "ghost-" + System.nanoTime();
+        for (int i = 0; i < 5; i++) {
+            assertEquals("用户名或密码错误", controller.login(credentials(ghost, "wrong-pass" + i)).message());
+        }
+        assertTrue(controller.login(credentials(ghost, "wrong-pass")).message().contains("登录失败次数过多"));
+    }
+
+    @Test
+    void loginAsksForMissingCredentials() {
+        assertEquals("请输入用户名和密码", controller.login(credentials("", "")).message());
+        assertEquals("请输入用户名和密码", controller.login(credentials("demo", "")).message());
+    }
+
+    @Test
+    void profileLookupNeedsSignInAndHidesGovernanceFieldsFromOthers() {
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String demoAuth = "Bearer " + LocalAuth.issueToken("demo");
+        String username = "lookup-" + System.nanoTime();
+        Map<String, Object> registered = controller.register(credentials(username, "secret123")).data();
+        String memberAuth = "Bearer " + registered.get("token");
+        Long memberId = ((Number) ((Map<?, ?>) registered.get("user")).get("id")).longValue();
+
+        assertEquals(500, controller.info(null, "demo").code());
+        assertEquals(500, controller.info(memberAuth, "").code());
+
+        Map<String, Object> card = controller.info(memberAuth, "demo").data();
+        assertEquals("demo", card.get("username"));
+        assertTrue(card.containsKey("nickname"));
+        assertFalse(card.containsKey("role"));
+        assertFalse(card.containsKey("status"));
+        assertFalse(card.containsKey("publishPolicy"));
+
+        assertTrue(controller.info(demoAuth, "demo").data().containsKey("role"));
+        assertTrue(controller.info(adminAuth, "demo").data().containsKey("publishPolicy"));
+
+        controller.updateUserStatus(adminAuth, Map.of("userId", memberId, "status", "DISABLED"));
+        assertEquals(500, controller.info(demoAuth, username).code());
+        assertEquals("DISABLED", controller.info(adminAuth, username).data().get("status"));
+    }
+
+    @Test
+    void passwordChangeFollowsTheRegistrationRules() {
+        String username = "pwchange-" + System.nanoTime();
+        String auth = "Bearer " + controller.register(credentials(username, "secret123")).data().get("token");
+
+        assertEquals("密码须同时包含字母和数字", controller.changePassword(auth, Map.of(
+                "currentPassword", "secret123", "newPassword", "onlyletters")).message());
+        assertEquals("密码须同时包含字母和数字", controller.changePassword(auth, Map.of(
+                "currentPassword", "secret123", "newPassword", "12345678")).message());
+        assertEquals("密码不能包含空格", controller.changePassword(auth, Map.of(
+                "currentPassword", "secret123", "newPassword", "has space 1")).message());
+        assertEquals("新密码不能与当前密码相同", controller.changePassword(auth, Map.of(
+                "currentPassword", "secret123", "newPassword", "secret123")).message());
+        assertEquals("当前密码不正确", controller.changePassword(auth, Map.of(
+                "currentPassword", "wrong-pass1", "newPassword", "better456")).message());
+
+        assertEquals(0, controller.changePassword(auth, Map.of("currentPassword", "secret123", "newPassword", "better456")).code());
+        assertEquals(0, controller.login(credentials(username, "better456")).code());
+    }
+
+    @Test
+    void registrationRejectsReservedNamesInAnyCase() {
+        for (String reserved : new String[]{"Admin", "ADMINISTRATOR", "root", "System", "support"}) {
+            assertEquals("该用户名为系统保留名称", controller.register(credentials(reserved, "secret123")).message(), reserved);
+        }
+    }
+
+
+    @Test
+    void signInPutsTheTokenInAnHttpOnlyCookieOnly() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Forwarded-Proto", "https,http");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        ApiResponse<Map<String, Object>> result = controller.loginRequest(credentials("admin", "admin123"), request, response);
+
+        assertEquals(0, result.code());
+        assertFalse(result.data().containsKey("token"));
+        assertEquals("ADMIN", result.data().get("role"));
+        String cookie = response.getHeader("Set-Cookie");
+        assertTrue(cookie.startsWith("zh_session="), cookie);
+        assertTrue(cookie.contains("HttpOnly") && cookie.contains("Secure") && cookie.contains("SameSite=Lax"), cookie);
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+        String token = cookie.substring("zh_session=".length(), cookie.indexOf(';'));
+        assertTrue(LocalAuth.isAdmin("Bearer " + token));
+
+        // Plain HTTP gets no Secure flag, and a failed sign-in sets nothing.
+        MockHttpServletResponse local = new MockHttpServletResponse();
+        controller.loginRequest(credentials("admin", "admin123"), new MockHttpServletRequest(), local);
+        assertFalse(local.getHeader("Set-Cookie").contains("Secure"));
+        MockHttpServletResponse failed = new MockHttpServletResponse();
+        assertEquals(500, controller.loginRequest(credentials("demo", "wrong-pass1"), new MockHttpServletRequest(), failed).code());
+        assertNull(failed.getHeader("Set-Cookie"));
+
+        MockHttpServletResponse registered = new MockHttpServletResponse();
+        var registration = controller.registerRequest(credentials("cookie-" + System.nanoTime(), "secret123"),
+                new MockHttpServletRequest(), registered);
+        assertFalse(registration.data().containsKey("token"));
+        assertTrue(registered.getHeader("Set-Cookie").startsWith("zh_session="));
+    }
+
+    @Test
+    void logoutEndsThatSessionOnly() {
+        RecordingRevocations revocations = new RecordingRevocations();
+        UserController sessions = controllerWith(revocations);
+        String current = "Bearer " + LocalAuth.issueToken("demo", 1L, "USER");
+        String otherDevice = "Bearer " + LocalAuth.issueToken("demo", 1L, "USER");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        assertEquals(0, sessions.logout(current, new MockHttpServletRequest(), response).code());
+        assertEquals(List.of(LocalAuth.tokenInfo(current).tokenId()), revocations.tokens);
+        assertTrue(revocations.users.isEmpty());
+        assertTrue(response.getHeader("Set-Cookie").contains("Max-Age=0"));
+        // Signing out without a valid session still clears the cookie.
+        MockHttpServletResponse anonymous = new MockHttpServletResponse();
+        assertEquals(0, sessions.logout(null, new MockHttpServletRequest(), anonymous).code());
+        assertTrue(anonymous.getHeader("Set-Cookie").contains("Max-Age=0"));
+
+        // An older page's stored token moves into the cookie, unless it was revoked.
+        assertEquals(500, sessions.adoptSession(current, new MockHttpServletRequest(), new MockHttpServletResponse()).code());
+        assertEquals(500, sessions.adoptSession("Bearer forged", new MockHttpServletRequest(), new MockHttpServletResponse()).code());
+        MockHttpServletResponse adopted = new MockHttpServletResponse();
+        var adoption = sessions.adoptSession(otherDevice, new MockHttpServletRequest(), adopted);
+        assertEquals(0, adoption.code());
+        assertEquals("demo", adoption.data().get("username"));
+        assertTrue(adopted.getHeader("Set-Cookie").startsWith("zh_session=" + otherDevice.substring(7) + ";"));
+        long cookieSeconds = Long.parseLong(adopted.getHeader("Set-Cookie").replaceAll(".*Max-Age=(\\d+).*", "$1"));
+        long tokenSeconds = LocalAuth.tokenInfo(otherDevice).expiresAt() - java.time.Instant.now().getEpochSecond();
+        assertTrue(Math.abs(cookieSeconds - tokenSeconds) <= 2, cookieSeconds + " vs " + tokenSeconds);
+    }
+
+    @Test
+    void passwordChangeSignsOutEverywhereAndRenewsThisSession() {
+        RecordingRevocations revocations = new RecordingRevocations();
+        UserController sessions = controllerWith(revocations);
+        String username = "rotate-" + System.nanoTime();
+        Map<String, Object> registered = sessions.register(credentials(sessions, username, "secret123")).data();
+        long userId = ((Number) ((Map<?, ?>) registered.get("user")).get("id")).longValue();
+        String auth = "Bearer " + registered.get("token");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        var changed = sessions.changePasswordRequest(auth, Map.of("currentPassword", "secret123", "newPassword", "better456"),
+                new MockHttpServletRequest(), response);
+        assertEquals(0, changed.code());
+        assertEquals(Map.of("updated", true), changed.data());
+        assertEquals(List.of(userId), revocations.users);
+        String cookie = response.getHeader("Set-Cookie");
+        String renewed = cookie.substring("zh_session=".length(), cookie.indexOf(';'));
+        assertEquals(userId, LocalAuth.userId("Bearer " + renewed));
+
+        // A rejected change revokes nothing.
+        sessions.changePassword(auth, Map.of("currentPassword", "wrong-pass1", "newPassword", "better789"));
+        assertEquals(1, revocations.users.size());
+    }
+
+    @Test
+    void suspensionsAndRoleChangesEndOpenSessions() {
+        RecordingRevocations revocations = new RecordingRevocations();
+        UserController sessions = controllerWith(revocations);
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String username = "governed-" + System.nanoTime();
+        long userId = ((Number) ((Map<?, ?>) sessions.register(credentials(sessions, username, "secret123"))
+                .data().get("user")).get("id")).longValue();
+
+        sessions.updateUserGovernance(adminAuth, Map.of("userId", userId, "publishPolicy", "PRE_REVIEW"));
+        assertTrue(revocations.users.isEmpty());
+
+        sessions.updateUserStatus(adminAuth, Map.of("userId", userId, "status", "DISABLED"));
+        assertEquals(List.of(userId), revocations.users);
+        sessions.updateUserStatus(adminAuth, Map.of("userId", userId, "status", "ACTIVE"));
+        assertEquals(1, revocations.users.size());
+
+        sessions.updateUserGovernance(adminAuth, Map.of("userId", userId, "role", "ADMIN"));
+        assertEquals(2, revocations.users.size());
+
+        // A weak reset password is refused before anything is written.
+        assertEquals("密码须同时包含字母和数字", sessions.updateUserGovernance(adminAuth, Map.of(
+                "userId", userId, "role", "USER", "publishPolicy", "BLOCKED", "resetPassword", "onlyletters")).message());
+        assertEquals(2, revocations.users.size());
+        var user = sessions.info(adminAuth, username).data();
+        assertEquals("ADMIN", user.get("role"));
+        assertEquals("PRE_REVIEW", user.get("publishPolicy"));
+
+        assertEquals(0, sessions.updateUserGovernance(adminAuth, Map.of("userId", userId, "resetPassword", "handed-over1")).code());
+        assertEquals(3, revocations.users.size());
+        assertEquals(0, sessions.login(credentials(sessions, username, "handed-over1")).code());
+    }
+
+    @Test
+    void membersCannotPassThemselvesOffAsStaff() {
+        Map<String, String> request = credentials("impostor-" + System.nanoTime(), "secret123");
+        request.put("nickname", "官方 客服");
+        assertEquals("昵称不能冒充平台管理员、官方或客服，请更换", controller.register(request).message());
+        // With no nickname the username is shown, so the username is what gets checked.
+        assertEquals("该用户名为系统保留名称", controller.register(credentials("admin_zhang", "secret123")).message());
+
+        String username = "renamer-" + System.nanoTime();
+        Map<String, Object> registered = controller.register(credentials(username, "secret123")).data();
+        String auth = "Bearer " + registered.get("token");
+        assertEquals("昵称不能冒充平台管理员、官方或客服，请更换", controller.updateProfile(auth,
+                Map.of("nickname", "社区管理员", "signature", "")).message());
+        assertEquals(0, controller.updateProfile(auth, Map.of("nickname", "普通成员", "signature", "你好")).code());
+
+        // Admins are staff; and a name that predates the rule does not block editing the rest of the profile.
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String adminName = String.valueOf(controller.info(adminAuth, "admin").data().get("nickname"));
+        assertEquals(0, controller.updateProfile(adminAuth, Map.of("nickname", "平台管理员", "signature", "")).code());
+        controller.updateProfile(adminAuth, Map.of("nickname", adminName, "signature", ""));
+        long userId = ((Number) ((Map<?, ?>) registered.get("user")).get("id")).longValue();
+        controller.updateUserGovernance(adminAuth, Map.of("userId", userId, "nickname", "官方助手"));
+        assertEquals(0, controller.updateProfile(auth, Map.of("nickname", "官方助手", "signature", "只改签名")).code());
+    }
+
+    private static final class RecordingRevocations implements TokenRevocations {
+        private final List<String> tokens = new java.util.ArrayList<>();
+        private final List<Long> users = new java.util.ArrayList<>();
+
+        @Override public void revokeToken(String tokenId, long expiresAtEpochSecond) { tokens.add(tokenId); }
+        @Override public void revokeUser(long userId) { users.add(userId); }
+        @Override public boolean isRevoked(LocalAuth.TokenInfo token) { return token != null && tokens.contains(token.tokenId()); }
+    }
+
+    private UserController controllerWith(TokenRevocations revocations) {
+        return new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder,
+                new UserAvatarStorageService("local", "target/test-user-avatars", "http://127.0.0.1:9000", "test", "test", "test"),
+                new CaptchaService(), null, new LoginAttemptGuard(), revocations);
+    }
+
+    private Map<String, String> credentials(UserController target, String username, String password) {
+        var challenge = target.captcha();
+        String[] values = String.valueOf(challenge.data().get("question")).replace("= ?", "").split("\\+");
+        Map<String, String> request = new HashMap<>();
+        request.put("username", username);
+        request.put("password", password);
+        request.put("captchaId", String.valueOf(challenge.data().get("captchaId")));
+        request.put("captchaAnswer", String.valueOf(Integer.parseInt(values[0].trim()) + Integer.parseInt(values[1].trim())));
+        return request;
+    }
 }

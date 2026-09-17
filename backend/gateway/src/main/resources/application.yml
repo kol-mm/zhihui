@@ -6,6 +6,12 @@ server:
 spring:
   application:
     name: gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
   cloud:
     nacos:
       discovery:
@@ -53,3 +59,8 @@ spring:
           uri: ${AI_SERVICE_URL:http://127.0.0.1:8200}
           predicates:
             - Path=/ai/**
+
+auth:
+  revocation:
+    # redis: end sessions that user-service revoked (logout, password change, suspension) before they expire.
+    store: ${AUTH_REVOCATION_STORE:memory}

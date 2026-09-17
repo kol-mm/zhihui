@@ -639,6 +639,22 @@ class KnowledgeControllerTest {
             previous = score;
         }
 
+        // The ranking is kept for a minute: more views do not show up yet, the period's totals do.
+        Map<String, Object> ranked = top.stream().filter(item -> title.equals(item.get("title"))).findFirst().orElseThrow();
+        controller.view(userAuth, Map.of("fileId", fileId));
+        Map<String, Object> cached = controller.adminAnalytics(adminAuth, 7).data();
+        assertEquals(baseViews + 2, number(controller.adminAnalytics(adminAuth, 30).data().get("views")));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cachedTop = (List<Map<String, Object>>) cached.get("top");
+        assertEquals(number(ranked.get("views")), number(cachedTop.stream()
+                .filter(item -> title.equals(item.get("title"))).findFirst().orElseThrow().get("views")));
+
+        // Taking a file down drops it from the ranking at once.
+        controller.updateFileMetadata(adminAuth, Map.of("fileId", fileId, "auditStatus", "HIDDEN"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> afterHide = (List<Map<String, Object>>) controller.adminAnalytics(adminAuth, 30).data().get("top");
+        assertTrue(afterHide.stream().noneMatch(item -> fileId.equals(((Number) item.get("id")).longValue())));
+
         assertEquals(500, controller.adminAnalytics(userAuth, 30).code());
     }
 

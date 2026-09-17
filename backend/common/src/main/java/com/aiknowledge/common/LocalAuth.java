@@ -103,6 +103,19 @@ public final class LocalAuth {
         );
     }
 
+    /** What session revocation needs from a valid token; null when the token is missing or not valid. */
+    public static TokenInfo tokenInfo(String authorization) {
+        Claims claims = claims(authorization);
+        return claims == null ? null : new TokenInfo(claims.userId(), claims.tokenId(), claims.issuedAt(), claims.expiresAt());
+    }
+
+    public static long tokenLifetimeSeconds() {
+        return expirySeconds();
+    }
+
+    public record TokenInfo(long userId, String tokenId, long issuedAt, long expiresAt) {
+    }
+
     private static Claims claims(String authorization) {
         String token = bearerToken(authorization);
         String[] parts = token.split("\\.");
@@ -126,7 +139,7 @@ public final class LocalAuth {
                     || expiresAt - issuedAt > expirySeconds() + 60) {
                 return null;
             }
-            return new Claims(username, userId, role, issuedAt, expiresAt);
+            return new Claims(username, userId, role, issuedAt, expiresAt, String.valueOf(payload.getOrDefault("jti", "")));
         } catch (Exception ignored) {
             return null;
         }
@@ -182,6 +195,6 @@ public final class LocalAuth {
         return value instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(value));
     }
 
-    private record Claims(String username, long userId, String role, long issuedAt, long expiresAt) {
+    private record Claims(String username, long userId, String role, long issuedAt, long expiresAt, String tokenId) {
     }
 }

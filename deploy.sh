@@ -33,7 +33,7 @@ validate_environment() {
   }
 
   local key value port bind_address
-  for key in MYSQL_ROOT_PASSWORD MYSQL_PASSWORD AI_KNOWLEDGE_JWT_SECRET INTERNAL_NOTIFICATION_TOKEN; do
+  for key in MYSQL_ROOT_PASSWORD MYSQL_PASSWORD AI_KNOWLEDGE_JWT_SECRET INTERNAL_NOTIFICATION_TOKEN REDIS_PASSWORD; do
     value="$(read_env "$key")"
     if [[ -z "$value" || "$value" == replace-with-* ]]; then
       echo "$ENV_FILE 中的 $key 尚未正确配置。" >&2

@@ -19,6 +19,13 @@ x-java-common: &java-common
   PLATFORM_AI_CONFIG_URL: http://ai:8200/ai/config/public
   JAVA_TOOL_OPTIONS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC"
 
+# 会话吊销记录（退出登录、改密、停用账号）：用户服务写入，网关在每个请求上核对。
+x-session-redis: &session-redis
+  AUTH_REVOCATION_STORE: redis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
 x-java-build: &java-build
   context: .
   dockerfile: deploy/docker/backend.Dockerfile
@@ -48,6 +55,24 @@ services:
       retries: 12
     restart: unless-stopped
     mem_limit: 768m
+    networks: [app]
+
+  redis:
+    image: redis:7.2-alpine
+    # 吊销记录都带过期时间；内存写满时宁可拒绝写入并记录日志，也不能悄悄淘汰记录让已退出的会话复活。
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --maxmemory 48mb --maxmemory-policy noeviction"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    mem_limit: 96m
     networks: [app]
 
   ai:
@@ -80,11 +105,12 @@ services:
         <<: *java-build-args
         SERVICE: user-service
     environment:
-      <<: *java-common
+      <<: [*java-common, *session-redis]
       MYSQL_URL: jdbc:mysql://mysql:3306/user_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     volumes: ["app_data:/data"]
     depends_on:
       mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -m 4 http://127.0.0.1:8101/user/health/ready >/dev/null || exit 1"]
       interval: 10s
@@ -168,13 +194,14 @@ services:
         <<: *java-build-args
         SERVICE: gateway
     environment:
-      <<: *java-common
+      <<: [*java-common, *session-redis]
       USER_SERVICE_URL: http://user-service:8101
       KNOWLEDGE_SERVICE_URL: http://knowledge-service:8102
       COMMUNITY_SERVICE_URL: http://community-service:8103
       MESSAGE_SERVICE_URL: http://message-service:8104
       AI_SERVICE_URL: http://ai:8200
     depends_on:
+      redis: { condition: service_healthy }
       user-service: { condition: service_healthy }
       knowledge-service: { condition: service_healthy }
       community-service: { condition: service_healthy }
@@ -203,6 +230,7 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:
   app_data:
 
 networks:

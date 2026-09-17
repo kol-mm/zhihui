@@ -33,6 +33,16 @@ public record ApiResponse<T>(int code, String message, T data) {
             case "nickname must not exceed 64 characters" -> "昵称不能超过 64 个字符";
             case "new password must contain between 8 and 128 characters" -> "新密码长度须为 8-128 个字符";
             case "current password is incorrect" -> "当前密码不正确";
+            case "new password must differ from the current password" -> "新密码不能与当前密码相同";
+            case "username and password are required" -> "请输入用户名和密码";
+            case "this nickname is reserved for platform staff" -> "昵称不能冒充平台管理员、官方或客服，请更换";
+            case "reset code is invalid or expired" -> "重置码无效或已过期，请联系管理员重新签发";
+            case "username is required" -> "请输入用户名";
+            case "contact must not exceed 100 characters" -> "联系方式不能超过 100 个字符";
+            case "reset code and new password are required" -> "请输入重置码和新密码";
+            case "reset request not found" -> "重置申请不存在";
+            case "reset request is already closed" -> "该重置申请已处理完毕";
+            case "cannot reset the password of a disabled account" -> "该账号已停用，无法重置密码";
             case "profile fields exceed the allowed length" -> "个人资料内容超过允许长度";
             case "user ids must be positive numbers" -> "用户编号必须为正整数";
             case "cannot follow yourself" -> "不能关注自己";

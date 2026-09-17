@@ -1,6 +1,6 @@
 # Docker Linux 一键部署
 
-本文档适用于 `docker-linux` 分支。该方案面向单台 4 GB Linux 服务器，使用 Docker Compose 运行 MySQL、AI 服务、五个 Java 服务以及 Vue + Nginx 前端，不启动 Nacos、MinIO、Redis、RabbitMQ、Elasticsearch 或 Milvus。
+本文档适用于 `docker-linux` 分支。该方案面向单台 4 GB Linux 服务器，使用 Docker Compose 运行 MySQL、Redis（仅保存会话吊销记录）、AI 服务、五个 Java 服务以及 Vue + Nginx 前端，不启动 Nacos、MinIO、RabbitMQ、Elasticsearch 或 Milvus。
 
 完成 Docker 安装和 `.env` 配置后，项目通过以下命令一键构建、启动和验收：
 
@@ -28,6 +28,7 @@ gateway：统一 API 网关
    └─ ai
 
 mysql：仅 Docker 内部网络访问
+redis：仅 Docker 内部网络访问，user-service 写入、gateway 读取会话吊销记录
 ```
 
 Compose 默认只发布前端端口。MySQL、网关、AI 和业务服务不会映射到宿主机端口。
@@ -202,6 +203,7 @@ MYSQL_ROOT_PASSWORD="$(openssl rand -hex 24)"
 MYSQL_PASSWORD="$(openssl rand -hex 24)"
 JWT_SECRET="$(openssl rand -hex 48)"
 INTERNAL_TOKEN="$(openssl rand -hex 32)"
+REDIS_PASSWORD="$(openssl rand -hex 32)"
 
 cat > .env <<EOF
 HTTP_BIND_ADDRESS=127.0.0.1
@@ -218,10 +220,11 @@ AI_KNOWLEDGE_JWT_SECRET=${JWT_SECRET}
 AI_API_KEY=
 AI_API_TIMEOUT=30
 INTERNAL_NOTIFICATION_TOKEN=${INTERNAL_TOKEN}
+REDIS_PASSWORD=${REDIS_PASSWORD}
 EOF
 
 chmod 600 .env
-unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET INTERNAL_TOKEN
+unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET INTERNAL_TOKEN REDIS_PASSWORD
 ```
 
 配置说明：
@@ -238,6 +241,7 @@ unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET INTERNAL_TOKEN
 | `AI_KNOWLEDGE_JWT_SECRET` | Java 与 AI 服务共享的 JWT 签名密钥 |
 | `AI_API_KEY` | 使用外部 OpenAI 兼容接口时填写；本地 AI 模式可留空 |
 | `INTERNAL_NOTIFICATION_TOKEN` | 社区服务调用消息服务时使用的内部令牌 |
+| `REDIS_PASSWORD` | Redis 访问密码；Redis 保存退出登录、改密、停用账号后的会话吊销记录（升级旧部署时需补上此项） |
 
 检查文件权限和配置，但不要把密码输出到终端：
 

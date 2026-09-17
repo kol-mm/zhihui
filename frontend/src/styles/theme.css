@@ -480,6 +480,19 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .status-list i.offline { box-shadow: 0 0 0 3px rgba(217, 83, 79, .15); animation: none; }
 .status-list span, .task-list button { border-bottom-color: var(--zh-divider); }
 .analytics-ranking article>b { background: var(--zh-primary-50); }
+/* Forgotten password: entry under the login form, step switch and guidance in the dialog. */
+.forgot-entry.el-button { width: 100%; margin: 2px 0 0 !important; color: var(--zh-ink-500); }
+.forgot-steps { width: 100%; margin-bottom: 12px; }
+.forgot-intro { margin: 0 0 16px; color: var(--zh-ink-500); font-size: 13px; line-height: 1.6; }
+/* Admin password reset queue and the dialog that shows a code once. */
+.reset-request-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.reset-status-filter { width: 128px; }
+.reset-request-note { display: block; color: var(--zh-ink-400); font-size: 12px; line-height: 1.4; }
+.reset-code-value { margin: 16px 0 8px; padding: 14px 10px; color: var(--zh-ink-900); font: 600 26px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .12em; text-align: center; background: var(--zh-surface-soft); border: 1px dashed var(--zh-border-strong); border-radius: var(--zh-radius-md); user-select: all; overflow-wrap: anywhere; }
+.reset-code-meta { margin: 0 0 14px; color: var(--zh-ink-500); font-size: 12px; text-align: center; }
+@media (max-width: 640px) { .reset-code-value { font-size: 21px; letter-spacing: .08em; } .reset-status-filter { width: 112px; } }
+/* Registration hint reads as guidance, not an error, until something is typed. */
+.registration-field-hint.is-neutral { color: var(--zh-ink-400); }
 /* Inline counter row: feedback structure on the analytics page and the governance dialog. */
 .governance-user-summary { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 .governance-user-summary span { display: inline-flex; align-items: baseline; gap: 6px; }

@@ -1,8 +1,12 @@
 import axios from 'axios';
 
+// The session lives in an httpOnly cookie that scripts cannot read. The gateway only honours it for writes that
+// carry X-Requested-With, which other sites' forms cannot send.
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : '/api'),
-  timeout: 8000
+  timeout: 8000,
+  withCredentials: true,
+  headers: { 'X-Requested-With': 'XMLHttpRequest' }
 });
 
 export function resolveApiUrl(path: string): string {
@@ -11,13 +15,20 @@ export function resolveApiUrl(path: string): string {
   return `${String(api.defaults.baseURL || '').replace(/\/$/, '')}${path}`;
 }
 
-const AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
+/** Where earlier versions kept the session token; only read to move a signed-in visitor onto the cookie. */
+const LEGACY_AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
 const CAPTCHA_CLIENT_KEY = 'ai-knowledge-captcha-client';
 const GENERIC_ERROR_MESSAGE = '操作失败，请稍后重试';
 const volatileStorage = new Map<string, string>();
 const removedStorageKeys = new Set<string>();
 
 class UserFacingError extends Error {}
+/** The gateway ended the session; the page already tells the visitor once, so callers need not repeat it. */
+class SessionExpiredError extends UserFacingError {}
+
+export function isSessionExpiredError(error: unknown): boolean {
+  return error instanceof SessionExpiredError;
+}
 
 export function getStoredValue(key: string, fallback = ''): string {
   if (removedStorageKeys.has(key)) return fallback;
@@ -60,23 +71,38 @@ function getCaptchaClientKey() {
   return generated;
 }
 
-export function setAuthToken(token: string) {
-  setStoredValue(AUTH_TOKEN_KEY, token);
+export function getLegacyAuthToken() {
+  return getStoredValue(LEGACY_AUTH_TOKEN_KEY);
 }
 
-export function getAuthToken() {
-  return getStoredValue(AUTH_TOKEN_KEY);
+export function clearLegacyAuthToken() {
+  removeStoredValue(LEGACY_AUTH_TOKEN_KEY);
+}
+
+let sessionExpiredHandler: (() => void) | undefined;
+
+/** Called when the gateway reports that the session was ended elsewhere (logout, password change, suspension). */
+export function onSessionExpired(handler: () => void) {
+  sessionExpiredHandler = handler;
 }
 
 api.interceptors.request.use((config) => {
-  const token = getAuthToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // Until restoreSession moves it into the cookie, a stored token still signs requests.
+  const legacyToken = getLegacyAuthToken();
+  if (legacyToken) {
+    config.headers.Authorization = `Bearer ${legacyToken}`;
   }
-  if (/\/user\/(captcha|login|register)(?:$|[?#])/i.test(String(config.url || ''))) {
+  if (/\/user\/(captcha|login|register|password-reset\/(?:request|complete))(?:$|[?#])/i.test(String(config.url || ''))) {
     config.headers['X-Captcha-Client'] = getCaptchaClientKey();
   }
   return config;
+});
+
+api.interceptors.response.use(undefined, (error) => {
+  if (axios.isAxiosError(error) && error.response?.status === 401 && !/\/user\/logout(?:$|[?#])/.test(String(error.config?.url || ''))) {
+    sessionExpiredHandler?.();
+  }
+  return Promise.reject(error);
 });
 
 function normalizeApiResponse<T>(payload: unknown): T {
@@ -104,8 +130,8 @@ function toReadableError(error: unknown): Error {
           ? body
           : '';
 
+    if (status === 401) return new SessionExpiredError(backendMessage.trim() ? localizeBackendMessage(backendMessage) : '登录状态已失效，请重新登录');
     if (backendMessage.trim()) return new UserFacingError(localizeBackendMessage(backendMessage));
-    if (status === 401) return new UserFacingError('登录状态已失效，请重新登录');
     if (status === 403) return new UserFacingError('当前账号没有执行此操作的权限');
     if (status === 404) return new UserFacingError('请求的内容不存在或已被删除');
     if (!error.response) return new UserFacingError('暂时无法连接到服务，请稍后重试');

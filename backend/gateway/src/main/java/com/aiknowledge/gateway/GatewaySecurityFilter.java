@@ -62,6 +62,8 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         if (path.equals("/user/login")) return 10;
         if (path.equals("/user/register")) return 5;
         if (path.equals("/user/captcha")) return 20;
+        if (path.equals("/user/password-reset/request")) return 5;
+        if (path.equals("/user/password-reset/complete")) return 10;
         if (!"GET".equals(method) && !"OPTIONS".equals(method)) return 120;
         return 600;
     }
@@ -70,6 +72,8 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         if (path.equals("/user/login")) return "auth-login";
         if (path.equals("/user/register")) return "auth-register";
         if (path.equals("/user/captcha")) return "auth-captcha";
+        if (path.equals("/user/password-reset/request")) return "auth-reset-request";
+        if (path.equals("/user/password-reset/complete")) return "auth-reset-complete";
         return "general";
     }
 
@@ -87,7 +91,8 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         return "ip:" + (address == null ? "unknown" : address.getHostAddress());
     }
 
-    private boolean isTrustedProxy(InetAddress address) {
+    /** Loopback and private addresses: nginx and the Docker network, never a visitor reaching the gateway directly. */
+    static boolean isTrustedProxy(InetAddress address) {
         return address != null && (address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress());
     }
 

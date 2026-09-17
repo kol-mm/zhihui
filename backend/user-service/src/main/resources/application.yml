@@ -17,6 +17,17 @@ spring:
       discovery:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
         ip: ${SERVICE_REGISTER_IP:127.0.0.1}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+
+auth:
+  revocation:
+    # redis: the gateway sees logouts and signed-out accounts; memory: single-process local runs only.
+    store: ${AUTH_REVOCATION_STORE:memory}
 
 user:
   avatar:
