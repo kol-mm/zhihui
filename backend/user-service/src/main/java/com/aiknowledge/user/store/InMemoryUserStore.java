@@ -163,6 +163,30 @@ public class InMemoryUserStore implements UserStore {
     }
 
     @Override
+    public synchronized Optional<UserEntity> updateEmail(Long userId, String email) {
+        Optional<UserEntity> found = findById(userId);
+        found.ifPresent(user -> {
+            user.setEmail(email);
+            user.setEmailVerifiedAt(null);
+            user.setUpdatedAt(LocalDateTime.now());
+            persist();
+        });
+        return found;
+    }
+
+    @Override
+    public synchronized Optional<UserEntity> markEmailVerified(Long userId, String email) {
+        UserEntity user = findById(userId).orElse(null);
+        if (user == null || email == null || !email.equals(user.getEmail())) return Optional.empty();
+        boolean taken = users.values().stream().anyMatch(other -> !other.getId().equals(userId)
+                && email.equals(other.getEmail()) && other.getEmailVerifiedAt() != null);
+        if (taken) throw new EmailTakenException();
+        if (user.getEmailVerifiedAt() == null) user.setEmailVerifiedAt(LocalDateTime.now());
+        persist();
+        return Optional.of(user);
+    }
+
+    @Override
     public List<UserEntity> listUsers() {
         return List.copyOf(users.values());
     }

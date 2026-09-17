@@ -89,6 +89,32 @@ public class MySqlUserStore implements UserStore {
     }
 
     @Override
+    public Optional<UserEntity> updateEmail(Long userId, String email) {
+        // An explicit update: updateById would skip the nulls that remove an address or its verification.
+        int updated = userMapper.update(null, Wrappers.<UserEntity>lambdaUpdate()
+                .set(UserEntity::getEmail, email)
+                .set(UserEntity::getEmailVerifiedAt, null)
+                .set(UserEntity::getUpdatedAt, LocalDateTime.now())
+                .eq(UserEntity::getId, userId));
+        return updated == 0 ? Optional.empty() : findById(userId);
+    }
+
+    @Override
+    public Optional<UserEntity> markEmailVerified(Long userId, String email) {
+        if (email == null) return Optional.empty();
+        try {
+            int updated = userMapper.update(null, Wrappers.<UserEntity>lambdaUpdate()
+                    .setSql("email_verified_at = IFNULL(email_verified_at, NOW())")
+                    .eq(UserEntity::getId, userId)
+                    .eq(UserEntity::getEmail, email));
+            return updated == 0 ? Optional.empty() : findById(userId);
+        } catch (org.springframework.dao.DuplicateKeyException taken) {
+            // uk_user_verified_email: another account verified this address first.
+            throw new EmailTakenException();
+        }
+    }
+
+    @Override
     public List<UserEntity> listUsers() {
         return userMapper.selectList(Wrappers.emptyWrapper());
     }
@@ -275,6 +301,7 @@ public class MySqlUserStore implements UserStore {
             // The table searches by account id as well as by name, so the id is matched as text.
             wrapper.and(match -> match.like(UserEntity::getUsername, keyword)
                     .or().like(UserEntity::getNickname, keyword)
+                    .or().like(UserEntity::getEmail, keyword)
                     .or().apply("CAST(id AS CHAR) LIKE CONCAT('%', {0}, '%')", keyword));
         }
         return wrapper;

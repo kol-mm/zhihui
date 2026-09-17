@@ -2,6 +2,7 @@ import { createApp, defineAsyncComponent } from 'vue';
 import { ElAlert } from 'element-plus/es/components/alert/index.mjs';
 import { ElBadge } from 'element-plus/es/components/badge/index.mjs';
 import { ElButton } from 'element-plus/es/components/button/index.mjs';
+import { ElCheckbox } from 'element-plus/es/components/checkbox/index.mjs';
 import { ElCollapse, ElCollapseItem } from 'element-plus/es/components/collapse/index.mjs';
 import { ElDialog } from 'element-plus/es/components/dialog/index.mjs';
 import { ElDivider } from 'element-plus/es/components/divider/index.mjs';
@@ -22,6 +23,7 @@ import { ElUpload } from 'element-plus/es/components/upload/index.mjs';
 import 'element-plus/es/components/alert/style/css';
 import 'element-plus/es/components/badge/style/css';
 import 'element-plus/es/components/button/style/css';
+import 'element-plus/es/components/checkbox/style/css';
 import 'element-plus/es/components/collapse/style/css';
 import 'element-plus/es/components/collapse-item/style/css';
 import 'element-plus/es/components/dialog/style/css';
@@ -57,7 +59,7 @@ import App from './App.vue';
 
 const app = createApp(App);
 [
-  ElAlert, ElBadge, ElButton, ElCollapse, ElCollapseItem, ElDialog, ElDivider, ElDropdown,
+  ElAlert, ElBadge, ElButton, ElCheckbox, ElCollapse, ElCollapseItem, ElDialog, ElDivider, ElDropdown,
   ElDropdownItem, ElDropdownMenu, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElOption,
   ElRadio, ElRadioButton, ElRadioGroup, ElSegmented, ElSelect, ElSlider, ElSwitch,
   ElTabPane, ElTabs, ElTag, ElUpload

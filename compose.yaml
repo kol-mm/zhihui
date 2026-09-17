@@ -109,6 +109,13 @@ services:
     environment:
       <<: [*java-common, *session-redis]
       MYSQL_URL: jdbc:mysql://mysql:3306/user_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      # 邮箱验证码发信（选填）；留空时用户仍可绑定邮箱，但无法验证。
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-ssl}
     volumes: ["app_data:/data"]
     depends_on:
       mysql: { condition: service_healthy }

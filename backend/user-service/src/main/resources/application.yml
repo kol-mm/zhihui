@@ -29,6 +29,17 @@ auth:
     # redis: the gateway sees logouts and signed-out accounts; memory: single-process local runs only.
     store: ${AUTH_REVOCATION_STORE:memory}
 
+app:
+  # 邮箱验证码的发信服务器；不配置 SMTP_HOST 时用户仍可绑定邮箱，只是无法验证。
+  mail:
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:465}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    from: ${SMTP_FROM:}
+    # ssl（465 端口）、starttls（587 端口）或 none
+    security: ${SMTP_SECURITY:ssl}
+
 user:
   avatar:
     storage-mode: ${USER_AVATAR_STORAGE_MODE:${KNOWLEDGE_STORAGE_MODE:local}}

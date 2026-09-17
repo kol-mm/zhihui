@@ -437,6 +437,35 @@ class UserControllerTest {
     }
 
     @Test
+    void onlyTheMemberAndAdministratorsSeeTheBoundEmail() {
+        InMemoryUserStore store = new InMemoryUserStore(passwordEncoder);
+        UserController users = new UserController(store, passwordEncoder);
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        String username = "mail-" + System.nanoTime();
+        com.aiknowledge.user.entity.UserEntity member = new com.aiknowledge.user.entity.UserEntity();
+        member.setUsername(username);
+        member.setPasswordHash(passwordEncoder.encode("secret123"));
+        member.setNickname("邮箱成员");
+        member.setStatus("ACTIVE");
+        member.setRole("USER");
+        Long memberId = store.save(member).getId();
+        store.updateEmail(memberId, "member@example.com");
+
+        String memberAuth = "Bearer " + LocalAuth.issueToken(username, memberId, "USER");
+        String otherAuth = "Bearer " + LocalAuth.issueToken("demo");
+        assertEquals("member@example.com", users.info(memberAuth, username).data().get("email"));
+        assertEquals(false, users.info(memberAuth, username).data().get("emailVerified"));
+        assertFalse(users.info(otherAuth, username).data().containsKey("email"));
+        assertFalse(users.summaries(otherAuth, String.valueOf(memberId)).data().toString().contains("member@example.com"));
+
+        // Administrators can find the account by its address and remove it.
+        assertEquals(1, ((java.util.List<?>) users.adminUsersPage(adminAuth, "MEMBER@example", null, null, null, null, 20).data().get("items")).size());
+        Map<String, Object> updated = users.updateUserGovernance(adminAuth, Map.of("userId", memberId, "removeEmail", true)).data();
+        assertNull(updated.get("email"));
+        assertNull(store.findById(memberId).orElseThrow().getEmail());
+    }
+
+    @Test
     void profileLookupNeedsSignInAndHidesGovernanceFieldsFromOthers() {
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
         String demoAuth = "Bearer " + LocalAuth.issueToken("demo");

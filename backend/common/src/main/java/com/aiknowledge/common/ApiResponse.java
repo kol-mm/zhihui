@@ -38,6 +38,16 @@ public record ApiResponse<T>(int code, String message, T data) {
             case "this nickname is reserved for platform staff" -> "昵称不能冒充平台管理员、官方或客服，请更换";
             case "reset code is invalid or expired" -> "重置码无效或已过期，请联系管理员重新签发";
             case "username is required" -> "请输入用户名";
+            case "email is required" -> "请输入邮箱地址";
+            case "email address is invalid" -> "邮箱地址格式不正确";
+            case "bind an email address first" -> "请先绑定邮箱";
+            case "email is already verified" -> "邮箱已验证";
+            case "email verification is not available" -> "平台暂未开通邮件发送，邮箱暂时无法验证";
+            case "too many verification emails today" -> "今天获取验证码的次数已达上限，请明天再试";
+            case "verification email could not be sent" -> "验证邮件发送失败，请稍后重试";
+            case "enter the six-digit code" -> "请输入 6 位数字验证码";
+            case "verification code is invalid or expired" -> "验证码错误或已过期";
+            case "email is already verified by another account" -> "该邮箱已被其他账号验证，请更换邮箱";
             case "contact must not exceed 100 characters" -> "联系方式不能超过 100 个字符";
             case "reset code and new password are required" -> "请输入重置码和新密码";
             case "reset request not found" -> "重置申请不存在";

@@ -642,6 +642,7 @@ public class UserController {
             String passwordProblem = PasswordRules.problem(resetPassword, user.getUsername());
             if (passwordProblem != null) return ApiResponse.fail(passwordProblem);
         }
+        boolean removeEmail = Boolean.TRUE.equals(request.get("removeEmail"));
         boolean signOut = !"ACTIVE".equals(status) || !role.equals(role(user)) || !resetPassword.isBlank();
         userStore.updateProfile(userId, nickname, avatarUrl, signature);
         userStore.updateStatus(userId, status);
@@ -649,6 +650,7 @@ public class UserController {
         if (!resetPassword.isBlank()) {
             userStore.updatePassword(userId, passwordEncoder.encode(resetPassword));
         }
+        if (removeEmail && user.getEmail() != null) userStore.updateEmail(userId, null);
         // Tokens carry the role, and a suspension or new password should apply right away: end open sessions.
         if (signOut) tokenRevocations.revokeUser(userId);
         return ApiResponse.ok(toView(userStore.findById(userId).orElseThrow()));
@@ -675,6 +677,10 @@ public class UserController {
         view.put("role", role(user));
         view.put("publishPolicy", publishPolicy(user));
         view.put("messagingEnabled", messagingEnabled(user));
+        // Only the member and administrators see this view; public cards never carry the address.
+        view.put("email", user.getEmail());
+        view.put("emailVerified", user.getEmailVerifiedAt() != null);
+        view.put("emailVerifiedAt", user.getEmailVerifiedAt());
         return view;
     }
 

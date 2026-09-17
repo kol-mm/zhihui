@@ -19,6 +19,22 @@ public interface UserStore {
 
     Optional<UserEntity> updatePassword(Long userId, String passwordHash);
 
+    /** Binds (or with null removes) the account's email; any earlier verification no longer applies. */
+    Optional<UserEntity> updateEmail(Long userId, String email);
+
+    /** Thrown when the address is already verified by another account. */
+    class EmailTakenException extends RuntimeException {
+        public EmailTakenException() { super("email is already verified by another account"); }
+    }
+
+    /**
+     * Marks the account's email verified, provided it is still {@code email}. Empty when the account or its
+     * address changed in the meantime.
+     *
+     * @throws EmailTakenException when another account has already verified the address
+     */
+    Optional<UserEntity> markEmailVerified(Long userId, String email);
+
     List<UserEntity> listUsers();
 
     Optional<UserEntity> updateStatus(Long userId, String status);
@@ -108,7 +124,8 @@ public interface UserStore {
                 .filter(user -> keyword.isEmpty()
                         || String.valueOf(user.getId()).contains(keyword)
                         || (user.getUsername() != null && user.getUsername().toLowerCase().contains(keyword))
-                        || (user.getNickname() != null && user.getNickname().toLowerCase().contains(keyword)));
+                        || (user.getNickname() != null && user.getNickname().toLowerCase().contains(keyword))
+                        || (user.getEmail() != null && user.getEmail().toLowerCase().contains(keyword)));
     }
 
 

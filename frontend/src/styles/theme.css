@@ -738,3 +738,12 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 }
 
 .knowledge-load-more { display: flex; justify-content: center; padding: 14px 0 4px; }
+
+/* Bound email addresses in the admin console. */
+.muted-text { color: var(--zh-ink-400); }
+.admin-email-cell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.admin-email-cell > span { overflow-wrap: anywhere; }
+.governance-email { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.governance-email .is-removed { color: var(--zh-ink-400); text-decoration: line-through; }
+.reset-contact { display: grid; gap: 2px; }
+.reset-contact small { color: var(--zh-ink-400); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }

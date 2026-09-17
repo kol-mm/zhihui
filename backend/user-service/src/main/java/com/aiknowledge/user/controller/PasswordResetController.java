@@ -232,6 +232,9 @@ public class PasswordResetController {
         view.put("nickname", user == null ? request.username() : user.getNickname());
         view.put("accountStatus", user == null ? "DELETED" : user.getStatus());
         view.put("contact", request.contact() == null ? "" : request.contact());
+        // The address bound to the account helps staff confirm the request came from its owner.
+        view.put("email", user == null ? null : user.getEmail());
+        view.put("emailVerified", user != null && user.getEmailVerifiedAt() != null);
         view.put("status", request.status());
         view.put("codeExpiresAt", request.codeExpiresAt());
         view.put("codeExpired", PasswordResetStore.ISSUED.equals(request.status()) && codeExpired(request));

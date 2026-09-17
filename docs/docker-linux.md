@@ -253,6 +253,19 @@ grep -E '^(HTTP_BIND_ADDRESS|HTTP_PORT|MYSQL_USER|AI_API_TIMEOUT)=' .env
 
 `.env` 权限应为 `600`。
 
+用户可以在“个人中心”绑定邮箱，验证是可选的。要让用户收到验证码，在 `.env` 中配置发信服务器（不配置时仍可绑定，只是页面会提示暂时无法验证）：
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_SECURITY=ssl               # ssl（465）| starttls（587）| none
+SMTP_USERNAME=no-reply@example.com
+SMTP_PASSWORD=邮箱服务商提供的授权码
+SMTP_FROM=知汇 <no-reply@example.com>
+```
+
+修改后执行 `docker compose up -d user-service` 生效。验证码 15 分钟内有效，每个账号 60 秒内只能获取一次、每天最多 10 次，输错 5 次作废；同一邮箱只能被一个账号验证。管理员可在“用户管理 → 资料与治理”中解除某个账号的邮箱绑定。
+
 如果默认国内镜像在当前地区不可用，可以修改为其他可信镜像。例如切回官方源：
 
 ```dotenv

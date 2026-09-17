@@ -17,10 +17,12 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndTheStarterAccounts() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_fresh")) {
             db.flyway().migrate();
-            assertEquals("1", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(2, db.number("SELECT COUNT(*) FROM user"));
             assertEquals("ADMIN", db.text("SELECT role FROM user WHERE username = 'admin'"));
             assertTrue(db.hasIndex("password_reset_request", "idx_reset_status_id"));
+            assertTrue(db.hasIndex("user", "uk_user_verified_email"));
+            assertEquals(0, db.number("SELECT COUNT(*) FROM email_verification"));
             assertEquals(0, db.flyway().migrate().migrationsExecuted);
         }
     }
@@ -45,7 +47,9 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertTrue(db.hasColumn("user", "email"));
+            assertEquals(0, db.number("SELECT COUNT(*) FROM user WHERE email IS NOT NULL"));
             assertTrue(db.hasIndex("user", "idx_user_status_id"));
             assertTrue(db.hasIndex("user", "idx_user_role_id"));
             assertTrue(db.hasIndex("user_report", "idx_user_report_status_id"));
@@ -54,6 +58,27 @@ class FlywayMigrationTest {
             assertEquals(0, db.number("SELECT COUNT(*) FROM user WHERE username = 'demo'"));
             assertEquals("kept-hash", db.text("SELECT password_hash FROM user WHERE username = 'admin'"));
             assertEquals(0, db.flyway().migrate().migrationsExecuted);
+        }
+    }
+
+    @Test
+    void onlyVerifiedAddressesHaveToBeUnique() throws Exception {
+        try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_email")) {
+            db.flyway().migrate();
+            db.execute("INSERT INTO user (id, username, password_hash, nickname) VALUES "
+                    + "(11, 'u11', 'h', 'U11'), (12, 'u12', 'h', 'U12'), (13, 'u13', 'h', 'U13')");
+            // Any number of accounts may bind the same address while it is unverified.
+            db.execute("UPDATE user SET email = 'same@example.com' WHERE id IN (11, 12, 13)",
+                    "UPDATE user SET email_verified_at = NOW() WHERE id = 11");
+            assertEquals("same@example.com", db.text("SELECT verified_email FROM user WHERE id = 11"));
+            assertEquals(null, db.text("SELECT verified_email FROM user WHERE id = 12"));
+            SQLException taken = assertThrows(SQLException.class,
+                    () -> db.execute("UPDATE user SET email_verified_at = NOW() WHERE id = 12"));
+            assertEquals(1062, taken.getErrorCode());
+            // Unbinding frees the address for another account.
+            db.execute("UPDATE user SET email = NULL, email_verified_at = NULL WHERE id = 11",
+                    "UPDATE user SET email_verified_at = NOW() WHERE id = 12");
+            assertEquals(1, db.number("SELECT COUNT(*) FROM user WHERE verified_email = 'same@example.com'"));
         }
     }
 }

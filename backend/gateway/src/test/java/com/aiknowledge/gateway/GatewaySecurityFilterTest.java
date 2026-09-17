@@ -82,4 +82,62 @@ class GatewaySecurityFilterTest {
         assertEquals(11, forwarded.get());
         assertNull(secondClient.getResponse().getStatusCode());
     }
+
+    @Test
+    void browsingDoesNotUseUpTheWriteAllowance() {
+        GatewaySecurityFilter filter = new GatewaySecurityFilter();
+        AtomicInteger forwarded = new AtomicInteger();
+        GatewayFilterChain chain = exchange -> {
+            forwarded.incrementAndGet();
+            return Mono.empty();
+        };
+        java.net.InetSocketAddress client = new java.net.InetSocketAddress("203.0.113.20", 12345);
+
+        // A busy console: far more reads than the write limit, all allowed.
+        for (int index = 0; index < 300; index++) {
+            filter.filter(MockServerWebExchange.from(MockServerHttpRequest.get("/user/admin/users/page").remoteAddress(client).build()), chain)
+                    .block(Duration.ofSeconds(1));
+        }
+        var save = MockServerWebExchange.from(MockServerHttpRequest.delete("/user/email").remoteAddress(client).build());
+        filter.filter(save, chain).block(Duration.ofSeconds(1));
+        assertEquals(301, forwarded.get());
+        assertNull(save.getResponse().getStatusCode());
+
+        // Writes still have their own limit of 120 a minute.
+        for (int index = 1; index < 120; index++) {
+            filter.filter(MockServerWebExchange.from(MockServerHttpRequest.post("/post/like").remoteAddress(client).build()), chain)
+                    .block(Duration.ofSeconds(1));
+        }
+        var overLimit = MockServerWebExchange.from(MockServerHttpRequest.post("/post/like").remoteAddress(client).build());
+        filter.filter(overLimit, chain).block(Duration.ofSeconds(1));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, overLimit.getResponse().getStatusCode());
+
+        // Reads keep working after the writes ran out.
+        var read = MockServerWebExchange.from(MockServerHttpRequest.get("/user/email").remoteAddress(client).build());
+        filter.filter(read, chain).block(Duration.ofSeconds(1));
+        assertNull(read.getResponse().getStatusCode());
+    }
+
+    @Test
+    void emailCodesHaveTheirOwnTightLimit() {
+        GatewaySecurityFilter filter = new GatewaySecurityFilter();
+        GatewayFilterChain chain = exchange -> Mono.empty();
+        java.net.InetSocketAddress client = new java.net.InetSocketAddress("203.0.113.21", 12345);
+        MockServerWebExchange last = null;
+        for (int index = 0; index < 6; index++) {
+            last = MockServerWebExchange.from(MockServerHttpRequest.post("/user/email/code").remoteAddress(client).build());
+            filter.filter(last, chain).block(Duration.ofSeconds(1));
+        }
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, last.getResponse().getStatusCode());
+        // Other writes are unaffected.
+        var bind = MockServerWebExchange.from(MockServerHttpRequest.post("/user/email").remoteAddress(client).build());
+        filter.filter(bind, chain).block(Duration.ofSeconds(1));
+        assertNull(bind.getResponse().getStatusCode());
+
+        for (int index = 0; index < 11; index++) {
+            last = MockServerWebExchange.from(MockServerHttpRequest.post("/user/email/verify").remoteAddress(client).build());
+            filter.filter(last, chain).block(Duration.ofSeconds(1));
+        }
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, last.getResponse().getStatusCode());
+    }
 }

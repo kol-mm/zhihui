@@ -32,7 +32,7 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         addSecurityHeaders(exchange);
         String path = exchange.getRequest().getPath().value();
         int limit = requestLimit(path, exchange.getRequest().getMethod().name());
-        String key = clientKey(exchange) + ':' + rateClass(path);
+        String key = clientKey(exchange) + ':' + rateClass(path, exchange.getRequest().getMethod().name());
         if (!allow(key, limit)) {
             byte[] body = "{\"code\":429,\"message\":\"too many requests\",\"data\":{}}"
                     .getBytes(StandardCharsets.UTF_8);
@@ -64,17 +64,22 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         if (path.equals("/user/captcha")) return 20;
         if (path.equals("/user/password-reset/request")) return 5;
         if (path.equals("/user/password-reset/complete")) return 10;
+        if (path.equals("/user/email/code")) return 5;
+        if (path.equals("/user/email/verify")) return 10;
         if (!"GET".equals(method) && !"OPTIONS".equals(method)) return 120;
         return 600;
     }
 
-    private String rateClass(String path) {
+    private String rateClass(String path, String method) {
         if (path.equals("/user/login")) return "auth-login";
         if (path.equals("/user/register")) return "auth-register";
         if (path.equals("/user/captcha")) return "auth-captcha";
         if (path.equals("/user/password-reset/request")) return "auth-reset-request";
         if (path.equals("/user/password-reset/complete")) return "auth-reset-complete";
-        return "general";
+        if (path.equals("/user/email/code")) return "email-code";
+        if (path.equals("/user/email/verify")) return "email-verify";
+        // Reads and writes are counted apart: pages load many reads, which must not use up the smaller write allowance.
+        return "GET".equals(method) || "OPTIONS".equals(method) ? "general-read" : "general-write";
     }
 
     private String clientKey(ServerWebExchange exchange) {
