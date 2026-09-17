@@ -93,6 +93,7 @@ public class MessageController {
         notification.setType("MESSAGE");
         notification.setTitle("收到新的私信");
         notification.setContent(content);
+        notification.linkTo("CHAT", sessionId, saved.getId());
         messageStore.saveNotification(notification);
         }
         eventBus.publish("MESSAGE_SENT", String.valueOf(saved.getId()), Map.of(
@@ -520,6 +521,7 @@ public class MessageController {
                     notification.setType("FEEDBACK");
                     notification.setTitle("工单有新的处理结果");
                     notification.setContent(ticket.getOfficialReply() == null ? "你的工单状态已更新。" : ticket.getOfficialReply());
+                    notification.linkTo("TICKET", ticket.getId(), null);
                     messageStore.saveNotification(notification);
                     eventBus.publish("FEEDBACK_TICKET_REPLIED", String.valueOf(ticket.getId()), Map.of(
                             "status", ticket.getStatus(),
@@ -600,6 +602,14 @@ public class MessageController {
         view.put("content", localizeNotificationContent(notification));
         view.put("read", notification.getIsRead() != null && notification.getIsRead() == 1);
         view.put("createdAt", notification.getCreatedAt());
+        Map<String, Object> target = null;
+        if (notification.getTargetType() != null && notification.getTargetId() != null) {
+            target = new LinkedHashMap<>();
+            target.put("type", notification.getTargetType());
+            target.put("id", notification.getTargetId());
+            target.put("anchorId", notification.getAnchorId());
+        }
+        view.put("target", target);
         return view;
     }
 

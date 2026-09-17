@@ -16,6 +16,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static com.aiknowledge.community.notification.CommunityNotificationClient.CommentAudience.POST_AUTHOR;
+import static com.aiknowledge.community.notification.CommunityNotificationClient.CommentAudience.REPLIED_AUTHOR;
 import static org.mockito.Mockito.when;
 
 class CommunityControllerTest {
@@ -452,9 +455,12 @@ class CommunityControllerTest {
 
         verifyNoInteractions(notifications);
 
-        isolated.createComment(secondUserAuth, Map.of(
+        var reply = isolated.createComment(secondUserAuth, Map.of(
                 "postId", postId, "parentId", parentId, "content", "reply from another user"));
-        verify(notifications).commentCreated(1L, 2L, postId, "reply from another user");
+        Long replyId = ((Number) reply.data().get("id")).longValue();
+        // The post author wrote the parent too, so one reply notification covers both roles.
+        verify(notifications).commentCreated(REPLIED_AUTHOR, 1L, 2L, postId, "Self notification", replyId, "reply from another user");
+        verifyNoMoreInteractions(notifications);
     }
 
     @Test
@@ -706,4 +712,66 @@ class CommunityControllerTest {
         return (List<Map<String, Object>>) page.get("items");
     }
 
+
+    @Test
+    void aReplyTellsTheRepliedAuthorAndThePostAuthorOnceEach() {
+        var notifications = mock(com.aiknowledge.community.notification.CommunityNotificationClient.class);
+        var isolated = new CommunityController(
+                new InMemoryCommunityStore(),
+                new com.aiknowledge.community.storage.CommunityMediaStorageService(
+                        "local", "target/test-community-media", "http://127.0.0.1:9000",
+                        "ai-community", "test", "test-password"),
+                notifications
+        );
+        String thirdUserAuth = "Bearer " + LocalAuth.issueToken("third", 3L, "USER");
+        Long postId = ((Number) isolated.createPost(userAuth, Map.of("title", "Linked notices", "content", "body"))
+                .data().get("id")).longValue();
+        isolated.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+
+        Long commentId = ((Number) isolated.createComment(secondUserAuth, Map.of("postId", postId, "content", "first"))
+                .data().get("id")).longValue();
+        verify(notifications).commentCreated(POST_AUTHOR, 1L, 2L, postId, "Linked notices", commentId, "first");
+
+        Long replyId = ((Number) isolated.createComment(thirdUserAuth, Map.of(
+                "postId", postId, "parentId", commentId, "content", "second")).data().get("id")).longValue();
+        verify(notifications).commentCreated(REPLIED_AUTHOR, 2L, 3L, postId, "Linked notices", replyId, "second");
+        verify(notifications).commentCreated(POST_AUTHOR, 1L, 3L, postId, "Linked notices", replyId, "second");
+
+        // The post author replying in their own discussion only tells the person they answered.
+        Long ownReply = ((Number) isolated.createComment(userAuth, Map.of(
+                "postId", postId, "parentId", replyId, "content", "third")).data().get("id")).longValue();
+        verify(notifications).commentCreated(REPLIED_AUTHOR, 3L, 1L, postId, "Linked notices", ownReply, "third");
+        verifyNoMoreInteractions(notifications);
+    }
+
+    @Test
+    void aSingleThreadCanBeLoadedToShowALinkedComment() {
+        Long postId = ((Number) controller.createPost(userAuth, Map.of("title", "Deep thread", "content", "body"))
+                .data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", postId, "status", "PUBLISHED"));
+        Long firstRoot = ((Number) controller.createComment(userAuth, Map.of("postId", postId, "content", "old root"))
+                .data().get("id")).longValue();
+        Long reply = ((Number) controller.createComment(secondUserAuth, Map.of(
+                "postId", postId, "parentId", firstRoot, "content", "old reply")).data().get("id")).longValue();
+        for (int i = 0; i < 12; i++) {
+            controller.createComment(userAuth, Map.of("postId", postId, "content", "newer root " + i));
+        }
+
+        var thread = controller.commentThread(secondUserAuth, postId, reply);
+        assertEquals(0, thread.code());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) thread.data().get("items");
+        assertEquals(List.of(firstRoot, reply), items.stream().map(item -> ((Number) item.get("id")).longValue()).toList());
+
+        // Another post's id, a hidden comment and a hidden post all answer "not found".
+        Long otherPost = ((Number) controller.createPost(userAuth, Map.of("title", "Other", "content", "body"))
+                .data().get("id")).longValue();
+        controller.auditPost(adminAuth, Map.of("postId", otherPost, "status", "PUBLISHED"));
+        assertEquals(500, controller.commentThread(secondUserAuth, otherPost, reply).code());
+        controller.updateCommentStatus(adminAuth, Map.of("commentId", reply, "status", "HIDDEN"));
+        assertEquals("评论不存在", controller.commentThread(secondUserAuth, postId, reply).message());
+        assertEquals(0, controller.commentThread(adminAuth, postId, reply).code());
+        // The root stays reachable while it is visible.
+        assertEquals(0, controller.commentThread(secondUserAuth, postId, firstRoot).code());
+    }
 }

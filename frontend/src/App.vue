@@ -134,6 +134,7 @@
           :following="isFollowing(detailPost.userId)"
           :comments-enabled="platformConfig.comments_enabled"
           :max-comment-length="platformConfig.max_comment_length"
+          :focus-comment-id="detailFocusCommentId"
           :on-submit-comment="createDetailComment"
           @back="leaveDetail"
           @like="likeDetailPost"
@@ -236,7 +237,7 @@
 
           <section v-else class="page-stack">
             <div class="page-toolbar"><div><h3>个人中心</h3><p>管理资料、关注关系和反馈工单</p></div><el-button type="primary" @click="saveProfile">保存资料</el-button></div>
-            <div class="profile-layout"><section class="surface profile-card"><div class="profile-avatar"><img v-if="avatarUrl" :src="resolveApiUrl(avatarUrl)" alt="头像" /><span v-else>{{ displayName.slice(0, 1).toUpperCase() }}</span></div><h3>{{ displayName }}</h3><p>@{{ username }}</p><el-tag>{{ roleLabel(role) }}</el-tag><el-button v-if="avatarUrl" class="remove-avatar" text type="danger" @click="removeAvatar">删除头像</el-button><div class="profile-counts"><span><strong>{{ followData.followedUserIds?.length || 0 }}</strong>关注</span><span><strong>{{ followData.followerUserIds?.length || 0 }}</strong>粉丝</span><span><strong>{{ drafts.length }}</strong>草稿</span></div></section><section class="surface profile-form"><h3>基础资料</h3><el-form label-position="top"><el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item><el-form-item label="个性签名"><el-input v-model="profileForm.signature" type="textarea" :rows="3" /></el-form-item></el-form><el-divider>修改密码</el-divider><el-form label-position="top"><el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" type="password" show-password autocomplete="current-password" /></el-form-item><el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" type="password" show-password autocomplete="new-password" maxlength="128" placeholder="8-128 位，需包含字母和数字" /></el-form-item><el-button type="primary" plain @click="changePassword">更新密码</el-button></el-form></section><section class="surface feedback-card"><div class="surface-head"><div><h3>我的反馈</h3><p>问题进度与官方回复</p></div><el-button v-if="platformConfig.feedback_enabled" :icon="Plus" circle @click="feedbackDialog = true" /></div><article v-for="ticket in tickets" :key="ticket.id"><div><strong>{{ ticketTypeLabel(ticket.type) }}</strong><p>{{ ticket.content }}</p><small v-if="ticket.reply">官方回复：{{ ticket.reply }}</small></div><el-tag :type="ticket.status === 'RESOLVED' ? 'success' : 'warning'">{{ ticketStatusLabel(ticket.status) }}</el-tag></article><el-empty v-if="!tickets.length" description="暂无反馈工单" /></section></div>
+            <div class="profile-layout"><section class="surface profile-card"><div class="profile-avatar"><img v-if="avatarUrl" :src="resolveApiUrl(avatarUrl)" alt="头像" /><span v-else>{{ displayName.slice(0, 1).toUpperCase() }}</span></div><h3>{{ displayName }}</h3><p>@{{ username }}</p><el-tag>{{ roleLabel(role) }}</el-tag><el-button v-if="avatarUrl" class="remove-avatar" text type="danger" @click="removeAvatar">删除头像</el-button><div class="profile-counts"><span><strong>{{ followData.followedUserIds?.length || 0 }}</strong>关注</span><span><strong>{{ followData.followerUserIds?.length || 0 }}</strong>粉丝</span><span><strong>{{ drafts.length }}</strong>草稿</span></div></section><section class="surface profile-form"><h3>基础资料</h3><el-form label-position="top"><el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item><el-form-item label="个性签名"><el-input v-model="profileForm.signature" type="textarea" :rows="3" /></el-form-item></el-form><el-divider>修改密码</el-divider><el-form label-position="top"><el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" type="password" show-password autocomplete="current-password" /></el-form-item><el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" type="password" show-password autocomplete="new-password" maxlength="128" placeholder="8-128 位，需包含字母和数字" /></el-form-item><el-button type="primary" plain @click="changePassword">更新密码</el-button></el-form></section><section class="surface feedback-card"><div class="surface-head"><div><h3>我的反馈</h3><p>问题进度与官方回复</p></div><el-button v-if="platformConfig.feedback_enabled" :icon="Plus" circle @click="feedbackDialog = true" /></div><article v-for="ticket in tickets" :key="ticket.id" :data-ticket-id="ticket.id" :class="{ 'is-linked': linkedTicketId === ticket.id }"><div><strong>{{ ticketTypeLabel(ticket.type) }}</strong><p>{{ ticket.content }}</p><small v-if="ticket.reply">官方回复：{{ ticket.reply }}</small></div><el-tag :type="ticket.status === 'RESOLVED' ? 'success' : 'warning'">{{ ticketStatusLabel(ticket.status) }}</el-tag></article><el-empty v-if="!tickets.length" description="暂无反馈工单" /></section></div>
             <section class="surface"><div class="surface-head"><div><h3>我的知识资源</h3><p>统一查看上传、收藏、点赞、下载和转发记录</p></div><el-tag type="info">{{ myKnowledgeTotal }} 条</el-tag><el-radio-group v-model="knowledgeActivityType" size="small" @change="loadMyKnowledge"><el-radio-button value="UPLOADED">上传</el-radio-button><el-radio-button value="COLLECTED">收藏</el-radio-button><el-radio-button value="LIKED">点赞</el-radio-button><el-radio-button value="DOWNLOADED">下载</el-radio-button><el-radio-button value="FORWARDED">转发</el-radio-button></el-radio-group></div><div class="activity-list"><article v-for="file in myKnowledge" :key="file.id"><span class="file-type">{{ file.fileType?.toUpperCase() }}</span><div><strong>{{ file.title }}</strong><p>资源 #{{ file.id }} · {{ auditLabel(file.auditStatus) }}</p></div><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button></article><div v-if="myKnowledgeHasMore || myKnowledgeLoading || myKnowledgeError" class="knowledge-load-more"><el-button text type="primary" :loading="myKnowledgeLoading" @click="loadMoreMyKnowledge">{{ myKnowledgeLoading ? '正在加载记录' : myKnowledgeError ? `${myKnowledgeError}，点击重试` : '加载更多记录' }}</el-button></div><el-empty v-if="!myKnowledge.length" description="暂无对应资源记录" /></div></section>
             <section class="surface"><div class="surface-head"><div><h3>收藏的社区帖子</h3><p>集中查看收藏内容，进入帖子后可继续参与讨论</p></div><el-tag type="info">{{ collectedPosts.length }} 篇</el-tag></div><div class="activity-list"><article v-for="post in collectedPosts" :key="post.id"><span class="file-type">帖子</span><div><strong>{{ post.title }}</strong><p>帖子 #{{ post.id }} · {{ post.likes || 0 }} 赞</p></div><div class="collection-actions"><el-button text type="primary" @click="openPostDetail(post)">查看</el-button><el-button text type="danger" @click="removeCollectedPost(post)">取消收藏</el-button></div></article><el-empty v-if="!collectedPosts.length" description="暂无收藏的社区帖子" /></div></section>
             <div class="two-column account-tools">
@@ -348,7 +349,7 @@
       <template #footer><el-button :icon="Refresh" @click="loadGovernance">刷新数据</el-button><el-button type="primary" @click="governanceDialog = false">完成</el-button></template>
     </el-dialog>
     <el-dialog v-model="governancePreviewDialog" :title="governancePreviewKind" width="min(760px, 94vw)" top="6vh" destroy-on-close><div class="reader-header"><span class="file-type large">VIEW</span><div><h3>{{ governancePreviewTitle }}</h3></div></div><article class="knowledge-body governance-preview-body">{{ governancePreviewContent }}</article><template #footer><el-button type="primary" @click="governancePreviewDialog=false">关闭</el-button></template></el-dialog>
-    <el-dialog v-model="notificationsDialog" :title="notificationsDialogTitle" width="min(620px, 92vw)"><div class="notification-list"><article v-for="notice in notifications" :key="notice.id"><span class="notification-symbol"><Bell /></span><div><strong>{{ notice.title }}</strong><p>{{ notice.content }}</p><small>{{ notificationTypeLabel(notice.type) }} · {{ formatDate(notice.createdAt || '') }}</small></div><el-button v-if="!notice.read" text type="primary" @click="markNotificationRead(notice)">标为已读</el-button><el-tag v-else type="info" size="small">已读</el-tag></article><div v-if="notificationHasMore || notificationLoading || notificationError" class="notification-more"><el-button text type="primary" :loading="notificationLoading" @click="loadMoreNotifications">{{ notificationLoading ? '正在加载通知' : notificationError ? `${notificationError}，点击重试` : '加载更多通知' }}</el-button></div><el-empty v-if="!notifications.length" description="暂无通知" /></div><template #footer><el-button :icon="Refresh" @click="openNotifications">刷新</el-button><el-button :disabled="!notificationUnread" @click="markAllNotificationsRead">全部已读</el-button><el-button type="primary" @click="notificationsDialog = false">关闭</el-button></template></el-dialog>
+    <el-dialog v-model="notificationsDialog" :title="notificationsDialogTitle" width="min(620px, 92vw)"><div class="notification-list"><article v-for="notice in notifications" :key="notice.id"><span class="notification-symbol"><Bell /></span><div><strong>{{ notice.title }}</strong><p>{{ notice.content }}</p><small>{{ notificationTypeLabel(notice.type) }} · {{ formatDate(notice.createdAt || '') }}</small></div><div class="notification-actions"><el-button v-if="noticeDestination(notice.target)" text type="primary" @click="openNotice(notice)">查看</el-button><el-button v-if="!notice.read" text type="primary" @click="markNotificationRead(notice)">标为已读</el-button><el-tag v-else type="info" size="small">已读</el-tag></div></article><div v-if="notificationHasMore || notificationLoading || notificationError" class="notification-more"><el-button text type="primary" :loading="notificationLoading" @click="loadMoreNotifications">{{ notificationLoading ? '正在加载通知' : notificationError ? `${notificationError}，点击重试` : '加载更多通知' }}</el-button></div><el-empty v-if="!notifications.length" description="暂无通知" /></div><template #footer><el-button :icon="Refresh" @click="openNotifications">刷新</el-button><el-button :disabled="!notificationUnread" @click="markAllNotificationsRead">全部已读</el-button><el-button type="primary" @click="notificationsDialog = false">关闭</el-button></template></el-dialog>
     <el-dialog v-model="categoryDialog" title="知识分类管理" width="min(520px, 92vw)"><el-form inline @submit.prevent="saveCategory"><el-form-item><el-input v-model="categoryForm.name" placeholder="分类名称" /></el-form-item><el-form-item><el-input-number v-model="categoryForm.sortNo" :min="0" /></el-form-item><el-button type="primary" @click="saveCategory">{{ categoryForm.id ? '保存修改' : '新增分类' }}</el-button></el-form><div class="category-admin-list"><article v-for="category in knowledgeCategories" :key="category.id"><span>{{ category.name }}</span><small>排序 {{ category.sortNo || 0 }}</small><div><el-button text @click="editCategory(category)">编辑</el-button><el-button text type="danger" @click="removeCategory(category)">删除</el-button></div></article></div><template #footer><el-button @click="categoryDialog=false">关闭</el-button></template></el-dialog>
     <el-dialog v-model="knowledgeMetadataDialog" title="编辑知识资源" width="min(520px, 92vw)"><el-form label-position="top"><el-form-item label="标题"><el-input v-model="knowledgeMetadataForm.title" maxlength="255" /></el-form-item><el-form-item label="分类"><el-select v-model="knowledgeMetadataForm.categoryId" clearable><el-option v-for="category in knowledgeCategories" :key="category.id" :label="category.name" :value="category.id" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="knowledgeMetadataForm.auditStatus"><el-option label="待审核" value="PENDING" /><el-option label="已通过" value="APPROVED" /><el-option label="已驳回" value="REJECTED" /><el-option label="已下架" value="HIDDEN" /></el-select></el-form-item></el-form><template #footer><el-button @click="knowledgeMetadataDialog=false">取消</el-button><el-button type="primary" @click="saveKnowledgeMetadata">保存</el-button></template></el-dialog>
     <el-dialog v-model="resetCodeDialog" class="reset-code-dialog" title="重置码已签发" width="min(460px, 92vw)" :close-on-click-modal="false" @closed="issuedResetCode = null"><template v-if="issuedResetCode"><p>请把重置码私下转交给 <strong>{{ issuedResetCode.nickname }}</strong>（@{{ issuedResetCode.username }}）<template v-if="issuedResetCode.contact">，申请人留下的联系方式：{{ issuedResetCode.contact }}</template>。</p><div class="reset-code-value">{{ issuedResetCode.code }}</div><p class="reset-code-meta">{{ formatClock(issuedResetCode.expiresAt) }} 前有效 · 只能使用一次 · 输错 5 次失效</p><el-alert type="warning" :closable="false" show-icon title="关闭此窗口后无法再次查看，遗失请重新签发。不要在公开渠道发送重置码。" /></template><template #footer><el-button :icon="CopyDocument" @click="copyResetCode">复制重置码</el-button><el-button type="primary" @click="resetCodeDialog = false">完成</el-button></template></el-dialog>
@@ -362,6 +363,7 @@ import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, CollectionTag, CopyDocument, DataAnalysis, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
+import { detailPath, linkedCommentFrom, noticeDestination, type NoticeTarget } from './utils/noticeTargets';
 import { clearLegacyAuthToken, deleteData, downloadData, getData, getLegacyAuthToken, getStoredValue, isSessionExpiredError, onSessionExpired, postData, postFormData, putData, removeStoredValue, resolveApiUrl, setStoredValue, toUserMessage } from './api/client';
 import CommunityDetailPage from './components/CommunityDetailPage.vue';
 import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
@@ -379,7 +381,7 @@ type Ticket = { id:number; userId:number; type:string; content:string; status:st
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string; publishPolicy?:string; messagingEnabled?:boolean };
 type ChatMessage = { id:number; sessionId:number; senderId:number; content:string; status:string; createdAt:string };
 type ChatSession = { id:number; userAId:number; userBId:number; otherUserId:number; status:string; updatedAt:string; lastMessage:string; messageCount?:number };
-type Notice = { id:number; type?:string; title:string; content:string; read:boolean; createdAt?:string };
+type Notice = { id:number; type?:string; title:string; content:string; read:boolean; createdAt?:string; target?:NoticeTarget|null };
 type Draft = { id:number; title:string; content:string; userId:number; imageUrls?:string[]; updatedAt?:string };
 type Report = { id:number; fileId?:number; targetUserId?:number; reason:string; status:string };
 type Faq = { id:number; question:string; answer:string; sortNo:number };
@@ -492,7 +494,7 @@ const pdfPreviewUrl = ref('');
 const detailRoute = ref<DetailRoute>();
 const detailLoading = ref(false); const detailError = ref('');
 const detailKnowledge = ref<KnowledgeFile>(); const detailKnowledgeBlocks = ref<KnowledgeContentBlock[]>([]); const detailPdfPreviewUrl = ref('');
-const detailPost = ref<Post>(); const detailComments = ref<Comment[]>([]);
+const detailPost = ref<Post>(); const detailComments = ref<Comment[]>([]); const detailFocusCommentId = ref(0);
 const COMMENT_THREAD_PAGE_SIZE = 10; const detailCommentTotal = ref(0); const detailCommentCursor = ref<number|null>(null);
 const detailCommentsHasMore = ref(false); const detailCommentsLoading = ref(false); const detailCommentsError = ref('');
 const selectedReviewPost = ref<Post>(); const reviewingKnowledge = ref(false);
@@ -637,7 +639,7 @@ function ticketTypeLabel(type:string){ return ({BUG:'系统问题',SUGGESTION:'�
 function roleLabel(value:string){ return ({ADMIN:'平台管理员',USER:'社区用户'} as Record<string,string>)[value] || value; }
 function publishPolicyLabel(value?:string){ return ({STANDARD:'标准审核',PRE_REVIEW:'强制预审',BLOCKED:'禁止发布'} as Record<string,string>)[value || 'STANDARD'] || value || '标准审核'; }
 function sessionStatusLabel(value:string){ return ({ACTIVE:'正常',RESTRICTED:'已限制',ARCHIVED:'已封存'} as Record<string,string>)[value] || value; }
-function notificationTypeLabel(type?:string){ return ({SYSTEM:'系统通知',MESSAGE:'私信通知',COMMENT:'评论通知',FEEDBACK:'反馈通知'} as Record<string,string>)[type || 'SYSTEM'] || '系统通知'; }
+function notificationTypeLabel(type?:string){ return ({SYSTEM:'系统通知',MESSAGE:'私信通知',COMMENT:'评论通知',REPLY:'回复通知',FEEDBACK:'反馈通知'} as Record<string,string>)[type || 'SYSTEM'] || '系统通知'; }
 function eventTypeLabel(type:string){ return ({MESSAGE_SENT:'私信已发送',MESSAGE_CLEARED:'私信已清空',MESSAGE_DELETED:'私信已删除',FEEDBACK_TICKET_CREATED:'反馈工单已创建',FEEDBACK_TICKET_REPLIED:'反馈工单已回复'} as Record<string,string>)[type] || type; }
 function eventStatusLabel(status:string){ return ({LOCAL_STORED:'已保存到本地',RABBITMQ_READY:'已发送到消息队列'} as Record<string,string>)[status] || status; }
 function runtimeModeLabel(mode:string){ return ({mysql:'MySQL',local:'本地模式',minio:'MinIO',redis:'Redis',nacos:'Nacos',direct:'服务直连',sqlite:'SQLite',elasticsearch:'Elasticsearch',rabbitmq:'RabbitMQ',milvus:'Milvus',chroma:'ChromaDB'} as Record<string,string>)[mode] || mode.toUpperCase(); }
@@ -775,7 +777,7 @@ function endLocalSession(){ ['ai-knowledge-local-token','ai-knowledge-username',
 async function restoreSession(){try{if(getLegacyAuthToken()){try{await postData('/user/session/adopt',{});}catch{/* an expired stored token is simply dropped */}finally{clearLegacyAuthToken();}}const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;setStoredValue('ai-knowledge-user-id',String(session.userId));syncUserForms();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value={...platformConfig.value,...await getData<typeof platformConfig.value>('/ai/config/public')};}catch{/* 配置服务短暂不可用时继续使用安全默认值。 */}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
-function resetDetailState(){detailRoute.value=undefined;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;resetDetailCommentPaging();if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
+function resetDetailState(){detailRoute.value=undefined;detailFocusCommentId.value=0;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;resetDetailCommentPaging();if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
 function returnToRoot(){if(window.location.pathname!=='/')window.history.pushState({},'', '/');resetDetailState();}
 async function confirmDiscardAdminConfig(){if(!aiConfigDirty.value)return true;try{await ElMessageBox.confirm('平台配置还有未保存的更改，离开后这些更改会丢失。','离开配置页面？',{confirmButtonText:'放弃更改并离开',cancelButtonText:'继续编辑',type:'warning'});return true;}catch{return false;}}
 async function switchPortal(value:'client'|'admin'){ if(value!==portal.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return;returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; await refreshCurrentView(); }
@@ -807,13 +809,21 @@ async function loadDetailRoute(){
       const [post,commentPage]=await Promise.all([getData<Post>(`/post/detail?id=${route.id}`),getData<CommentThreadPage>(commentThreadsUrl(route.id))]);
       detailPost.value=post;applyCommentThreadPage(commentPage,true);detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];
       await loadUserSummaries([post.userId,...commentPage.items.map(comment=>comment.userId)]);
+      // A notification link names a comment that may sit further down the discussion: load its thread too.
+      let linkedComment=linkedCommentFromUrl();
+      if(linkedComment&&!detailComments.value.some(comment=>comment.id===linkedComment&&!comment.placeholder)){
+        try{const thread=await getData<{items:Comment[]}>(`/comment/thread?postId=${route.id}&commentId=${linkedComment}`);if(detailPost.value?.id!==route.id)return;detailComments.value=mergeComments(detailComments.value,thread.items);await loadUserSummaries(thread.items.map(comment=>comment.userId));}
+        catch{linkedComment=0;ElMessage.info('这条评论已删除或暂不可见');}
+      }
+      detailFocusCommentId.value=linkedComment;
       await recordBehavior('VIEW','POST',post.id);
     }
     window.scrollTo({top:0,behavior:'auto'});
   }catch(error){detailError.value=toUserMessage(error,'详情加载失败，请重试');}
   finally{detailLoading.value=false;}
 }
-function navigateToDetail(kind:DetailRoute['kind'],id:number){const path=`/${kind}/${id}`;if(window.location.pathname!==path)window.history.pushState({kind,id},'',path);void loadDetailRoute();}
+function navigateToDetail(kind:DetailRoute['kind'],id:number,commentId?:number){const path=detailPath(kind,id,commentId);if(window.location.pathname+window.location.search!==path)window.history.pushState({kind,id},'',path);void loadDetailRoute();}
+function linkedCommentFromUrl(){return linkedCommentFrom(window.location.search);}
 function leaveDetail(){const destination=detailRoute.value?.kind==='community'?'forum':detailRoute.value?.kind||'home';returnToRoot();portal.value='client';activeView.value=destination;void refreshCurrentView();window.scrollTo({top:0,behavior:'auto'});}
 function handlePopState(){const route=parseDetailPath();if(route)void loadDetailRoute();else{resetDetailState();void refreshCurrentView();}}
 
@@ -1121,6 +1131,29 @@ async function refreshUnreadCount(){
   try{notificationUnread.value=(await getData<{unread:number}>(`/notification/unread-count?userId=${currentUserId.value}`)).unread;}
   catch{/* 通知服务短暂不可用时保留上一次的未读数。 */}
 }
+// Opens what the notification is about; opening it counts as reading it.
+async function openNotice(notice:Notice){
+  const destination=noticeDestination(notice.target);if(!destination)return;
+  if(!notice.read){try{const result=await postData<{unread:number}>('/notification/read',{notificationId:notice.id});notice.read=true;notificationUnread.value=result.unread;}catch{/* the link still opens */}}
+  notificationsDialog.value=false;
+  if(destination.kind==='detail'){navigateToDetail(destination.detail,destination.id,destination.commentId);return;}
+  // switchPortal may be declined (unsaved admin settings); read the portal again afterwards.
+  if(!inClientPortal()){await switchPortal('client');if(!inClientPortal())return;}
+  if(destination.kind==='chat'){
+    selectMessageSession(destination.sessionId);
+    await selectView('messages');
+    if(messageForm.value.sessionId!==destination.sessionId)ElMessage.info('这个会话已关闭或暂不可用');
+    return;
+  }
+  await selectView('profile');
+  await nextTick();
+  const ticket=document.querySelector<HTMLElement>(`[data-ticket-id="${destination.ticketId}"]`);
+  if(!ticket){ElMessage.info('没有找到这条反馈工单');return;}
+  ticket.scrollIntoView({block:'center'});
+  linkedTicketId.value=destination.ticketId;window.clearTimeout(linkedTicketTimer);linkedTicketTimer=window.setTimeout(()=>{linkedTicketId.value=0;},3000);
+}
+const linkedTicketId = ref(0); let linkedTicketTimer:number|undefined;
+function inClientPortal(){return portal.value==='client';}
 async function markNotificationRead(notice:Notice){const result=await postData<{unread:number}>('/notification/read',{notificationId:notice.id});notice.read=true;notificationUnread.value=result.unread;ElMessage.success('已标记为已读');}
 async function markAllNotificationsRead(){const result=await postData<{unread:number}>('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));notificationUnread.value=result.unread;ElMessage.success('全部通知已读');}
 function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}

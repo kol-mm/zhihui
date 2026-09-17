@@ -315,6 +315,10 @@ class MessageControllerTest {
                 .filter(item -> "notification body".equals(item.get("content")))
                 .findFirst().orElseThrow();
         assertEquals("MESSAGE", createdNotification.get("type"));
+        Map<?, ?> chatTarget = (Map<?, ?>) createdNotification.get("target");
+        assertEquals("CHAT", chatTarget.get("type"));
+        assertEquals(sessionId, ((Number) chatTarget.get("id")).longValue());
+        assertTrue(((Number) chatTarget.get("anchorId")).longValue() > 0);
         assertEquals(false, createdNotification.get("read"));
 
         Long notificationId = ((Number) createdNotification.get("id")).longValue();
@@ -356,9 +360,14 @@ class MessageControllerTest {
                 "status", "RESOLVED",
                 "reply", "The button has been fixed."
         )).code());
-        assertEquals(true, controller.notifications(userAuth, 1L).data().stream()
-                .anyMatch(item -> "FEEDBACK".equals(item.get("type"))
-                        && "The button has been fixed.".equals(item.get("content"))));
+        Map<String, Object> ticketNotice = controller.notifications(userAuth, 1L).data().stream()
+                .filter(item -> "FEEDBACK".equals(item.get("type"))
+                        && "The button has been fixed.".equals(item.get("content")))
+                .findFirst().orElseThrow();
+        Map<?, ?> ticketTarget = (Map<?, ?>) ticketNotice.get("target");
+        assertEquals("TICKET", ticketTarget.get("type"));
+        assertEquals(ticketId, ((Number) ticketTarget.get("id")).longValue());
+        assertEquals(null, ticketTarget.get("anchorId"));
     }
 
     @Test
@@ -556,4 +565,36 @@ class MessageControllerTest {
         return items(page).stream().map(item -> ((Number) item.get("id")).longValue()).toList();
     }
 
+
+    @Test
+    void notificationsCarryTheLinkTheyOpen() {
+        InMemoryMessageStore store = new InMemoryMessageStore();
+        MessageController isolated = new MessageController(store,
+                new LocalEventBusService("local", "127.0.0.1", 5672, "ai-knowledge.events"));
+        String auth = "Bearer " + LocalAuth.issueToken("linked-" + System.nanoTime(), 7_000_001L, "USER");
+        com.aiknowledge.message.entity.NotificationEntity linked = new com.aiknowledge.message.entity.NotificationEntity();
+        linked.setUserId(7_000_001L);
+        linked.setType("REPLY");
+        linked.setTitle("你的评论收到新回复");
+        linked.setContent("《帖子》：好");
+        linked.setTargetType("POST");
+        linked.setTargetId(5L);
+        linked.setAnchorId(9L);
+        store.saveNotification(linked);
+        com.aiknowledge.message.entity.NotificationEntity plain = new com.aiknowledge.message.entity.NotificationEntity();
+        plain.setUserId(7_000_001L);
+        plain.setType("SYSTEM");
+        plain.setTitle("系统通知");
+        plain.setContent("无链接");
+        store.saveNotification(plain);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> items = (List<Map<String, Object>>) isolated.notificationPage(auth, null, null, 20, false).data().get("items");
+        assertEquals(2, items.size());
+        assertEquals(null, items.get(0).get("target"));
+        Map<?, ?> target = (Map<?, ?>) items.get(1).get("target");
+        assertEquals("POST", target.get("type"));
+        assertEquals(5L, target.get("id"));
+        assertEquals(9L, target.get("anchorId"));
+    }
 }

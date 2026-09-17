@@ -14,8 +14,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * Applies the message_db parts of docs/sql/migration-v6-query-indexes.sql on startup, because deploys do not run
- * SQL migrations. Adding a secondary index is idempotent here and does not block reads or writes in InnoDB.
+ * Applies the message_db parts of the docs/sql migrations on startup, because deploys do not run SQL migrations.
+ * Every step is idempotent; adding a secondary index or a trailing column does not block reads or writes in InnoDB.
  */
 @Component
 @Profile("mysql")
@@ -46,7 +46,24 @@ public class MessageSchemaMigration implements InitializingBean {
             ensureIndex(connection, statement, "feedback_ticket", "idx_feedback_type_status", "type, status");
             // Governance pages conversations by most recent activity.
             ensureIndex(connection, statement, "chat_session", "idx_session_updated", "updated_at, id");
+            // Notifications that open the post and comment they are about (v15). Trailing columns are added in place.
+            ensureColumn(connection, statement, "notification", "target_type", "VARCHAR(16) NULL");
+            ensureColumn(connection, statement, "notification", "target_id", "BIGINT NULL");
+            ensureColumn(connection, statement, "notification", "anchor_id", "BIGINT NULL");
         }
+    }
+
+    private void ensureColumn(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
+        try (PreparedStatement query = connection.prepareStatement(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?")) {
+            query.setString(1, table);
+            query.setString(2, column);
+            try (ResultSet result = query.executeQuery()) {
+                if (result.next() && result.getLong(1) > 0) return;
+            }
+        }
+        statement.executeUpdate("ALTER TABLE `" + table + "` ADD COLUMN `" + column + "` " + definition);
+        log.info("Added {}.{} column", table, column);
     }
 
     private void ensureIndex(Connection connection, Statement statement, String table, String index, String columns) throws SQLException {

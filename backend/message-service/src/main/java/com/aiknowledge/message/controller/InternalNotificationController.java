@@ -56,6 +56,15 @@ public class InternalNotificationController {
         notification.setType(String.valueOf(request.getOrDefault("type", "SYSTEM")));
         notification.setTitle(title);
         notification.setContent(content);
+        // Optional link: an unknown type or a missing id leaves the notification as plain text.
+        String targetType = String.valueOf(request.getOrDefault("targetType", "")).trim();
+        Long targetId = number(request.get("targetId"));
+        if (NotificationEntity.TARGET_TYPES.contains(targetType) && targetId != null && targetId > 0) {
+            notification.setTargetType(targetType);
+            notification.setTargetId(targetId);
+            Long anchorId = number(request.get("anchorId"));
+            notification.setAnchorId(anchorId != null && anchorId > 0 ? anchorId : null);
+        }
         NotificationEntity saved = messageStore.saveNotification(notification);
         return ApiResponse.ok(Map.of("id", saved.getId(), "userId", saved.getUserId(), "created", true));
     }

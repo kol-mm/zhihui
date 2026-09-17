@@ -4,7 +4,9 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend ./
-RUN ./node_modules/.bin/vue-tsc -b && \
+# A failing unit test stops the image build, and with it the deploy.
+RUN ./node_modules/.bin/vitest run && \
+    ./node_modules/.bin/vue-tsc -b && \
     ./node_modules/.bin/vite build --config vite.config.mjs
 
 FROM nginx:1.27-alpine

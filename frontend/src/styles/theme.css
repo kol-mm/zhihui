@@ -480,6 +480,13 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .status-list i.offline { box-shadow: 0 0 0 3px rgba(217, 83, 79, .15); animation: none; }
 .status-list span, .task-list button { border-bottom-color: var(--zh-divider); }
 .analytics-ranking article>b { background: var(--zh-primary-50); }
+/* A comment opened from a notification is highlighted briefly. */
+/* The page keeps the list steady itself when comments load (utils/scrollAnchor), so the browser must not too. */
+.detail-comment-list { overflow-anchor: none; }
+.detail-comment-end { align-items: center; min-height: 40px; box-sizing: border-box; color: var(--zh-ink-400); font-size: 12px; }
+.feedback-card article.is-linked { margin-inline: -12px; padding-inline: 12px; border-radius: var(--zh-radius-sm); background: var(--zh-primary-50); box-shadow: inset 3px 0 0 var(--zh-primary-500); transition: background .6s var(--zh-ease), box-shadow .6s var(--zh-ease); }
+.detail-comment-item.is-linked { background: var(--zh-primary-50); box-shadow: inset 3px 0 0 var(--zh-primary-500); transition: background .6s var(--zh-ease), box-shadow .6s var(--zh-ease); }
+.notification-actions { display: flex; flex-shrink: 0; align-items: center; gap: 2px; }
 /* Forgotten password: entry under the login form, step switch and guidance in the dialog. */
 .forgot-entry.el-button { width: 100%; margin: 2px 0 0 !important; color: var(--zh-ink-500); }
 .forgot-steps { width: 100%; margin-bottom: 12px; }

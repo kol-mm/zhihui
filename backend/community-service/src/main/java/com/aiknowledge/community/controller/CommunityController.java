@@ -206,11 +206,53 @@ public class CommunityController {
         }
         comment.setContent(comment.getContent().trim());
         CommentEntity saved = communityStore.saveComment(comment);
-        Long notificationTarget = parent == null ? post.get().getUserId() : parent.getUserId();
-        if (!userId.equals(notificationTarget)) {
-            notificationClient.commentCreated(notificationTarget, userId, post.get().getId(), saved.getContent());
-        }
+        notifyComment(post.get(), parent, saved, userId);
         return ApiResponse.ok(toCommentView(saved));
+    }
+
+    /**
+     * The replied-to author hears about a reply, and the post's author about any new comment in the discussion;
+     * nobody is told about their own comment or twice about the same one.
+     */
+    private void notifyComment(PostEntity post, CommentEntity parent, CommentEntity saved, Long commenterId) {
+        Long repliedAuthor = parent == null ? null : parent.getUserId();
+        if (repliedAuthor != null && !repliedAuthor.equals(commenterId)) {
+            notificationClient.commentCreated(CommunityNotificationClient.CommentAudience.REPLIED_AUTHOR, repliedAuthor,
+                    commenterId, post.getId(), post.getTitle(), saved.getId(), saved.getContent());
+        }
+        Long postAuthor = post.getUserId();
+        if (postAuthor != null && !postAuthor.equals(commenterId) && !postAuthor.equals(repliedAuthor)) {
+            notificationClient.commentCreated(CommunityNotificationClient.CommentAudience.POST_AUTHOR, postAuthor,
+                    commenterId, post.getId(), post.getTitle(), saved.getId(), saved.getContent());
+        }
+    }
+
+    /**
+     * The whole thread a comment belongs to, as /comment/threads would show it. Used to open a notification on a
+     * comment that is not on the first page of the discussion.
+     */
+    @GetMapping("/comment/thread")
+    public ApiResponse<Map<String, Object>> commentThread(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "postId") Long postId,
+            @RequestParam(name = "commentId") Long commentId
+    ) {
+        boolean admin = LocalAuth.isAdmin(authorization);
+        if (!communityEnabled() || (!commentsEnabled() && !admin)) return ApiResponse.fail("comment not found");
+        PostEntity post = communityStore.findPost(postId).orElse(null);
+        if (post == null || !canViewPost(post, authorization)) return ApiResponse.fail("post not found");
+        CommentEntity comment = communityStore.findComment(commentId)
+                .filter(found -> postId.equals(found.getPostId()))
+                .orElse(null);
+        if (comment == null) return ApiResponse.fail("comment not found");
+        Long rootId = comment.getRootId() == null ? comment.getId() : comment.getRootId();
+        List<Map<String, Object>> items = threadViews(communityStore.listThreadComments(postId, List.of(rootId)), admin);
+        boolean shown = items.stream().anyMatch(item -> commentId.equals(item.get("id")) && !Boolean.TRUE.equals(item.get("placeholder")));
+        if (!shown) return ApiResponse.fail("comment not found");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", items);
+        result.put("commentId", commentId);
+        return ApiResponse.ok(result);
     }
 
     @GetMapping("/comment/list")
@@ -443,9 +485,7 @@ public class CommunityController {
         if (comment.getContent().isBlank()) return ApiResponse.fail("comment content is required");
         if (comment.getContent().trim().length() > maxCommentLength()) return ApiResponse.fail("评论内容不能超过 " + maxCommentLength() + " 个字符");
         CommentEntity saved = communityStore.saveComment(comment);
-        if (!userId.equals(post.getUserId())) {
-            notificationClient.commentCreated(post.getUserId(), userId, post.getId(), saved.getContent());
-        }
+        notifyComment(post, null, saved, userId);
         return ApiResponse.ok(toCommentView(saved));
     }
 
