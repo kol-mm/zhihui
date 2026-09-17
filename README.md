@@ -93,7 +93,7 @@ git switch docker-linux
 
 cp .env.example .env
 nano .env
-chmod +x deploy.sh setup-https.sh backup.sh restore.sh
+chmod +x deploy.sh setup-https.sh backup.sh restore.sh monitor.sh schedule.sh
 ./deploy.sh
 ```
 
@@ -206,6 +206,8 @@ RESTORE_CONFIRM=YES ./restore.sh /mnt/backup/zhihui/20260808-120000
 ```
 
 备份应保存到另一块磁盘或远程存储，不能只留在应用服务器。
+
+`sudo ./schedule.sh install` 会安装每日备份和每 5 分钟一次的巡检（`monitor.sh`，可通过企业微信、钉钉、飞书等 Webhook 告警），详见 `docs/docker-linux.md` 第 16、17 节。
 
 ## 安全配置
 

@@ -1,5 +1,6 @@
 package com.aiknowledge.knowledge.controller;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -1025,7 +1026,7 @@ public class KnowledgeController {
         int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
         KnowledgeStore.ContentAnalytics totals = knowledgeStore.analytics(LocalDateTime.now().minusDays(window));
         Map<String, Long> perDay = new LinkedHashMap<>();
-        knowledgeStore.dailyFileCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+        knowledgeStore.dailyFileCounts(AppTime.startOfDay(AppTime.today().minusDays(trendDays - 1L)))
                 .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
         List<Map<String, Object>> ranking = analyticsRanking.get(this::loadAnalyticsRanking);
         Map<String, Object> analytics = new LinkedHashMap<>();
@@ -1035,7 +1036,7 @@ public class KnowledgeController {
         analytics.put("views", totals.views());
         analytics.put("downloads", totals.downloads());
         analytics.put("likes", totals.likes());
-        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        analytics.put("trend", DailySeries.fill(AppTime.today(), trendDays, perDay));
         analytics.put("top", ranking);
         return ApiResponse.ok(analytics);
     }

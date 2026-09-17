@@ -21,6 +21,8 @@ from typing import Any, Iterator
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app import migrations
+
 
 APP_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = APP_DIR.parent / "data" / "ai_service.db"
@@ -168,7 +170,9 @@ _initialized_databases: set[Path] = set()
 
 
 def init_db() -> None:
-    """Create the schema and drop legacy sensitive chunks, once per database file per process.
+    """Apply pending schema migrations (app/migrations.py) and drop legacy sensitive chunks.
+
+    Runs once per database file per process.
 
     Every request path calls this. The purge reads every indexed chunk, so running it each time made each
     request cost grow with the index (about 3 s per request at 200k chunks). New chunks are already filtered
@@ -178,46 +182,9 @@ def init_db() -> None:
     if path in _initialized_databases and path.exists():
         return
     with connect() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS knowledge_chunk (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER NOT NULL DEFAULT 0,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                embedding TEXT,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_file_id
-                ON knowledge_chunk(file_id);
-
-            CREATE TABLE IF NOT EXISTS ai_chat_session (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_chat_message (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(session_id) REFERENCES ai_chat_session(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS ai_config (
-                config_key TEXT PRIMARY KEY,
-                config_value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            """
-        )
-        columns = {row["name"] for row in conn.execute("PRAGMA table_info(knowledge_chunk)").fetchall()}
-        if "embedding" not in columns:
-            conn.execute("ALTER TABLE knowledge_chunk ADD COLUMN embedding TEXT")
+        applied = migrations.migrate(conn)
+        if applied:
+            print(f"AI database migrated to version {applied[-1]} (applied {applied})", flush=True)
         purge_sensitive_chunks(conn)
     _initialized_databases.add(path)
 

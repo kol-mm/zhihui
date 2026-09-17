@@ -1,5 +1,6 @@
 package com.aiknowledge.community.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
 import com.aiknowledge.community.entity.PostEntity;
@@ -117,7 +118,7 @@ public interface CommunityStore {
         Map<String, Long> perDay = new LinkedHashMap<>();
         for (PostEntity post : analyticsPosts(since)) {
             if (post.getCreatedAt() == null) continue;
-            perDay.merge(post.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+            perDay.merge(AppTime.businessDate(post.getCreatedAt()).toString(), 1L, Long::sum);
         }
         return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
     }

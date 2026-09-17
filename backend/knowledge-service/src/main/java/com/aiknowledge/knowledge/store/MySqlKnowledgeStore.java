@@ -1,5 +1,6 @@
 package com.aiknowledge.knowledge.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.knowledge.entity.KnowledgeCollectEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeLikeEntity;
@@ -524,7 +525,7 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     /**
      * Optimizer hint for the analytics time windows. Left alone, MySQL reads every file with the status through
      * a status-only index and filters the dates afterwards; on a 300k-file table that was 3 to 10 times slower
-     * for 7 to 180 day windows and no faster for a full year. KnowledgeSchemaMigration creates the index, and
+     * for 7 to 180 day windows and no faster for a full year. the Flyway baseline (V1) creates the index, and
      * MySQL ignores the hint with a warning if it is ever missing.
      */
     private static final String WINDOW_INDEX = "/*+ INDEX(knowledge_file idx_file_audit_created) */ ";
@@ -547,12 +548,13 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
 
     @Override
     public List<DailyCount> dailyFileCounts(LocalDateTime since) {
+        String day = AppTime.sqlBusinessDate("created_at");
         return fileMapper.selectMaps(new QueryWrapper<KnowledgeFileEntity>()
-                        .select(WINDOW_INDEX + "DATE(created_at) AS day", "COUNT(*) AS file_count")
+                        .select(WINDOW_INDEX + day + " AS day", "COUNT(*) AS file_count")
                         .eq("audit_status", "APPROVED")
                         .ge("created_at", since)
-                        .groupBy("DATE(created_at)")
-                        .orderByAsc("DATE(created_at)"))
+                        .groupBy(day)
+                        .orderByAsc(day))
                 .stream()
                 .map(row -> new DailyCount(String.valueOf(row.get("day")), longValue(row.get("file_count"))))
                 .toList();

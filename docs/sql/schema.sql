@@ -1,79 +1,10 @@
-CREATE DATABASE IF NOT EXISTS user_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS knowledge_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS community_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS message_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS ai_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS audit_db DEFAULT CHARACTER SET utf8mb4;
-CREATE DATABASE IF NOT EXISTS statistics_db DEFAULT CHARACTER SET utf8mb4;
-
-USE user_db;
-CREATE TABLE IF NOT EXISTS user (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  username VARCHAR(64) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL DEFAULT '',
-  avatar_url VARCHAR(500),
-  nickname VARCHAR(64) NOT NULL,
-  signature VARCHAR(255),
-  status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
-  role VARCHAR(16) NOT NULL DEFAULT 'USER',
-  publish_policy VARCHAR(32) NOT NULL DEFAULT 'STANDARD',
-  messaging_enabled TINYINT(1) NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY idx_user_status_id (status, id),
-  KEY idx_user_role_id (role, id)
-);
-CREATE TABLE IF NOT EXISTS role (id BIGINT PRIMARY KEY AUTO_INCREMENT, code VARCHAR(64) NOT NULL UNIQUE, name VARCHAR(64) NOT NULL);
-CREATE TABLE IF NOT EXISTS permission (id BIGINT PRIMARY KEY AUTO_INCREMENT, code VARCHAR(128) NOT NULL UNIQUE, name VARCHAR(64) NOT NULL);
-CREATE TABLE IF NOT EXISTS user_role (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, role_id BIGINT NOT NULL, UNIQUE KEY uk_user_role(user_id, role_id));
-CREATE TABLE IF NOT EXISTS user_follow (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, target_user_id BIGINT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_follow(user_id, target_user_id));
-CREATE TABLE IF NOT EXISTS user_block (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, blocked_user_id BIGINT NOT NULL, reason VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_block(user_id, blocked_user_id));
-CREATE TABLE IF NOT EXISTS user_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, reporter_id BIGINT NOT NULL, target_user_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) NOT NULL DEFAULT 'PENDING', result VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_user_report_status(status, created_at), KEY idx_user_report_status_id(status, id));
-CREATE TABLE IF NOT EXISTS user_behavior_log (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, behavior_type VARCHAR(32) NOT NULL, target_type VARCHAR(32) NOT NULL, target_id BIGINT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, KEY idx_user_behavior(user_id, behavior_type, created_at));
-CREATE TABLE IF NOT EXISTS password_reset_request (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, username VARCHAR(64) NOT NULL, contact VARCHAR(100), status VARCHAR(16) NOT NULL DEFAULT 'PENDING', code_hash VARCHAR(100), code_expires_at DATETIME, failed_attempts INT NOT NULL DEFAULT 0, handled_by BIGINT, note VARCHAR(255), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_reset_status_id(status, id), KEY idx_reset_user_status(user_id, status));
-INSERT INTO user (id, username, password_hash, nickname, status, role, publish_policy, messaging_enabled)
-VALUES
-  (1, 'demo', '$2a$10$s.FoZgtcejwp0LTrreQ2oO7yrGQ8pgeBuaXyIQvGx1WbD1awva9Ja', 'Demo User', 'ACTIVE', 'USER', 'STANDARD', 1),
-  (2, 'admin', '$2a$10$HpKsfL9ZMThcXh4e8zmZeOcgwyNea4eqc6mXVWwYVFHGNrj2bywkS', 'Local Admin', 'ACTIVE', 'ADMIN', 'STANDARD', 1)
-ON DUPLICATE KEY UPDATE username = VALUES(username), role = VALUES(role);
-
-USE knowledge_db;
-CREATE TABLE IF NOT EXISTS knowledge_category (id BIGINT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(64) NOT NULL, parent_id BIGINT DEFAULT 0, sort_no INT DEFAULT 0);
-CREATE TABLE IF NOT EXISTS knowledge_file (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, category_id BIGINT, title VARCHAR(255) NOT NULL, file_url VARCHAR(500), file_type VARCHAR(16), parse_status VARCHAR(32) DEFAULT 'PENDING', audit_status VARCHAR(32) DEFAULT 'PENDING', views INT DEFAULT 0, downloads INT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_file_user(user_id), KEY idx_file_user_id(user_id, id), KEY idx_file_category(category_id), KEY idx_file_audit(audit_status, id), KEY idx_file_category_audit(category_id, audit_status, id), KEY idx_file_audit_created(audit_status, created_at));
-CREATE TABLE IF NOT EXISTS knowledge_collect (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_file_collect(user_id, file_id), KEY idx_file_collect_file(file_id), KEY idx_collect_user_id(user_id, id));
-CREATE TABLE IF NOT EXISTS knowledge_like (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_file_like(user_id, file_id), KEY idx_file_like_file(file_id), KEY idx_like_user_id(user_id, id));
-CREATE TABLE IF NOT EXISTS knowledge_download (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_download_file(file_id), KEY idx_download_user_id(user_id, id));
-CREATE TABLE IF NOT EXISTS knowledge_forward (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_forward_user(user_id, created_at), KEY idx_forward_user_id(user_id, id));
-CREATE TABLE IF NOT EXISTS knowledge_report (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, file_id BIGINT NOT NULL, reason VARCHAR(255), status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_knowledge_report_status(status));
-INSERT INTO knowledge_category (id, name, parent_id, sort_no)
-VALUES (1, 'Product', 0, 10), (2, 'Engineering', 0, 20), (3, 'Operations', 0, 30)
-ON DUPLICATE KEY UPDATE name = VALUES(name), sort_no = VALUES(sort_no);
-
-USE community_db;
-CREATE TABLE IF NOT EXISTS post (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, status VARCHAR(32) DEFAULT 'PENDING', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_post_user(user_id, created_at), KEY idx_post_status_id(status, id), KEY idx_post_status_created(status, created_at));
-CREATE TABLE IF NOT EXISTS post_image (id BIGINT PRIMARY KEY AUTO_INCREMENT, post_id BIGINT NOT NULL, image_url VARCHAR(500) NOT NULL, sort_no INT DEFAULT 0, KEY idx_post_image_post(post_id, sort_no));
-CREATE TABLE IF NOT EXISTS comment (id BIGINT PRIMARY KEY AUTO_INCREMENT, post_id BIGINT NOT NULL, user_id BIGINT NOT NULL, parent_id BIGINT DEFAULT 0, root_id BIGINT NULL, is_root TINYINT(1) NOT NULL DEFAULT 0, content TEXT NOT NULL, source VARCHAR(32) DEFAULT 'POST', status VARCHAR(32) DEFAULT 'VISIBLE', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_comment_post(post_id, created_at), KEY idx_comment_thread(post_id, root_id, id), KEY idx_comment_root(post_id, is_root, id));
-CREATE TABLE IF NOT EXISTS post_like (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, post_id BIGINT NOT NULL, source VARCHAR(32) DEFAULT 'POST', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_post_like(user_id, post_id), KEY idx_post_like_post(post_id));
-CREATE TABLE IF NOT EXISTS post_collect (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, post_id BIGINT NOT NULL, source VARCHAR(32) DEFAULT 'POST', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uk_post_collect(user_id, post_id), KEY idx_post_collect_post(post_id));
-CREATE TABLE IF NOT EXISTS post_draft (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255), content TEXT, image_urls_json TEXT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_draft_updated(updated_at, id));
-
-USE message_db;
-CREATE TABLE IF NOT EXISTS chat_session (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_a_id BIGINT NOT NULL, user_b_id BIGINT NOT NULL, status VARCHAR(32) DEFAULT 'ACTIVE', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_session_pair(user_a_id, user_b_id), KEY idx_session_user_b(user_b_id), KEY idx_session_updated(updated_at, id));
-CREATE TABLE IF NOT EXISTS chat_message (id BIGINT PRIMARY KEY AUTO_INCREMENT, session_id BIGINT NOT NULL, sender_id BIGINT NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'NORMAL', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_message_session(session_id, created_at), KEY idx_message_session_id(session_id, id));
-CREATE TABLE IF NOT EXISTS notification (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, title VARCHAR(255) NOT NULL, content TEXT, is_read TINYINT DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, target_type VARCHAR(16) NULL, target_id BIGINT NULL, anchor_id BIGINT NULL, KEY idx_notification_user(user_id, is_read, id), KEY idx_notification_user_id(user_id, id));
-  CREATE TABLE IF NOT EXISTS feedback_ticket (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(32) NOT NULL, content TEXT NOT NULL, status VARCHAR(32) DEFAULT 'PENDING', official_reply TEXT, assignee_user_id BIGINT, assigned_at DATETIME, closed_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_feedback_assignee(assignee_user_id, status), KEY idx_feedback_status_id(status, id), KEY idx_feedback_user_ticket(user_id, id), KEY idx_feedback_created(created_at), KEY idx_feedback_type_status(type, status));
-CREATE TABLE IF NOT EXISTS faq (id BIGINT PRIMARY KEY AUTO_INCREMENT, question VARCHAR(255) NOT NULL, answer TEXT NOT NULL, sort_no INT DEFAULT 0, enabled TINYINT DEFAULT 1);
-INSERT INTO faq (id, question, answer, sort_no, enabled)
-VALUES (1, 'How do I upload knowledge?', 'Open the knowledge library and choose Upload.', 10, 1)
-ON DUPLICATE KEY UPDATE question = VALUES(question), answer = VALUES(answer), enabled = VALUES(enabled);
-
-USE ai_db;
-CREATE TABLE IF NOT EXISTS ai_chat_session (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, title VARCHAR(255), created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS ai_chat_message (id BIGINT PRIMARY KEY AUTO_INCREMENT, session_id BIGINT NOT NULL, role VARCHAR(16) NOT NULL, content TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS knowledge_chunk (id BIGINT PRIMARY KEY AUTO_INCREMENT, file_id BIGINT NOT NULL, chunk_index INT NOT NULL, content TEXT NOT NULL, vector_id VARCHAR(128), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, KEY idx_chunk_file(file_id));
-
-USE audit_db;
-CREATE TABLE IF NOT EXISTS audit_record (id BIGINT PRIMARY KEY AUTO_INCREMENT, target_type VARCHAR(32) NOT NULL, target_id BIGINT NOT NULL, action VARCHAR(32) NOT NULL, reason VARCHAR(255), operator_id BIGINT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
-
-USE statistics_db;
-CREATE TABLE IF NOT EXISTS platform_statistics (id BIGINT PRIMARY KEY AUTO_INCREMENT, stat_date DATE NOT NULL, metric_key VARCHAR(64) NOT NULL, metric_value BIGINT NOT NULL DEFAULT 0, UNIQUE KEY uk_stat(stat_date, metric_key));
+-- Creates the databases. Each service creates and upgrades its own tables when it starts, using Flyway and the
+-- versioned scripts under backend/<service>/src/main/resources/db/migration (see docs/sql/README.md).
+CREATE DATABASE IF NOT EXISTS user_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS knowledge_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS community_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS message_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- Reserved; no service stores data here yet (the AI service keeps its data in SQLite).
+CREATE DATABASE IF NOT EXISTS ai_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS audit_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS statistics_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

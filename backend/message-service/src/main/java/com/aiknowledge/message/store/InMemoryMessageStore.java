@@ -32,6 +32,12 @@ public class InMemoryMessageStore implements MessageStore {
     private final List<NotificationEntity> notifications = new CopyOnWriteArrayList<>();
     private final List<FeedbackTicketEntity> tickets = new CopyOnWriteArrayList<>();
     private final List<FaqEntity> faqs = new CopyOnWriteArrayList<>();
+    // Removals only matter to conversations open right now, so they are not written to disk.
+    private final List<Removal> removals = new CopyOnWriteArrayList<>();
+    private final AtomicLong removalIds = new AtomicLong();
+
+    private record Removal(MessageRemoval removal, Long sessionId, LocalDateTime createdAt) {
+    }
 
     public InMemoryMessageStore() {
         State state = LocalJsonStore.read(storePath, State.class, new State());
@@ -145,7 +151,10 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
-    public int clearMessages(Long sessionId) {
+    public synchronized int clearMessages(Long sessionId) {
+        messages.stream().map(ChatMessageEntity::getSessionId)
+                .filter(id -> sessionId == null || id.equals(sessionId))
+                .distinct().forEach(this::recordClear);
         int before = messages.size();
         messages.removeIf(message -> sessionId == null || message.getSessionId().equals(sessionId));
         persist();
@@ -157,6 +166,7 @@ public class InMemoryMessageStore implements MessageStore {
         var sessionIds = sessions.stream()
                 .filter(session -> session.getUserAId().equals(userId) || session.getUserBId().equals(userId))
                 .map(ChatSessionEntity::getId).collect(java.util.stream.Collectors.toSet());
+        sessionIds.forEach(this::recordClear);
         int before = messages.size();
         messages.removeIf(message -> sessionIds.contains(message.getSessionId()));
         persist();
@@ -164,18 +174,41 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
-    public boolean deleteSession(Long sessionId) {
-        clearMessages(sessionId);
+    public synchronized boolean deleteSession(Long sessionId) {
+        messages.removeIf(message -> message.getSessionId().equals(sessionId));
+        removals.removeIf(entry -> entry.sessionId().equals(sessionId));
         boolean removed = sessions.removeIf(session -> session.getId().equals(sessionId));
         if (removed) persist();
         return removed;
     }
 
     @Override
-    public boolean deleteMessage(Long messageId) {
+    public synchronized boolean deleteMessage(Long messageId) {
+        findMessage(messageId).ifPresent(message -> addRemoval(message.getSessionId(), messageId, null));
         boolean removed = messages.removeIf(message -> message.getId().equals(messageId));
         if (removed) persist();
         return removed;
+    }
+
+    @Override
+    public List<MessageRemoval> listRemovals(Long sessionId, long afterId, int limit) {
+        return removals.stream()
+                .filter(entry -> entry.sessionId().equals(sessionId) && entry.removal().id() > afterId)
+                .map(Removal::removal)
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    private void recordClear(Long sessionId) {
+        messages.stream().filter(message -> message.getSessionId().equals(sessionId))
+                .map(ChatMessageEntity::getId).max(Long::compare)
+                .ifPresent(newest -> addRemoval(sessionId, null, newest));
+    }
+
+    private void addRemoval(Long sessionId, Long messageId, Long clearedThroughId) {
+        LocalDateTime now = LocalDateTime.now();
+        removals.removeIf(entry -> entry.createdAt().isBefore(now.minus(REMOVAL_RETENTION)));
+        removals.add(new Removal(new MessageRemoval(removalIds.incrementAndGet(), messageId, clearedThroughId), sessionId, now));
     }
 
     @Override

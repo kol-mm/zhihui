@@ -233,6 +233,7 @@ unset MYSQL_ROOT_PASSWORD MYSQL_PASSWORD JWT_SECRET INTERNAL_TOKEN REDIS_PASSWOR
 | --- | --- |
 | `HTTP_BIND_ADDRESS` | `0.0.0.0` 表示直接对外提供 HTTP；`127.0.0.1` 表示只允许宿主机反代访问 |
 | `HTTP_PORT` | 前端映射到宿主机的端口，默认 `80` |
+| `APP_TIME_ZONE` | 选填，默认 `Asia/Shanghai`。数据统计按该时区划分日期；时间按 UTC 存储，页面按访问者本地时间显示 |
 | `MAVEN_MIRROR_URL` | Java 依赖仓库，默认使用阿里云 Maven 公共仓库 |
 | `PIP_INDEX_URL` | Python 依赖仓库，默认使用阿里云 PyPI 镜像 |
 | `MYSQL_ROOT_PASSWORD` | MySQL root 密码，只供初始化和备份恢复使用 |
@@ -290,7 +291,7 @@ docker compose --env-file .env -f compose.yaml config --quiet
 
 ```bash
 cd /opt/zhihui
-chmod +x deploy.sh setup-https.sh backup.sh restore.sh
+chmod +x deploy.sh setup-https.sh backup.sh restore.sh monitor.sh schedule.sh
 ./deploy.sh
 ```
 
@@ -574,56 +575,82 @@ docker volume inspect zhihui_app_data
 
 ## 16. 手动备份
 
-建议将备份保存到独立磁盘或远程挂载点：
+建议将备份保存到独立磁盘或远程挂载点，并在 `.env` 中设置 `BACKUP_ROOT`（定时任务也使用这个目录）：
 
 ```bash
 sudo mkdir -p /mnt/backup/zhihui
 sudo chown "$USER":"$USER" /mnt/backup/zhihui
+echo 'BACKUP_ROOT=/mnt/backup/zhihui' >> /opt/zhihui/.env
 
 cd /opt/zhihui
-BACKUP_ROOT=/mnt/backup/zhihui ./backup.sh
+./backup.sh
 ```
 
-备份脚本会短暂停止业务写入，并生成：
+备份脚本会短暂暂停业务容器（约半分钟，让数据库与上传文件处于同一时刻；设置 `BACKUP_PAUSE_APP=0` 可跳过），然后生成：
 
 ```text
-mysql-all.sql
-app-data.tar.gz
-manifest.txt
-SHA256SUMS
+20260917-033000/
+├─ mysql-all.sql.gz   业务数据库（不含 MySQL 系统库，账号由初始化脚本按 .env 创建）
+├─ app-data.tar.gz    上传文件和 AI 数据
+├─ manifest.txt
+└─ SHA256SUMS
 ```
 
-检查最近备份：
+脚本会校验压缩包和导出是否完整，写入 `BACKUP_ROOT/last-success`（失败时写 `last-failure`），并按保留策略清理旧备份：
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `BACKUP_ROOT` | `./backups-docker` | 备份目录 |
+| `BACKUP_KEEP_DAYS` | `14` | 删除早于该天数的备份 |
+| `BACKUP_KEEP_MIN` | `3` | 无论多旧，至少保留最新的几份 |
+| `BACKUP_PAUSE_APP` | `1` | 备份时是否暂停业务容器 |
+| `BACKUP_POST_HOOK` | 空 | 备份成功后执行的命令，`{}` 替换为备份目录，`{name}` 替换为目录名，例如 `rclone copy {} remote:zhihui/{name}` |
+
+`.env` 中的密码和密钥不在备份内，请另行保存。只保存在同一块系统盘的备份不算可靠备份，应通过 `BACKUP_POST_HOOK` 或其他方式同步到另一台服务器或对象存储。
+
+## 17. 定时备份与监控
+
+一条命令安装两个定时任务：每天 03:30 备份，每 5 分钟巡检一次。
 
 ```bash
-ls -lah /mnt/backup/zhihui
-latest="$(find /mnt/backup/zhihui -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
-cd "$latest"
-sha256sum -c SHA256SUMS
+cd /opt/zhihui
+sudo ./schedule.sh install      # 系统级 systemd 定时器，以仓库所有者身份运行
+./schedule.sh status            # 查看下次执行时间、最近巡检和最近备份
+./schedule.sh print             # 只打印将要安装的单元，不做改动
+sudo ./schedule.sh remove
 ```
 
-## 17. 定时备份
+不用 sudo 时会安装为当前用户的定时器（需要 `sudo loginctl enable-linger $USER` 才能在注销后继续运行）；没有 systemd 的系统会改写当前用户的 crontab。执行时间可用 `BACKUP_SCHEDULE`（systemd `OnCalendar` 格式）和 `MONITOR_INTERVAL` 调整。
 
-编辑当前部署用户的定时任务：
+`monitor.sh` 每次巡检：
+
+- 每个容器都在运行且健康检查通过，并提醒被 Docker 自动重启过的容器；
+- `/healthz` 和 `/api/gateway/status` 能够访问；
+- Docker 数据目录和备份目录所在分区的剩余空间；
+- 最近一次成功备份不超过 `MONITOR_BACKUP_MAX_AGE_HOURS`（默认 26）小时，且之后没有失败；
+- 设置 `MONITOR_TLS_HOST` 时，证书剩余有效期不少于 `MONITOR_TLS_MIN_DAYS`（默认 14）天。
+
+结果写入 `.monitor/status.json`，有问题时退出码为 1。配置告警地址后，出现问题、问题变化和恢复时立即通知，持续异常时每 `MONITOR_REPEAT_HOURS`（默认 6）小时提醒一次：
 
 ```bash
-crontab -e
+# .env
+ALERT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
+ALERT_WEBHOOK_TYPE=wecom        # wecom | dingtalk | feishu | slack | json
 ```
 
-每天凌晨 3 点备份：
-
-```cron
-0 3 * * * cd /opt/zhihui && BACKUP_ROOT=/mnt/backup/zhihui ./backup.sh >> /mnt/backup/zhihui/backup.log 2>&1
-```
-
-查看定时任务：
+钉钉机器人如启用了关键词校验，请把关键词设为“监控”（消息以“[知汇 监控]”开头，可用 `ALERT_SITE_NAME` 修改站点名）。配置后先发一条测试告警：
 
 ```bash
-crontab -l
-tail -n 100 /mnt/backup/zhihui/backup.log
+./monitor.sh --test-alert
+./monitor.sh; echo "exit=$?"
 ```
 
-还应将 `/mnt/backup/zhihui` 同步到另一台服务器或对象存储。只保存在同一块系统盘不算可靠备份。
+查看执行记录：
+
+```bash
+journalctl -u zhihui-backup.service -n 50      # 用户级定时器请加 --user
+journalctl -u zhihui-monitor.service -n 50
+```
 
 ## 18. 恢复备份
 
@@ -652,7 +679,7 @@ RESTORE_CONFIRM=YES ./restore.sh /mnt/backup/zhihui/20260809-030000
 
 1. 校验备份文件 SHA-256。
 2. 停止前端和业务容器。
-3. 恢复 MySQL 全库。
+3. 恢复 MySQL 业务库（也能读取旧备份中未压缩的 `mysql-all.sql`）。
 4. 覆盖应用数据卷。
 5. 重新启动并执行健康检查。
 

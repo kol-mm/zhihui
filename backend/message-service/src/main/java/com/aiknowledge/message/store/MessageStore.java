@@ -1,5 +1,6 @@
 package com.aiknowledge.message.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.message.entity.ChatMessageEntity;
 import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
@@ -70,6 +71,19 @@ public interface MessageStore {
 
     Optional<ChatMessageEntity> findMessage(Long messageId);
 
+    /** How long removals are kept for conversations that are open elsewhere to catch up on. */
+    java.time.Duration REMOVAL_RETENTION = java.time.Duration.ofDays(7);
+
+    /**
+     * A removal an open conversation has to apply: one message ({@code messageId}), or every message up to
+     * {@code clearedThroughId}. Deleting, clearing and clearing-all record these; their ids only grow.
+     */
+    record MessageRemoval(long id, Long messageId, Long clearedThroughId) {
+    }
+
+    /** Removals recorded in the conversation after {@code afterId}, oldest first. */
+    List<MessageRemoval> listRemovals(Long sessionId, long afterId, int limit);
+
     List<NotificationEntity> listNotifications(Long userId);
 
     /** Newest-first page of notifications, optionally unread only; beforeId is the paging cursor. */
@@ -133,7 +147,7 @@ public interface MessageStore {
         Map<String, Long> perDay = new LinkedHashMap<>();
         for (FeedbackTicketEntity ticket : analyticsTickets(since)) {
             if (ticket.getCreatedAt() == null) continue;
-            perDay.merge(ticket.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+            perDay.merge(AppTime.businessDate(ticket.getCreatedAt()).toString(), 1L, Long::sum);
         }
         return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
     }

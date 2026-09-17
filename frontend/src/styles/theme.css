@@ -480,6 +480,8 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .status-list i.offline { box-shadow: 0 0 0 3px rgba(217, 83, 79, .15); animation: none; }
 .status-list span, .task-list button { border-bottom-color: var(--zh-divider); }
 .analytics-ranking article>b { background: var(--zh-primary-50); }
+/* A restricted or archived conversation explains why the composer is off. */
+.message-compose-notice { margin: 0; padding: 8px 14px; color: var(--zh-ink-500); font-size: 12px; background: var(--zh-surface-soft); border-top: 1px solid var(--zh-border); }
 /* A comment opened from a notification is highlighted briefly. */
 /* The page keeps the list steady itself when comments load (utils/scrollAnchor), so the browser must not too. */
 .detail-comment-list { overflow-anchor: none; }

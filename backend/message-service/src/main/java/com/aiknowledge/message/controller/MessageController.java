@@ -1,5 +1,6 @@
 package com.aiknowledge.message.controller;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -151,6 +152,51 @@ public class MessageController {
         int pageSize = Math.max(1, Math.min(100, limit));
         return ApiResponse.ok(messageStore.pageMessages(sessionId, beforeId, afterId, pageSize)
                 .stream().map(this::toMessageView).toList());
+    }
+
+    private static final int SYNC_PAGE_MAX = 100;
+    private static final int SYNC_REMOVAL_PAGE = 200;
+
+    /**
+     * What an open conversation has missed: messages after {@code afterId} and removals after
+     * {@code removalCursor} (start at 0). A conversation deleted in the meantime comes back as
+     * {@code sessionMissing}; one restricted or archived by an admin reports its new status.
+     */
+    @GetMapping("/message/sync")
+    public ApiResponse<Map<String, Object>> sync(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestParam(name = "sessionId") Long sessionId,
+            @RequestParam(name = "afterId", defaultValue = "0") long afterId,
+            @RequestParam(name = "removalCursor", defaultValue = "0") long removalCursor,
+            @RequestParam(name = "limit", defaultValue = "100") int limit
+    ) {
+        Long userId = LocalAuth.userId(authorization);
+        if (userId == null) return ApiResponse.fail("valid user authorization is required");
+        if (afterId < 0 || removalCursor < 0) return ApiResponse.fail("invalid message cursor");
+        ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (session == null) {
+            result.put("sessionMissing", true);
+            return ApiResponse.ok(result);
+        }
+        if (!isParticipant(session, userId)) return ApiResponse.fail("user is not a participant of this session");
+        int pageSize = Math.max(1, Math.min(SYNC_PAGE_MAX, limit));
+        List<ChatMessageEntity> fresh = messageStore.pageMessages(sessionId, null, afterId, pageSize + 1);
+        boolean moreMessages = fresh.size() > pageSize;
+        List<MessageStore.MessageRemoval> removals = messageStore.listRemovals(sessionId, removalCursor, SYNC_REMOVAL_PAGE + 1);
+        boolean moreRemovals = removals.size() > SYNC_REMOVAL_PAGE;
+        if (moreRemovals) removals = removals.subList(0, SYNC_REMOVAL_PAGE);
+        result.put("sessionMissing", false);
+        result.put("sessionStatus", session.getStatus());
+        result.put("messages", (moreMessages ? fresh.subList(0, pageSize) : fresh).stream().map(this::toMessageView).toList());
+        result.put("hasMoreMessages", moreMessages);
+        result.put("removedMessageIds", removals.stream().map(MessageStore.MessageRemoval::messageId)
+                .filter(java.util.Objects::nonNull).toList());
+        result.put("clearedThroughId", removals.stream().map(MessageStore.MessageRemoval::clearedThroughId)
+                .filter(java.util.Objects::nonNull).max(Long::compare).orElse(null));
+        result.put("removalCursor", removals.isEmpty() ? removalCursor : removals.get(removals.size() - 1).id());
+        result.put("hasMoreRemovals", moreRemovals);
+        return ApiResponse.ok(result);
     }
 
     @PostMapping("/message/clear")
@@ -706,7 +752,7 @@ public class MessageController {
         int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
         MessageStore.TicketAnalytics totals = messageStore.ticketAnalytics(LocalDateTime.now().minusDays(window));
         Map<String, Long> perDay = new LinkedHashMap<>();
-        messageStore.dailyTicketCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+        messageStore.dailyTicketCounts(AppTime.startOfDay(AppTime.today().minusDays(trendDays - 1L)))
                 .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
         Map<String, Object> analytics = new LinkedHashMap<>();
         analytics.put("days", window);
@@ -716,7 +762,7 @@ public class MessageController {
         analytics.put("suggestion", totals.suggestion());
         analytics.put("support", totals.support());
         analytics.put("resolved", totals.resolved());
-        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        analytics.put("trend", DailySeries.fill(AppTime.today(), trendDays, perDay));
         return ApiResponse.ok(analytics);
     }
 

@@ -558,7 +558,7 @@ class CommunityControllerTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
         assertEquals(14, trend.size());
-        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
+        assertEquals(com.aiknowledge.common.AppTime.today().toString(), trend.get(13).get("date"));
         assertTrue(analyticsNumber(trend.get(13).get("count")) >= 1);
         assertEquals(7, ((List<?>) controller.adminAnalytics(adminAuth, 7).data().get("trend")).size());
 

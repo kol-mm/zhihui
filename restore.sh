@@ -14,8 +14,11 @@ if [[ "${RESTORE_CONFIRM:-}" != "YES" ]]; then
   echo "恢复会覆盖当前数据库和应用文件。确认后设置 RESTORE_CONFIRM=YES。" >&2
   exit 1
 fi
-[[ -f "$SOURCE/mysql-all.sql" && -f "$SOURCE/app-data.tar.gz" && -f "$SOURCE/SHA256SUMS" ]] || {
-  echo "备份目录缺少 mysql-all.sql、app-data.tar.gz 或 SHA256SUMS。" >&2
+# 新备份的数据库导出是压缩的（mysql-all.sql.gz），旧备份是 mysql-all.sql。
+dump="$SOURCE/mysql-all.sql.gz"
+[[ -f "$dump" ]] || dump="$SOURCE/mysql-all.sql"
+[[ -f "$dump" && -f "$SOURCE/app-data.tar.gz" && -f "$SOURCE/SHA256SUMS" ]] || {
+  echo "备份目录缺少 mysql-all.sql(.gz)、app-data.tar.gz 或 SHA256SUMS。" >&2
   exit 1
 }
 
@@ -28,7 +31,11 @@ echo "停止业务容器……"
 "${COMPOSE[@]}" stop frontend gateway user-service knowledge-service community-service message-service ai
 
 echo "恢复 MySQL……"
-"${COMPOSE[@]}" exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' < "$SOURCE/mysql-all.sql"
+if [[ "$dump" == *.gz ]]; then
+  gzip -dc "$dump" | "${COMPOSE[@]}" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot'
+else
+  "${COMPOSE[@]}" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot' < "$dump"
+fi
 
 echo "恢复上传文件和 AI 数据……"
 docker run --rm --volumes-from "$ai_container" -v "$(cd "$SOURCE" && pwd):/backup:ro" alpine:3.20 \

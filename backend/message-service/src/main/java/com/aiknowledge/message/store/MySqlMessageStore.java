@@ -1,11 +1,14 @@
 package com.aiknowledge.message.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.message.entity.ChatMessageEntity;
+import com.aiknowledge.message.entity.ChatMessageRemovalEntity;
 import com.aiknowledge.message.entity.ChatSessionEntity;
 import com.aiknowledge.message.entity.FaqEntity;
 import com.aiknowledge.message.entity.FeedbackTicketEntity;
 import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.mapper.ChatMessageMapper;
+import com.aiknowledge.message.mapper.ChatMessageRemovalMapper;
 import com.aiknowledge.message.mapper.ChatSessionMapper;
 import com.aiknowledge.message.mapper.FaqMapper;
 import com.aiknowledge.message.mapper.FeedbackTicketMapper;
@@ -13,6 +16,8 @@ import com.aiknowledge.message.mapper.NotificationMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.context.annotation.Profile;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -33,37 +38,51 @@ public class MySqlMessageStore implements MessageStore {
     private final NotificationMapper notificationMapper;
     private final FeedbackTicketMapper ticketMapper;
     private final FaqMapper faqMapper;
+    private final ChatMessageRemovalMapper removalMapper;
 
     public MySqlMessageStore(
             ChatMessageMapper messageMapper,
             ChatSessionMapper sessionMapper,
             NotificationMapper notificationMapper,
             FeedbackTicketMapper ticketMapper,
-            FaqMapper faqMapper
+            FaqMapper faqMapper,
+            ChatMessageRemovalMapper removalMapper
     ) {
         this.messageMapper = messageMapper;
         this.sessionMapper = sessionMapper;
         this.notificationMapper = notificationMapper;
         this.ticketMapper = ticketMapper;
         this.faqMapper = faqMapper;
+        this.removalMapper = removalMapper;
     }
 
     @Override
     public ChatSessionEntity getOrCreateSession(Long firstUserId, Long secondUserId) {
         Long userAId = Math.min(firstUserId, secondUserId);
         Long userBId = Math.max(firstUserId, secondUserId);
-        ChatSessionEntity existing = sessionMapper.selectOne(Wrappers.<ChatSessionEntity>lambdaQuery()
-                .eq(ChatSessionEntity::getUserAId, userAId)
-                .eq(ChatSessionEntity::getUserBId, userBId)
-                .last("LIMIT 1"));
+        ChatSessionEntity existing = findSessionBetween(userAId, userBId);
         if (existing != null) return existing;
         ChatSessionEntity session = new ChatSessionEntity();
         session.setUserAId(userAId);
         session.setUserBId(userBId);
         session.setStatus("ACTIVE");
         session.setUpdatedAt(LocalDateTime.now());
-        sessionMapper.insert(session);
-        return session;
+        try {
+            sessionMapper.insert(session);
+            return session;
+        } catch (DuplicateKeyException raced) {
+            // uk_session_pair (V2): another request created the conversation first.
+            ChatSessionEntity winner = findSessionBetween(userAId, userBId);
+            if (winner == null) throw raced;
+            return winner;
+        }
+    }
+
+    private ChatSessionEntity findSessionBetween(Long userAId, Long userBId) {
+        return sessionMapper.selectOne(Wrappers.<ChatSessionEntity>lambdaQuery()
+                .eq(ChatSessionEntity::getUserAId, userAId)
+                .eq(ChatSessionEntity::getUserBId, userBId)
+                .last("LIMIT 1"));
     }
 
     @Override
@@ -159,26 +178,65 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override
+    @Transactional
     public int clearMessages(Long sessionId) {
+        pruneRemovals();
+        if (sessionId == null) removalMapper.recordAllClears(LocalDateTime.now());
+        else removalMapper.recordClears(List.of(sessionId), LocalDateTime.now());
         return messageMapper.delete(Wrappers.<ChatMessageEntity>lambdaQuery()
                 .eq(sessionId != null, ChatMessageEntity::getSessionId, sessionId));
     }
 
     @Override
+    @Transactional
     public int clearUserMessages(Long userId) {
         List<Long> sessionIds = listSessions(userId).stream().map(ChatSessionEntity::getId).toList();
         if (sessionIds.isEmpty()) return 0;
+        pruneRemovals();
+        removalMapper.recordClears(sessionIds, LocalDateTime.now());
         return messageMapper.delete(Wrappers.<ChatMessageEntity>lambdaQuery()
                 .in(ChatMessageEntity::getSessionId, sessionIds));
     }
 
     @Override
+    @Transactional
     public boolean deleteSession(Long sessionId) {
-        clearMessages(sessionId);
+        // Nothing to record: the conversation itself is gone, and a sync reports that instead.
+        messageMapper.delete(Wrappers.<ChatMessageEntity>lambdaQuery().eq(ChatMessageEntity::getSessionId, sessionId));
+        removalMapper.delete(Wrappers.<ChatMessageRemovalEntity>lambdaQuery().eq(ChatMessageRemovalEntity::getSessionId, sessionId));
         return sessionMapper.deleteById(sessionId) > 0;
     }
 
-    @Override public boolean deleteMessage(Long messageId) { return messageMapper.deleteById(messageId) > 0; }
+    @Override
+    @Transactional
+    public boolean deleteMessage(Long messageId) {
+        ChatMessageEntity message = messageMapper.selectById(messageId);
+        if (message == null) return false;
+        pruneRemovals();
+        ChatMessageRemovalEntity removal = new ChatMessageRemovalEntity();
+        removal.setSessionId(message.getSessionId());
+        removal.setMessageId(messageId);
+        removal.setCreatedAt(LocalDateTime.now());
+        removalMapper.insert(removal);
+        return messageMapper.deleteById(messageId) > 0;
+    }
+
+    @Override
+    public List<MessageRemoval> listRemovals(Long sessionId, long afterId, int limit) {
+        return removalMapper.selectList(Wrappers.<ChatMessageRemovalEntity>lambdaQuery()
+                        .eq(ChatMessageRemovalEntity::getSessionId, sessionId)
+                        .gt(ChatMessageRemovalEntity::getId, afterId)
+                        .orderByAsc(ChatMessageRemovalEntity::getId)
+                        .last("LIMIT " + Math.max(1, limit)))
+                .stream()
+                .map(row -> new MessageRemoval(row.getId(), row.getMessageId(), row.getClearedThroughId()))
+                .toList();
+    }
+
+    /** Removals only matter to conversations open right now; a bounded delete keeps the table small. */
+    private void pruneRemovals() {
+        removalMapper.pruneBefore(LocalDateTime.now().minus(REMOVAL_RETENTION));
+    }
     @Override public Optional<ChatMessageEntity> findMessage(Long messageId) {
         return Optional.ofNullable(messageMapper.selectById(messageId));
     }
@@ -311,11 +369,12 @@ public class MySqlMessageStore implements MessageStore {
 
     @Override
     public List<DailyCount> dailyTicketCounts(LocalDateTime since) {
+        String day = AppTime.sqlBusinessDate("created_at");
         return ticketMapper.selectMaps(new QueryWrapper<FeedbackTicketEntity>()
-                        .select("DATE(created_at) AS day", "COUNT(*) AS ticket_count")
+                        .select(day + " AS day", "COUNT(*) AS ticket_count")
                         .ge("created_at", since)
-                        .groupBy("DATE(created_at)")
-                        .orderByAsc("DATE(created_at)"))
+                        .groupBy(day)
+                        .orderByAsc(day))
                 .stream()
                 .map(row -> new DailyCount(String.valueOf(row.get("day")), ticketCount(row.get("ticket_count"))))
                 .toList();

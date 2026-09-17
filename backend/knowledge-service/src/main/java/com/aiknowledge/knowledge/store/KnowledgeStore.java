@@ -1,5 +1,6 @@
 package com.aiknowledge.knowledge.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 
@@ -93,7 +94,7 @@ public interface KnowledgeStore {
         Map<String, Long> perDay = new LinkedHashMap<>();
         for (KnowledgeFileEntity file : analyticsFiles(since)) {
             if (file.getCreatedAt() == null) continue;
-            perDay.merge(file.getCreatedAt().toLocalDate().toString(), 1L, Long::sum);
+            perDay.merge(AppTime.businessDate(file.getCreatedAt()).toString(), 1L, Long::sum);
         }
         return perDay.entrySet().stream().map(entry -> new DailyCount(entry.getKey(), entry.getValue())).toList();
     }

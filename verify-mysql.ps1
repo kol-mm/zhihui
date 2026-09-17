@@ -20,15 +20,16 @@ try {
     Get-Content -LiteralPath $schemaPath -Raw | & $MySqlExe "--user=$Username" --default-character-set=utf8mb4
     if ($LASTEXITCODE -ne 0) { throw "MySQL schema initialization failed." }
 
+    # Tables and seed data are created by the services (Flyway) when they first start against these databases.
     $query = @"
-SELECT 'user_db.user' AS table_name, COUNT(*) AS row_count FROM user_db.user
-UNION ALL SELECT 'knowledge_db.knowledge_category', COUNT(*) FROM knowledge_db.knowledge_category
-UNION ALL SELECT 'community_db.post', COUNT(*) FROM community_db.post
-UNION ALL SELECT 'message_db.faq', COUNT(*) FROM message_db.faq;
+SELECT table_schema AS database_name, 'yes' AS managed_by_flyway
+FROM information_schema.tables
+WHERE table_name = 'flyway_schema_history' AND table_schema IN ('user_db', 'knowledge_db', 'community_db', 'message_db')
+GROUP BY table_schema;
 "@
     & $MySqlExe "--user=$Username" --batch --table -e $query
     if ($LASTEXITCODE -ne 0) { throw "MySQL verification query failed." }
-    Write-Host "MySQL schema and seed verification passed." -ForegroundColor Green
+    Write-Host "Databases are ready; start the services to create or upgrade their tables." -ForegroundColor Green
 } finally {
     $env:MYSQL_PWD = $previousPassword
 }

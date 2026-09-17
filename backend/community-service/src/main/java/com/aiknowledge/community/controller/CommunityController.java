@@ -1,5 +1,6 @@
 package com.aiknowledge.community.controller;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -931,7 +932,7 @@ public class CommunityController {
         int trendDays = Math.min(window, ANALYTICS_TREND_DAYS);
         CommunityStore.PostAnalytics totals = communityStore.postAnalytics(LocalDateTime.now().minusDays(window));
         Map<String, Long> perDay = new LinkedHashMap<>();
-        communityStore.dailyPostCounts(LocalDate.now().minusDays(trendDays - 1L).atStartOfDay())
+        communityStore.dailyPostCounts(AppTime.startOfDay(AppTime.today().minusDays(trendDays - 1L)))
                 .forEach(entry -> perDay.merge(entry.date(), entry.count(), Long::sum));
         List<PostEntity> top = communityStore.topPosts(ANALYTICS_TOP_LIMIT);
         Map<Long, Long> topLikes = communityStore.countPostLikes(top.stream().map(PostEntity::getId).toList());
@@ -948,7 +949,7 @@ public class CommunityController {
         analytics.put("trendDays", trendDays);
         analytics.put("posts", totals.posts());
         analytics.put("likes", totals.likes());
-        analytics.put("trend", DailySeries.fill(LocalDate.now(), trendDays, perDay));
+        analytics.put("trend", DailySeries.fill(AppTime.today(), trendDays, perDay));
         analytics.put("top", ranking);
         return ApiResponse.ok(analytics);
     }

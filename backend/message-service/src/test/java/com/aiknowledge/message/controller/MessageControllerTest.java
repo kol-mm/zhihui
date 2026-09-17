@@ -414,7 +414,7 @@ class MessageControllerTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
         assertEquals(14, trend.size());
-        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
+        assertEquals(com.aiknowledge.common.AppTime.today().toString(), trend.get(13).get("date"));
         assertTrue(analyticsNumber(trend.get(13).get("count")) >= 2);
         assertEquals(7, ((List<?>) controller.feedbackAdminAnalytics(adminAuth, 7).data().get("trend")).size());
 
@@ -596,5 +596,91 @@ class MessageControllerTest {
         assertEquals("POST", target.get("type"));
         assertEquals(5L, target.get("id"));
         assertEquals(9L, target.get("anchorId"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncTellsAnOpenConversationWhatWasRemoved() {
+        Long sessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 71L)).data().get("id")).longValue();
+        String peerAuth = "Bearer " + LocalAuth.issueToken("peer-71", 71L, "USER");
+        Long first = sendText(sessionId, "one");
+        Long second = sendText(sessionId, "two");
+        Long third = sendText(sessionId, "three");
+
+        Map<String, Object> opened = controller.sync(peerAuth, sessionId, 0, 0, 100).data();
+        assertEquals(List.of(first, second, third), ids((List<Map<String, Object>>) opened.get("messages")));
+        assertEquals(List.of(), opened.get("removedMessageIds"));
+        assertEquals(0L, number(opened.get("removalCursor")));
+        assertEquals("ACTIVE", opened.get("sessionStatus"));
+
+        // The sender deletes a message the peer is looking at.
+        controller.deleteMessage(userAuth, Map.of("messageId", second));
+        Map<String, Object> afterDelete = controller.sync(peerAuth, sessionId, third, 0, 100).data();
+        assertEquals(List.of(second), afterDelete.get("removedMessageIds"));
+        assertEquals(null, afterDelete.get("clearedThroughId"));
+        assertEquals(List.of(), afterDelete.get("messages"));
+        long cursor = number(afterDelete.get("removalCursor"));
+        assertTrue(cursor > 0);
+        assertEquals(List.of(), controller.sync(peerAuth, sessionId, third, cursor, 100).data().get("removedMessageIds"));
+
+        // Clearing the conversation removes everything up to the newest message; later messages stay.
+        controller.clear(userAuth, Map.of("sessionId", sessionId));
+        Long fourth = sendText(sessionId, "four");
+        Map<String, Object> afterClear = controller.sync(peerAuth, sessionId, third, cursor, 100).data();
+        assertEquals(third, afterClear.get("clearedThroughId"));
+        assertEquals(List.of(fourth), ids((List<Map<String, Object>>) afterClear.get("messages")));
+        cursor = number(afterClear.get("removalCursor"));
+
+        // Clearing all of one's conversations counts too, and only for that user's conversations.
+        Long elsewhere = ((Number) controller.createSession(
+                "Bearer " + LocalAuth.issueToken("third-72", 72L, "USER"), Map.of("targetUserId", 73L)).data().get("id")).longValue();
+        controller.send("Bearer " + LocalAuth.issueToken("third-72", 72L, "USER"), Map.of("sessionId", elsewhere, "content", "untouched"));
+        controller.clearAllForUser(peerAuth);
+        assertEquals(fourth, controller.sync(peerAuth, sessionId, fourth, cursor, 100).data().get("clearedThroughId"));
+        String thirdAuth = "Bearer " + LocalAuth.issueToken("third-72", 72L, "USER");
+        assertEquals(null, controller.sync(thirdAuth, elsewhere, 0, 0, 100).data().get("clearedThroughId"));
+
+        // Outsiders learn nothing; a restricted conversation says so; a deleted one is reported as gone.
+        assertEquals(500, controller.sync(thirdAuth, sessionId, 0, 0, 100).code());
+        assertEquals(500, controller.sync(peerAuth, sessionId, -1, 0, 100).code());
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        controller.updateSessionStatus(adminAuth, Map.of("sessionId", sessionId, "status", "RESTRICTED"));
+        assertEquals("RESTRICTED", controller.sync(peerAuth, sessionId, 0, 0, 100).data().get("sessionStatus"));
+        controller.deleteSession(userAuth, Map.of("sessionId", sessionId));
+        assertEquals(true, controller.sync(peerAuth, sessionId, 0, 0, 100).data().get("sessionMissing"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void syncPagesALongGapInOrder() {
+        Long sessionId = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 74L)).data().get("id")).longValue();
+        List<Long> sent = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) sent.add(sendText(sessionId, "burst " + i));
+        Map<String, Object> page = controller.sync(userAuth, sessionId, 0, 0, 2).data();
+        assertEquals(sent.subList(0, 2), ids((List<Map<String, Object>>) page.get("messages")));
+        assertEquals(true, page.get("hasMoreMessages"));
+        Map<String, Object> rest = controller.sync(userAuth, sessionId, sent.get(1), 0, 10).data();
+        assertEquals(sent.subList(2, 5), ids((List<Map<String, Object>>) rest.get("messages")));
+        assertEquals(false, rest.get("hasMoreMessages"));
+    }
+
+    @Test
+    void theSameTwoUsersShareOneConversation() {
+        Long first = ((Number) controller.createSession(userAuth, Map.of("targetUserId", 75L)).data().get("id")).longValue();
+        String otherSide = "Bearer " + LocalAuth.issueToken("peer-75", 75L, "USER");
+        Long second = ((Number) controller.createSession(otherSide, Map.of("targetUserId", 1L)).data().get("id")).longValue();
+        assertEquals(first, second);
+    }
+
+    private Long sendText(Long sessionId, String content) {
+        return ((Number) controller.send(userAuth, Map.of("sessionId", sessionId, "content", content)).data().get("id")).longValue();
+    }
+
+    private static List<Long> ids(List<Map<String, Object>> items) {
+        return items.stream().map(item -> ((Number) item.get("id")).longValue()).toList();
+    }
+
+    private static long number(Object value) {
+        return ((Number) value).longValue();
     }
 }

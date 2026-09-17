@@ -227,7 +227,7 @@
 
           <section v-else-if="activeView === 'messages'" class="message-page" :class="{ 'has-session': messageForm.sessionId }">
             <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ sessions.length }} 个联系人</p></div><div><el-button :icon="Delete" circle text type="danger" title="清空全部聊天记录" @click="clearAllMessages" /><el-button :icon="Plus" circle title="发起私信" @click="newConversation" /></div></div><div class="session-list"><button v-for="session in sessions" :key="session.id" :class="{ active: messageForm.sessionId === session.id }" @click="openSession(session)"><div class="mini-avatar">{{ sessionPartner(session).nickname.slice(0,1).toUpperCase() }}</div><span><strong>{{ sessionPartner(session).nickname }}</strong><small>{{ session.lastMessage || `@${sessionPartner(session).username}` }}</small></span></button></div><el-empty v-if="!sessions.length" description="暂无私信会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" :loading="messageRefreshing" circle text title="获取新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list" @scroll.passive="handleMessageScroll"><div v-if="messageForm.sessionId && messages.length" class="message-history-state"><el-button v-if="messageHasOlder || messageHistoryLoading" text size="small" :loading="messageHistoryLoading" @click="loadOlderMessages">{{ messageHistoryLoading ? '正在加载更早的消息' : '查看更早的消息' }}</el-button><small v-else>已显示全部消息</small></div><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><button v-if="messageUnseenCount" type="button" class="message-new-indicator" @click="jumpToLatestMessages">{{ messageUnseenCount }} 条新消息</button><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim()" @click="sendMessage">发送</el-button></div></section>
+            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" :loading="messageRefreshing" circle text title="获取新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list" @scroll.passive="handleMessageScroll"><div v-if="messageForm.sessionId && messages.length" class="message-history-state"><el-button v-if="messageHasOlder || messageHistoryLoading" text size="small" :loading="messageHistoryLoading" @click="loadOlderMessages">{{ messageHistoryLoading ? '正在加载更早的消息' : '查看更早的消息' }}</el-button><small v-else>已显示全部消息</small></div><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><button v-if="messageUnseenCount" type="button" class="message-new-indicator" @click="jumpToLatestMessages">{{ messageUnseenCount }} 条新消息</button><p v-if="openSessionClosed" class="message-compose-notice" role="status">该会话{{ sessionStatusLabel(openSessionStatus) }}，暂时不能发送消息</p><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending || openSessionClosed" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim() || openSessionClosed" @click="sendMessage">发送</el-button></div></section>
           </section>
 
           <section v-else-if="activeView === 'ai'" class="ai-page" :class="{ 'history-open': mobileAiHistoryOpen }">
@@ -358,16 +358,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, markRaw, onBeforeUnmount, onMounted, nextTick, ref, watch } from 'vue';
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, CollectionTag, CopyDocument, DataAnalysis, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { detailPath, linkedCommentFrom, noticeDestination, type NoticeTarget } from './utils/noticeTargets';
 import { clearLegacyAuthToken, deleteData, downloadData, getData, getLegacyAuthToken, getStoredValue, isSessionExpiredError, onSessionExpired, postData, postFormData, putData, removeStoredValue, resolveApiUrl, setStoredValue, toUserMessage } from './api/client';
-import CommunityDetailPage from './components/CommunityDetailPage.vue';
-import KnowledgeDetailPage from './components/KnowledgeDetailPage.vue';
-import PdfViewer from './components/PdfViewer.vue';
+// Loaded when first shown: most visits never open a detail page or a PDF.
+const CommunityDetailPage = defineAsyncComponent(() => import('./components/CommunityDetailPage.vue'));
+const KnowledgeDetailPage = defineAsyncComponent(() => import('./components/KnowledgeDetailPage.vue'));
+const PdfViewer = defineAsyncComponent(() => import('./components/PdfViewer.vue'));
 
 type KnowledgeFile = { id:number; userId:number; categoryId?:number; title:string; fileType:string; auditStatus:string; fileUrl?:string; content?:string; contentBlocks?:KnowledgeContentBlock[]; imageUrls?:string[]; coverUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean; createdAt?:string };
 type KnowledgeLikeResult = { fileId:number; liked:boolean; likes:number };
@@ -380,6 +381,8 @@ type PostCollectResult = { postId:number; collected:boolean };
 type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string; assigneeUserId?:number; assignedAt?:string; closedAt?:string; createdAt?:string; updatedAt?:string };
 type UserRecord = { id:number; username:string; nickname:string; avatarUrl?:string; signature?:string; status:string; role:string; publishPolicy?:string; messagingEnabled?:boolean };
 type ChatMessage = { id:number; sessionId:number; senderId:number; content:string; status:string; createdAt:string };
+// What an open conversation missed since it was loaded (GET /message/sync).
+type MessageSync = { sessionMissing:boolean; sessionStatus?:string; messages?:ChatMessage[]; hasMoreMessages?:boolean; removedMessageIds?:number[]; clearedThroughId?:number|null; removalCursor?:number; hasMoreRemovals?:boolean };
 type ChatSession = { id:number; userAId:number; userBId:number; otherUserId:number; status:string; updatedAt:string; lastMessage:string; messageCount?:number };
 type Notice = { id:number; type?:string; title:string; content:string; read:boolean; createdAt?:string; target?:NoticeTarget|null };
 type Draft = { id:number; title:string; content:string; userId:number; imageUrls?:string[]; updatedAt?:string };
@@ -446,7 +449,7 @@ const messageSending = ref(false); const messageListRef = ref<HTMLElement>();
 const MESSAGE_PAGE_SIZE = 30; const MESSAGE_POLL_INTERVAL = 9000; const MESSAGE_BOTTOM_THRESHOLD = 80;
 const messageHasOlder = ref(false); const messageHistoryLoading = ref(false); const messageRefreshing = ref(false); const messageUnseenCount = ref(0);
 const pageVisible = ref(typeof document === 'undefined' || document.visibilityState !== 'hidden');
-let loadedMessageSessionId = 0; let messagePollTimer: number | undefined; let messageFetchInFlight = false;
+let messageRemovalCursor = 0; let loadedMessageSessionId = 0; let messagePollTimer: number | undefined; let messageFetchInFlight = false;
 const conversationTargetId = ref(0);
 const feedbackForm = ref({ userId:currentUserId.value, type:'BUG', content:'' });
 const ticketReply = ref({ ticketId:0, status:'PROCESSING', reply:'' });
@@ -649,7 +652,9 @@ function behaviorTargetLabel(target:string){return ({KNOWLEDGE:'知识',POST:'�
 function behaviorTargetCanOpen(item:BehaviorRecord){return item.targetId>0&&['KNOWLEDGE','POST'].includes(item.targetType);}
 function openBehaviorTarget(item:BehaviorRecord){if(!behaviorTargetCanOpen(item))return;if(item.targetType==='KNOWLEDGE')openKnowledge({id:item.targetId} as KnowledgeFile);else openPostDetail({id:item.targetId} as Post);}
 
-function formatDate(value:string){ return value ? new Date(value).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
+function localDateStamp(){const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;}
+// The API sends times with their offset, so the browser shows them in the reader's own time zone.
+function formatDate(value:string){ if(!value)return ''; const time=new Date(value); return Number.isNaN(time.getTime())?value:time.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function notifyError(error:unknown){ if(isSessionExpiredError(error))return; ElMessage.error(toUserMessage(error)); }
 function clearCaptchaCooldown(){captchaCooldownRemaining.value=0;if(captchaCooldownTimer){clearInterval(captchaCooldownTimer);captchaCooldownTimer=undefined;}}
 function startCaptchaCooldown(seconds:number){ captchaCooldownRemaining.value=Math.max(0,Math.ceil(seconds)); if(captchaCooldownTimer)clearInterval(captchaCooldownTimer); if(captchaCooldownRemaining.value>0){ captchaCooldownTimer=setInterval(()=>{ captchaCooldownRemaining.value=Math.max(0,captchaCooldownRemaining.value-1); if(captchaCooldownRemaining.value===0 && captchaCooldownTimer){clearInterval(captchaCooldownTimer); captchaCooldownTimer=undefined; if(captchaRefreshPending){captchaRefreshPending=false;void loadCaptcha();} } },1000); } }
@@ -1092,7 +1097,7 @@ function selectMessageSession(sessionId:number){
   messageForm.value.content=sessionId?(messageDrafts.get(sessionId)||''):'';
   resetMessagePaging();
 }
-function resetMessagePaging(){messages.value=[];loadedMessageSessionId=0;messageHasOlder.value=false;messageUnseenCount.value=0;}
+function resetMessagePaging(){messages.value=[];messageRemovalCursor=0;loadedMessageSessionId=0;messageHasOlder.value=false;messageUnseenCount.value=0;}
 async function loadMessageData(options:{reloadMessages?:boolean}={}){
   const [chatSessions,noticePage]=await Promise.all([
     getData<ChatSession[]>(`/message/sessions?userId=${currentUserId.value}`),
@@ -1205,12 +1210,29 @@ async function fetchNewMessages(manual=false){
   messageFetchInFlight=true;
   try{
     const received:ChatMessage[]=[];
+    let removedAny=false;
     for(let round=0;round<5;round++){
       const newest=messages.value[messages.value.length-1];
-      const batch=await getData<ChatMessage[]>(messagePageUrl(sessionId,{afterId:newest?.id??0},100));
+      const sync=await getData<MessageSync>(messageSyncUrl(sessionId,newest?.id??0,messageRemovalCursor));
       if(messageForm.value.sessionId!==sessionId||loadedMessageSessionId!==sessionId)return 0;
+      if(sync.sessionMissing){
+        // The other side (or an admin) deleted the conversation while it was open here.
+        selectMessageSession(0);messageDrafts.delete(sessionId);
+        ElMessage.info('该会话已被删除');
+        void loadMessageData({reloadMessages:false}).catch(()=>undefined);
+        return 0;
+      }
+      // Removals first: a message deleted before this poll must not be shown even briefly.
+      const removed=new Set(sync.removedMessageIds||[]);const cleared=sync.clearedThroughId||0;
+      if(removed.size||cleared){
+        const kept=messages.value.filter(message=>!removed.has(message.id)&&message.id>cleared);
+        if(kept.length!==messages.value.length){messages.value=kept;removedAny=true;}
+      }
+      messageRemovalCursor=sync.removalCursor??messageRemovalCursor;
+      const session=sessions.value.find(item=>item.id===sessionId);
+      if(session&&sync.sessionStatus)session.status=sync.sessionStatus;
       const known=new Set(messages.value.map(message=>message.id));
-      const fresh=batch.filter(message=>!known.has(message.id));
+      const fresh=(sync.messages||[]).filter(message=>!known.has(message.id)&&!removed.has(message.id));
       if(fresh.length){
         const stickToBottom=isMessageListNearBottom();
         messages.value=mergeMessages(messages.value,fresh);
@@ -1219,14 +1241,17 @@ async function fetchNewMessages(manual=false){
         if(stickToBottom)scrollMessagesToBottom();
         else messageUnseenCount.value+=fresh.filter(message=>message.senderId!==currentUserId.value).length;
       }
-      if(batch.length<100)break;
+      if(!sync.hasMoreMessages&&!sync.hasMoreRemovals)break;
     }
     const latest=received[received.length-1];
     const session=sessions.value.find(item=>item.id===sessionId);
     if(latest&&session){session.lastMessage=latest.content;session.updatedAt=latest.createdAt;}
+    // The conversation list shows the last message, which may be the one that just went away.
+    if(removedAny&&!latest)void loadMessageData({reloadMessages:false}).catch(()=>undefined);
     return received.length;
   }finally{messageFetchInFlight=false;}
 }
+function messageSyncUrl(sessionId:number,afterId:number,removalCursor:number){return `/message/sync?${new URLSearchParams({sessionId:String(sessionId),afterId:String(afterId),removalCursor:String(removalCursor),limit:'100'})}`;}
 async function refreshMessages(){
   if(messageRefreshing.value)return;
   messageRefreshing.value=true;
@@ -1234,6 +1259,9 @@ async function refreshMessages(){
   catch(error){notifyError(error);}
   finally{messageRefreshing.value=false;}
 }
+// Admins can restrict or archive a conversation; sync keeps this status current while it is open.
+const openSessionStatus=computed(()=>sessions.value.find(session=>session.id===messageForm.value.sessionId)?.status||'ACTIVE');
+const openSessionClosed=computed(()=>Boolean(messageForm.value.sessionId)&&openSessionStatus.value!=='ACTIVE');
 const shouldPollMessages=computed(()=>authenticated.value&&portal.value==='client'&&activeView.value==='messages'&&!detailRoute.value&&Boolean(messageForm.value.sessionId)&&pageVisible.value);
 function stopMessagePolling(){if(messagePollTimer!==undefined){window.clearInterval(messagePollTimer);messagePollTimer=undefined;}}
 watch(shouldPollMessages,(active,wasActive)=>{
@@ -1437,7 +1465,7 @@ async function exportAdminUsers(){
     }
   }catch(error){notifyError(error);return;}finally{adminUserExporting.value=false;}
   if(!matching.length){ElMessage.warning('当前筛选条件下没有可导出的用户');return;}
-  const rows=[['用户ID','用户名','昵称','角色','账号状态','发帖策略'],...matching.map(user=>[user.id,user.username,user.nickname,roleLabel(user.role),user.status==='ACTIVE'?'正常':'已停用',publishPolicyLabel(user.publishPolicy)])];const blob=new Blob([`\ufeff${rows.map(row=>row.map(csvValue).join(',')).join('\r\n')}`],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`zhihui-users-${new Date().toISOString().slice(0,10)}.csv`;link.click();URL.revokeObjectURL(url);ElMessage.success(`已导出 ${matching.length} 位用户`);}
+  const rows=[['用户ID','用户名','昵称','角色','账号状态','发帖策略'],...matching.map(user=>[user.id,user.username,user.nickname,roleLabel(user.role),user.status==='ACTIVE'?'正常':'已停用',publishPolicyLabel(user.publishPolicy)])];const blob=new Blob([`\ufeff${rows.map(row=>row.map(csvValue).join(',')).join('\r\n')}`],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`zhihui-users-${localDateStamp()}.csv`;link.click();URL.revokeObjectURL(url);ElMessage.success(`已导出 ${matching.length} 位用户`);}
 // total is only sent with the first page; later pages send null and the table keeps the first figure.
 type AdminPage<T> = { items:T[]; nextCursor:number|string|null; hasMore:boolean; total:number|null };
 function adminUsersUrl(cursor:number|string|null,limit=ADMIN_USER_PAGE_SIZE){

@@ -1,5 +1,6 @@
 package com.aiknowledge.community.store;
 
+import com.aiknowledge.common.AppTime;
 import com.aiknowledge.community.entity.CommentEntity;
 import com.aiknowledge.community.entity.PostCollectEntity;
 import com.aiknowledge.community.entity.PostDraftEntity;
@@ -413,7 +414,7 @@ public class MySqlCommunityStore implements CommunityStore {
     /**
      * Optimizer hint for the analytics time windows. Left alone, MySQL reads every post with the status through
      * idx_post_status_id and filters the dates afterwards; on a 300k-post table that was 3 to 10 times slower for
-     * 7 to 180 day windows and no faster for a full year. CommunitySchemaMigration creates the index, and MySQL
+     * 7 to 180 day windows and no faster for a full year. the Flyway baseline (V1) creates the index, and MySQL
      * ignores the hint with a warning if it is ever missing.
      */
     private static final String WINDOW_INDEX = "/*+ INDEX(post idx_post_status_created) */ ";
@@ -432,12 +433,13 @@ public class MySqlCommunityStore implements CommunityStore {
 
     @Override
     public List<DailyCount> dailyPostCounts(LocalDateTime since) {
+        String day = AppTime.sqlBusinessDate("created_at");
         return postMapper.selectMaps(new QueryWrapper<PostEntity>()
-                        .select(WINDOW_INDEX + "DATE(created_at) AS day", "COUNT(*) AS post_count")
+                        .select(WINDOW_INDEX + day + " AS day", "COUNT(*) AS post_count")
                         .eq("status", "PUBLISHED")
                         .ge("created_at", since)
-                        .groupBy("DATE(created_at)")
-                        .orderByAsc("DATE(created_at)"))
+                        .groupBy(day)
+                        .orderByAsc(day))
                 .stream()
                 .map(row -> new DailyCount(String.valueOf(row.get("day")), countValue(row.get("post_count"))))
                 .toList();

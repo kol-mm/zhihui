@@ -622,8 +622,8 @@ class KnowledgeControllerTest {
         List<Map<String, Object>> trend = (List<Map<String, Object>>) after.get("trend");
         assertEquals(14, trend.size());
         assertEquals(14, number(after.get("trendDays")));
-        assertEquals(java.time.LocalDate.now().toString(), trend.get(13).get("date"));
-        assertEquals(java.time.LocalDate.now().minusDays(13).toString(), trend.get(0).get("date"));
+        assertEquals(com.aiknowledge.common.AppTime.today().toString(), trend.get(13).get("date"));
+        assertEquals(com.aiknowledge.common.AppTime.today().minusDays(13).toString(), trend.get(0).get("date"));
         assertTrue(number(trend.get(13).get("count")) >= 1);
         // A shorter period asks for fewer bars but still one per day.
         assertEquals(7, ((List<?>) controller.adminAnalytics(adminAuth, 7).data().get("trend")).size());
