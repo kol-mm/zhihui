@@ -17,12 +17,15 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndTheStarterAccounts() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_fresh")) {
             db.flyway().migrate();
-            assertEquals("1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(2, db.number("SELECT COUNT(*) FROM user"));
             assertEquals("ADMIN", db.text("SELECT role FROM user WHERE username = 'admin'"));
             assertTrue(db.hasIndex("password_reset_request", "idx_reset_status_id"));
             assertTrue(db.hasIndex("user", "uk_user_verified_email"));
             assertEquals(0, db.number("SELECT COUNT(*) FROM email_verification"));
+            assertTrue(db.hasIndex("admin_audit_log", "idx_audit_category_id"));
+            assertTrue(db.hasIndex("user_profile_change", "uk_profile_change_open"));
+            assertTrue(db.hasColumn("admin_audit_log", "subject_user_id"));
             assertEquals(0, db.flyway().migrate().migrationsExecuted);
         }
     }
@@ -47,7 +50,7 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertTrue(db.hasColumn("user", "email"));
             assertEquals(0, db.number("SELECT COUNT(*) FROM user WHERE email IS NOT NULL"));
             assertTrue(db.hasIndex("user", "idx_user_status_id"));
@@ -79,6 +82,24 @@ class FlywayMigrationTest {
             db.execute("UPDATE user SET email = NULL, email_verified_at = NULL WHERE id = 11",
                     "UPDATE user SET email_verified_at = NOW() WHERE id = 12");
             assertEquals(1, db.number("SELECT COUNT(*) FROM user WHERE verified_email = 'same@example.com'"));
+        }
+    }
+
+    @Test
+    void aMemberCanOnlyHaveOneProfileChangeWaiting() throws Exception {
+        try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_profile")) {
+            db.flyway().migrate();
+            db.execute("INSERT INTO user_profile_change (user_id, nickname, before_nickname) VALUES (5, '新昵称', '原昵称')");
+            SQLException taken = assertThrows(SQLException.class, () -> db.execute(
+                    "INSERT INTO user_profile_change (user_id, nickname, before_nickname) VALUES (5, '再改一次', '原昵称')"));
+            assertEquals(1062, taken.getErrorCode());
+            // Deciding the first one frees the member to submit again.
+            db.execute("UPDATE user_profile_change SET status = 'REJECTED' WHERE user_id = 5",
+                    "INSERT INTO user_profile_change (user_id, nickname, before_nickname) VALUES (5, '再改一次', '原昵称')");
+            assertEquals(1, db.number("SELECT COUNT(*) FROM user_profile_change WHERE status = 'PENDING'"));
+            // Another member is unaffected.
+            db.execute("INSERT INTO user_profile_change (user_id, nickname, before_nickname) VALUES (6, '别人', '原')");
+            assertEquals(2, db.number("SELECT COUNT(*) FROM user_profile_change WHERE status = 'PENDING'"));
         }
     }
 }

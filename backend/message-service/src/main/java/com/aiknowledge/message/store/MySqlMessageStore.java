@@ -331,6 +331,11 @@ public class MySqlMessageStore implements MessageStore {
     }
 
     @Override
+    public Optional<FeedbackTicketEntity> findTicket(Long ticketId) {
+        return Optional.ofNullable(ticketMapper.selectById(ticketId));
+    }
+
+    @Override
     public Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId) {
         FeedbackTicketEntity ticket = ticketMapper.selectById(ticketId);
         if (ticket == null) return Optional.empty();

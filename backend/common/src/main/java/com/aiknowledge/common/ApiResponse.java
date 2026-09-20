@@ -39,6 +39,13 @@ public record ApiResponse<T>(int code, String message, T data) {
             case "reset code is invalid or expired" -> "重置码无效或已过期，请联系管理员重新签发";
             case "username is required" -> "请输入用户名";
             case "email is required" -> "请输入邮箱地址";
+            case "administrators cannot disable their own account" -> "不能停用或删除自己的管理员账号";
+            case "administrators cannot change their own role" -> "不能修改自己的角色";
+            case "invalid account status" -> "账号状态无效";
+            case "invalid audit category" -> "操作类别无效";
+            case "invalid profile change status" -> "资料审核状态无效";
+            case "dates must look like 2026-09-17" -> "日期格式应为 2026-09-17";
+            case "the end date is before the start date" -> "结束日期不能早于开始日期";
             case "email address is invalid" -> "邮箱地址格式不正确";
             case "bind an email address first" -> "请先绑定邮箱";
             case "email is already verified" -> "邮箱已验证";

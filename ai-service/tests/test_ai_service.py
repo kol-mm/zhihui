@@ -20,6 +20,10 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.main = main
         self.main.init_db()
         self.user_auth = self.issue_token("demo", 1, "USER")
+        # Admin actions are reported to the user service; test_admin_audit covers that.
+        audit = mock.patch.object(self.main, "record_admin_action")
+        audit.start()
+        self.addCleanup(audit.stop)
 
     def tearDown(self) -> None:
         self.tmpdir.cleanup()

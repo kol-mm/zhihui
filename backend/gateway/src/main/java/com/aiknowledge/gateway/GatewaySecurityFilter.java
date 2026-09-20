@@ -22,6 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 public class GatewaySecurityFilter implements GlobalFilter, Ordered {
     private static final long WINDOW_MILLIS = 60_000L;
+    static final String CLIENT_IP_HEADER = "X-Client-Ip";
+    private static final java.util.regex.Pattern INTERNAL_PATH =
+            java.util.regex.Pattern.compile("(^|/)internal(/|$)", java.util.regex.Pattern.CASE_INSENSITIVE);
+
     private final Cache<String, WindowCounter> counters = Caffeine.newBuilder()
             .maximumSize(100_000)
             .expireAfterAccess(Duration.ofMinutes(3))
@@ -31,8 +35,14 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         addSecurityHeaders(exchange);
         String path = exchange.getRequest().getPath().value();
+        // Service-to-service endpoints are only reachable inside the container network.
+        if (INTERNAL_PATH.matcher(path).find()) {
+            exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
+            return exchange.getResponse().setComplete();
+        }
         int limit = requestLimit(path, exchange.getRequest().getMethod().name());
-        String key = clientKey(exchange) + ':' + rateClass(path, exchange.getRequest().getMethod().name());
+        String client = clientKey(exchange);
+        String key = client + ':' + rateClass(path, exchange.getRequest().getMethod().name());
         if (!allow(key, limit)) {
             byte[] body = "{\"code\":429,\"message\":\"too many requests\",\"data\":{}}"
                     .getBytes(StandardCharsets.UTF_8);
@@ -42,7 +52,11 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
             DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(body);
             return exchange.getResponse().writeWith(Mono.just(buffer));
         }
-        return chain.filter(exchange);
+        // Services record this address in the admin action log; whatever the browser sent under the name is replaced.
+        String clientIp = auditAddress(exchange, client.substring("ip:".length()));
+        return chain.filter(exchange.mutate()
+                .request(exchange.getRequest().mutate().headers(headers -> headers.set(CLIENT_IP_HEADER, clientIp)).build())
+                .build());
     }
 
     private boolean allow(String key, int limit) {
@@ -80,6 +94,19 @@ public class GatewaySecurityFilter implements GlobalFilter, Ordered {
         if (path.equals("/user/email/verify")) return "email-verify";
         // Reads and writes are counted apart: pages load many reads, which must not use up the smaller write allowance.
         return "GET".equals(method) || "OPTIONS".equals(method) ? "general-read" : "general-write";
+    }
+
+    /**
+     * The address to record for an administrator's action. Rate limiting counts only addresses this gateway can
+     * vouch for, which on a private network is the proxy itself; the log is more useful with the address nginx saw,
+     * so the chain's first entry is used when it holds nothing public.
+     */
+    private String auditAddress(ServerWebExchange exchange, String rateLimitAddress) {
+        if (!isTrustedProxy(parseAddress(rateLimitAddress))) return rateLimitAddress;
+        String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
+        if (forwarded == null || forwarded.isBlank()) return rateLimitAddress;
+        InetAddress first = parseAddress(forwarded.split(",")[0]);
+        return first == null ? rateLimitAddress : first.getHostAddress();
     }
 
     private String clientKey(ServerWebExchange exchange) {

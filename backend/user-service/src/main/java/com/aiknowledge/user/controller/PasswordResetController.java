@@ -1,5 +1,6 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
@@ -62,6 +63,13 @@ public class PasswordResetController {
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
     private volatile String timingPaddingHash;
+
+    private AdminAudit audit = AdminAudit.NONE;
+
+    @Autowired(required = false)
+    public void setAdminAudit(AdminAudit audit) {
+        this.audit = audit == null ? AdminAudit.NONE : audit;
+    }
 
     @Autowired
     public PasswordResetController(UserStore userStore, PasswordResetStore resetStore, PasswordEncoder passwordEncoder,
@@ -198,6 +206,10 @@ public class PasswordResetController {
         ResetRequest issued = resetStore.issue(existing.id(), passwordEncoder.encode(normalizeCode(code)), expiresAt,
                 LocalAuth.userId(authorization)).orElse(null);
         if (issued == null) return ApiResponse.fail("reset request is already closed");
+        // The code itself is never logged.
+        audit.record(authorization, AdminAudit.Event.of("PASSWORD_RESET_ISSUE", AdminAudit.ACCOUNTS, "PASSWORD_RESET",
+                issued.id(), UserController.userLabel(user, user.getId()), user.getId(),
+                PasswordResetStore.ISSUED.equals(existing.status()) ? "重新签发密码重置码" : "签发密码重置码"));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("code", code);
         result.put("expiresAt", expiresAt);
@@ -219,8 +231,16 @@ public class PasswordResetController {
         if (note.length() > 255) note = note.substring(0, 255);
         ResetRequest existing = resetStore.find(requestId).orElse(null);
         if (existing == null) return ApiResponse.fail("reset request not found");
+        String closeNote = note;
         return resetStore.close(requestId, LocalAuth.userId(authorization), note)
-                .map(closed -> ApiResponse.ok(view(closed, userStore.findById(closed.userId()).orElse(null))))
+                .map(closed -> {
+                    UserEntity owner = userStore.findById(closed.userId()).orElse(null);
+                    audit.record(authorization, AdminAudit.Event.of("PASSWORD_RESET_CLOSE", AdminAudit.ACCOUNTS, "PASSWORD_RESET",
+                                    closed.id(), owner == null ? "@" + closed.username() : UserController.userLabel(owner, closed.userId()),
+                                    closed.userId(), "关闭密码重置申请")
+                            .with("note", closeNote));
+                    return ApiResponse.ok(view(closed, owner));
+                })
                 .orElseGet(() -> ApiResponse.fail("reset request is already closed"));
     }
 

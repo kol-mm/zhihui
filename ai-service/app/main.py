@@ -9,10 +9,13 @@ import os
 import re
 import sqlite3
 import ipaddress
+import logging
 import socket
+import time
 import urllib.error
 import urllib.request
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,6 +83,7 @@ class AiConfigRequest(BaseModel):
     private_messages_enabled: bool = True
     feedback_enabled: bool = True
     post_audit_required: bool = True
+    profile_audit_required: bool = False
     default_publish_policy: str = Field(default="STANDARD", pattern="^(STANDARD|PRE_REVIEW|BLOCKED)$")
     max_post_images: int = Field(default=9, ge=0, le=9)
     max_comment_length: int = Field(default=2000, ge=100, le=5000)
@@ -247,9 +251,128 @@ def require_user(authorization: str | None) -> dict[str, Any]:
     return claims
 
 
-def require_admin(authorization: str | None) -> None:
-    if not is_admin_token(authorization):
+def require_admin(authorization: str | None) -> dict[str, Any]:
+    claims = token_claims(authorization)
+    if claims is None or claims.get("role") != "ADMIN":
         raise HTTPException(status_code=403, detail="admin authorization is required")
+    return claims
+
+
+# ---- Admin action log -------------------------------------------------------------------------------------------
+# Settings changes and index rebuilds are reported to the user service, which keeps the platform's action log.
+# Delivery happens in the background and never fails the request; undeliverable entries go to this service's log.
+audit_log = logging.getLogger("ai.admin_audit")
+_audit_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="admin-audit")
+AUDIT_RETRY_DELAYS = (0, 1, 5)
+AI_CONFIG_LABELS = {
+    "platform_name": "平台名称",
+    "platform_notice": "平台公告",
+    "registration_enabled": "开放注册",
+    "ai_chat_enabled": "AI 问答",
+    "knowledge_upload_enabled": "用户上传知识",
+    "user_ranking_enabled": "用户排行",
+    "comments_enabled": "评论",
+    "private_messages_enabled": "私信",
+    "feedback_enabled": "反馈工单",
+    "post_audit_required": "帖子先审后发",
+    "profile_audit_required": "资料修改先审后改",
+    "default_publish_policy": "默认发帖策略",
+    "max_post_images": "帖子配图上限",
+    "max_comment_length": "评论字数上限",
+    "max_message_length": "私信字数上限",
+    "draft_retention_days": "草稿保留天数",
+    "data_source_scope": "AI 知识范围",
+    "match_limit": "检索片段数",
+    "compliance_rule": "回答规则",
+    "provider": "模型服务",
+    "model": "模型",
+    "base_url": "接口地址",
+    "request_url": "请求地址",
+    "temperature": "温度",
+    "max_upload_mb": "上传大小上限",
+    "notifications_enabled": "通知",
+    "community_enabled": "社区",
+    "selected_file_ids": "指定知识文件",
+}
+
+
+def _audit_value(key: str, value: Any) -> Any:
+    if key == "selected_file_ids":
+        return f"{len(value or [])} 个文件"
+    if key in {"base_url", "request_url"} and value:
+        # Credentials written into a URL are not kept.
+        parts = urllib.parse.urlsplit(str(value))
+        if parts.username or parts.password:
+            host = parts.hostname or ""
+            if parts.port:
+                host = f"{host}:{parts.port}"
+            return urllib.parse.urlunsplit((parts.scheme, host, parts.path, "", ""))
+        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+    return value
+
+
+def config_changes(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    changes = []
+    for key, label in AI_CONFIG_LABELS.items():
+        old, new = _audit_value(key, before.get(key)), _audit_value(key, after.get(key))
+        if key == "selected_file_ids":
+            if sorted(before.get(key) or []) == sorted(after.get(key) or []):
+                continue
+        elif old == new:
+            continue
+        changes.append({"field": key, "label": label, "before": old, "after": new})
+    return changes
+
+
+def build_audit_entry(claims: dict[str, Any], client_ip: str | None, action: str, target_type: str,
+                      target_id: str | None, target_label: str, summary: str,
+                      detail: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "actorId": int(claims["uid"]),
+        "actorName": str(claims.get("sub", ""))[:64],
+        "action": action,
+        "category": "SYSTEM",
+        "targetType": target_type,
+        "targetId": target_id,
+        "targetLabel": target_label,
+        "subjectUserId": None,
+        "summary": summary[:500],
+        "detail": detail or {},
+        "source": "ai-service",
+        "clientIp": client_ip.strip()[:64] or None if isinstance(client_ip, str) else None,
+    }
+
+
+def deliver_audit_entry(entry: dict[str, Any]) -> bool:
+    url = os.getenv("PLATFORM_AUDIT_URL", "http://127.0.0.1:8101/user/internal/audit")
+    token = os.getenv("PLATFORM_INTERNAL_USER_TOKEN", "ai-knowledge-local-internal")
+    body = json.dumps(entry, ensure_ascii=False).encode("utf-8")
+    problem = ""
+    for delay in AUDIT_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        try:
+            request = urllib.request.Request(url, data=body, method="POST", headers={
+                "Content-Type": "application/json", "X-Internal-Token": token})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                if json.loads(response.read().decode("utf-8")).get("code") == 0:
+                    return True
+                problem = "rejected"
+        except (OSError, ValueError) as error:
+            problem = str(error)
+    audit_log.error("Admin audit entry could not be delivered (%s): %s", problem, body.decode("utf-8"))
+    return False
+
+
+def record_admin_action(claims: dict[str, Any], client_ip: str | None, action: str, target_type: str,
+                        target_id: str | None, target_label: str, summary: str,
+                        detail: dict[str, Any] | None = None) -> None:
+    try:
+        entry = build_audit_entry(claims, client_ip, action, target_type, target_id, target_label, summary, detail)
+        _audit_executor.submit(deliver_audit_entry, entry)
+    except Exception as error:  # the action itself must never fail because of the log
+        audit_log.error("Admin audit entry could not be prepared: %s", error)
 
 
 def read_ai_config() -> dict[str, Any]:
@@ -264,6 +387,7 @@ def read_ai_config() -> dict[str, Any]:
         "private_messages_enabled": True,
         "feedback_enabled": True,
         "post_audit_required": True,
+        "profile_audit_required": False,
         "default_publish_policy": "STANDARD",
         "max_post_images": 9,
         "max_comment_length": 2000,
@@ -297,6 +421,7 @@ def read_ai_config() -> dict[str, Any]:
         elif row["config_key"] in {
             "registration_enabled", "ai_chat_enabled", "knowledge_upload_enabled", "user_ranking_enabled",
             "comments_enabled", "private_messages_enabled", "feedback_enabled", "post_audit_required",
+            "profile_audit_required",
             "notifications_enabled", "community_enabled"
         }:
             defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
@@ -563,6 +688,7 @@ def public_config() -> ApiResponse:
         "private_messages_enabled": bool(config.get("private_messages_enabled", True)),
         "feedback_enabled": bool(config.get("feedback_enabled", True)),
         "post_audit_required": bool(config.get("post_audit_required", True)),
+        "profile_audit_required": bool(config.get("profile_audit_required", False)),
         "default_publish_policy": str(config.get("default_publish_policy", "STANDARD")),
         "max_post_images": int(config.get("max_post_images", 9)),
         "max_comment_length": int(config.get("max_comment_length", 2000)),
@@ -827,8 +953,12 @@ def admin_chunks_page(
 
 
 @app.post("/ai/admin/index/rebuild", response_model=ApiResponse)
-def rebuild_index(request: RebuildIndexRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
-    require_admin(authorization)
+def rebuild_index(
+    request: RebuildIndexRequest,
+    authorization: str | None = Header(default=None),
+    x_client_ip: str | None = Header(default=None),
+) -> ApiResponse:
+    claims = require_admin(authorization)
     init_db()
     created: list[dict[str, Any]] = []
     with connect() as conn:
@@ -836,6 +966,10 @@ def rebuild_index(request: RebuildIndexRequest, authorization: str | None = Head
             conn.execute("DELETE FROM knowledge_chunk")
         for document in request.documents:
             created.extend(index_document(conn, document))
+    # A rebuild arrives in batches; the first one, which clears the index, stands for the whole rebuild.
+    if request.reset:
+        record_admin_action(claims, x_client_ip, "AI_INDEX_REBUILD", "AI_INDEX", None, "AI 知识索引",
+                            "重建 AI 知识索引", {"firstBatchDocuments": len(request.documents)})
     return ApiResponse(data={"documents": len(request.documents), "chunks": len(created)})
 
 
@@ -849,8 +983,13 @@ def remove_indexed_file(file_id: int, authorization: str | None = Header(default
 
 
 @app.post("/ai/admin/config", response_model=ApiResponse)
-def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
-    require_admin(authorization)
+def save_ai_config(
+    request: AiConfigRequest,
+    authorization: str | None = Header(default=None),
+    x_client_ip: str | None = Header(default=None),
+) -> ApiResponse:
+    claims = require_admin(authorization)
+    before = read_ai_config()
     values = request.model_dump()
     values["selected_file_ids"] = sorted({int(item) for item in values.get("selected_file_ids", []) if int(item) > 0})
     for key in ("base_url", "request_url"):
@@ -869,7 +1008,13 @@ def save_ai_config(request: AiConfigRequest, authorization: str | None = Header(
                 "ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value, updated_at=excluded.updated_at",
                 (key, stored_value, now_iso()),
             )
-    return ApiResponse(data={"configuration": read_ai_config(), "updated": True})
+    after = read_ai_config()
+    changes = config_changes(before, after)
+    if changes:
+        labels = "、".join(change["label"] for change in changes)
+        record_admin_action(claims, x_client_ip, "AI_CONFIG_SAVE", "PLATFORM_CONFIG", None, "平台与 AI 设置",
+                            f"修改了{labels}", {"changes": changes})
+    return ApiResponse(data={"configuration": after, "updated": True})
 
 
 @app.post("/ai/chat", response_model=ApiResponse)

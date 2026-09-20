@@ -1,6 +1,7 @@
 package com.aiknowledge.message.controller;
 
 import com.aiknowledge.common.AppTime;
+import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -37,6 +38,13 @@ public class MessageController {
     private final LocalEventBusService eventBus;
     private final PlatformConfigClient platformConfig;
     private final UserRelationClient userRelationClient;
+
+    private AdminAudit audit = AdminAudit.NONE;
+
+    @Autowired(required = false)
+    public void setAdminAudit(AdminAudit audit) {
+        this.audit = audit == null ? AdminAudit.NONE : audit;
+    }
 
     @Autowired
     public MessageController(MessageStore messageStore, LocalEventBusService eventBus,
@@ -210,14 +218,23 @@ public class MessageController {
         if (sessionId == null && !LocalAuth.isAdmin(authorization)) {
             return ApiResponse.fail("admin authorization is required to clear all messages");
         }
+        ChatSessionEntity session = null;
         if (sessionId != null) {
-            ChatSessionEntity session = messageStore.findSession(sessionId).orElse(null);
+            session = messageStore.findSession(sessionId).orElse(null);
             if (session == null) return ApiResponse.fail("chat session not found");
             if (!isParticipant(session, userId) && !LocalAuth.isAdmin(authorization)) {
                 return ApiResponse.fail("user is not a participant of this session");
             }
         }
         int removed = messageStore.clearMessages(sessionId);
+        if (session == null) {
+            audit.record(authorization, AdminAudit.Event.of("MESSAGES_CLEAR_ALL", AdminAudit.MESSAGES, "CHAT_SESSION", null,
+                    "全部私信会话", null, "清空全部私信记录 " + removed + " 条").with("removed", removed));
+        } else if (!isParticipant(session, userId)) {
+            audit.record(authorization, AdminAudit.Event.of("MESSAGES_CLEAR", AdminAudit.MESSAGES, "CHAT_SESSION", sessionId,
+                            sessionLabel(session), null, "清空会话聊天记录 " + removed + " 条")
+                    .with("removed", removed).with("participants", List.of(session.getUserAId(), session.getUserBId())));
+        }
         eventBus.publish("MESSAGE_CLEARED", sessionId == null ? "ALL" : String.valueOf(sessionId), Map.of("removed", removed));
         return ApiResponse.ok(Map.of("sessionId", sessionId == null ? "ALL" : sessionId, "removed", removed));
     }
@@ -248,6 +265,11 @@ public class MessageController {
         }
         boolean removed = messageStore.deleteSession(sessionId);
         if (removed) eventBus.publish("MESSAGE_SESSION_DELETED", String.valueOf(sessionId), Map.of("removed", true));
+        if (removed && !isParticipant(session, userId)) {
+            audit.record(authorization, AdminAudit.Event.of("SESSION_DELETE", AdminAudit.MESSAGES, "CHAT_SESSION", sessionId,
+                            sessionLabel(session), null, "删除私信会话")
+                    .with("participants", List.of(session.getUserAId(), session.getUserBId())));
+        }
         return ApiResponse.ok(Map.of("sessionId", sessionId, "removed", removed));
     }
 
@@ -270,6 +292,10 @@ public class MessageController {
         }
         boolean removed = messageStore.deleteMessage(messageId);
         if (removed) eventBus.publish("MESSAGE_DELETED", String.valueOf(messageId), Map.of("removed", true));
+        if (removed && !userId.equals(message.getSenderId())) {
+            audit.record(authorization, AdminAudit.Event.of("MESSAGE_DELETE", AdminAudit.MESSAGES, "CHAT_MESSAGE", messageId,
+                    sessionLabel(session), message.getSenderId(), "删除他人私信").with("sessionId", session.getId()));
+        }
         return ApiResponse.ok(Map.of("messageId", messageId, "removed", removed));
     }
 
@@ -392,11 +418,29 @@ public class MessageController {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         FaqEntity faq = new FaqEntity();
         if (request.get("id") != null) faq.setId(number(request.get("id"), null));
+        FaqEntity found = faq.getId() == null ? null
+                : messageStore.listFaqs().stream().filter(item -> faq.getId().equals(item.getId())).findFirst().orElse(null);
+        // Plain values: the local store may hand back the object it then updates.
+        boolean existed = found != null;
+        String previousQuestion = existed ? found.getQuestion() : null;
+        String previousAnswer = existed ? found.getAnswer() : null;
+        Integer previousSortNo = existed ? found.getSortNo() : null;
+        Integer previousEnabled = existed ? found.getEnabled() : null;
         faq.setQuestion(String.valueOf(request.getOrDefault("question", "")));
         faq.setAnswer(String.valueOf(request.getOrDefault("answer", "")));
         faq.setSortNo(number(request.get("sortNo"), 0L).intValue());
         faq.setEnabled(number(request.get("enabled"), 1L).intValue());
-        return ApiResponse.ok(toFaqView(messageStore.saveFaq(faq)));
+        FaqEntity saved = messageStore.saveFaq(faq);
+        AdminAudit.Changes changes = new AdminAudit.Changes()
+                .add("question", "问题", previousQuestion, saved.getQuestion())
+                .add("sortNo", "排序", previousSortNo, saved.getSortNo())
+                .add("enabled", "启用", previousEnabled, saved.getEnabled());
+        if (existed && !java.util.Objects.equals(previousAnswer, saved.getAnswer())) changes.addHidden("answer", "答案");
+        if (!existed || !changes.isEmpty()) {
+            audit.record(authorization, AdminAudit.Event.of("FAQ_SAVE", AdminAudit.SUPPORT, "FAQ", saved.getId(),
+                    saved.getQuestion(), null, existed ? "修改常见问题" : "新建常见问题").withChanges(changes));
+        }
+        return ApiResponse.ok(toFaqView(saved));
     }
 
     @DeleteMapping("/feedback/admin/faq")
@@ -406,7 +450,14 @@ public class MessageController {
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         Long faqId = number(request.get("faqId"), 0L);
-        return ApiResponse.ok(Map.of("faqId", faqId, "removed", messageStore.deleteFaq(faqId)));
+        String question = messageStore.listFaqs().stream().filter(item -> faqId.equals(item.getId()))
+                .map(FaqEntity::getQuestion).findFirst().orElse("#" + faqId);
+        boolean removed = messageStore.deleteFaq(faqId);
+        if (removed) {
+            audit.record(authorization, AdminAudit.Event.of("FAQ_DELETE", AdminAudit.SUPPORT, "FAQ", faqId, question, null,
+                    "删除常见问题"));
+        }
+        return ApiResponse.ok(Map.of("faqId", faqId, "removed", removed));
     }
 
     @PostMapping("/feedback/ticket")
@@ -495,8 +546,17 @@ public class MessageController {
         if (!List.of("ACTIVE", "RESTRICTED", "ARCHIVED").contains(status)) {
             return ApiResponse.fail("invalid conversation status");
         }
+        String previousStatus = messageStore.findSession(sessionId).map(ChatSessionEntity::getStatus).orElse(null);
         return messageStore.updateSessionStatus(sessionId, status)
-                .map(session -> ApiResponse.ok(toSessionView(session, session.getUserAId())))
+                .map(session -> {
+                    if (!status.equals(previousStatus)) {
+                        audit.record(authorization, AdminAudit.Event.of("SESSION_STATUS", AdminAudit.MESSAGES, "CHAT_SESSION",
+                                        sessionId, sessionLabel(session), null, "修改私信会话状态")
+                                .withChanges(new AdminAudit.Changes().add("status", "会话状态", previousStatus, status))
+                                .with("participants", List.of(session.getUserAId(), session.getUserBId())));
+                    }
+                    return ApiResponse.ok(toSessionView(session, session.getUserAId()));
+                })
                 .orElseGet(() -> ApiResponse.fail("chat session not found"));
     }
 
@@ -535,8 +595,15 @@ public class MessageController {
         Long ticketId = number(request.get("ticketId"), 0L);
         Long rawAssignee = number(request.get("assigneeUserId"), 0L);
         Long assigneeUserId = rawAssignee != null && rawAssignee > 0 ? rawAssignee : null;
+        Long previousAssignee = messageStore.findTicket(ticketId).map(FeedbackTicketEntity::getAssigneeUserId).orElse(null);
         return messageStore.assignTicket(ticketId, assigneeUserId)
                 .map(ticket -> {
+                    if (!java.util.Objects.equals(previousAssignee, assigneeUserId)) {
+                        audit.record(authorization, AdminAudit.Event.of("TICKET_ASSIGN", AdminAudit.SUPPORT, "TICKET",
+                                        ticketId, ticketLabel(ticket), ticket.getUserId(),
+                                        assigneeUserId == null ? "取消工单分配" : "分配工单")
+                                .withChanges(new AdminAudit.Changes().add("assigneeUserId", "处理人", previousAssignee, assigneeUserId)));
+                    }
                     eventBus.publish("FEEDBACK_TICKET_ASSIGNED", String.valueOf(ticket.getId()), Map.of(
                             "assigned", assigneeUserId != null,
                             "assigneeUserId", assigneeUserId == null ? 0L : assigneeUserId
@@ -560,8 +627,16 @@ public class MessageController {
         String reply = String.valueOf(request.getOrDefault("reply", ""));
         if (!List.of("PENDING", "PROCESSING", "RESOLVED").contains(status)) return ApiResponse.fail("invalid ticket status");
         if (reply.length() > 5000) return ApiResponse.fail("ticket reply is too long");
+        FeedbackTicketEntity before = messageStore.findTicket(ticketId).orElse(null);
+        String previousStatus = before == null ? null : before.getStatus();
+        String previousReply = before == null ? null : before.getOfficialReply();
         return messageStore.replyTicket(ticketId, status, reply)
                 .map(ticket -> {
+                    AdminAudit.Changes changes = new AdminAudit.Changes()
+                            .add("status", "工单状态", previousStatus, ticket.getStatus())
+                            .add("officialReply", "官方回复", previousReply, ticket.getOfficialReply());
+                    audit.record(authorization, AdminAudit.Event.of("TICKET_REPLY", AdminAudit.SUPPORT, "TICKET", ticketId,
+                            ticketLabel(ticket), ticket.getUserId(), "回复工单").withChanges(changes));
                     NotificationEntity notification = new NotificationEntity();
                     notification.setUserId(ticket.getUserId());
                     notification.setType("FEEDBACK");
@@ -633,6 +708,15 @@ public class MessageController {
         view.put("updatedAt", session.getUpdatedAt());
         view.put("lastMessage", latest == null ? "" : latest.getContent());
         return view;
+    }
+
+    private static String sessionLabel(ChatSessionEntity session) {
+        return "会话 #" + session.getId() + "（用户 #" + session.getUserAId() + " 与 #" + session.getUserBId() + "）";
+    }
+
+    private static String ticketLabel(FeedbackTicketEntity ticket) {
+        String content = ticket.getContent() == null ? "" : ticket.getContent().replaceAll("\\s+", " ").strip();
+        return "工单 #" + ticket.getId() + (content.isEmpty() ? "" : "：" + (content.length() > 40 ? content.substring(0, 40) + "…" : content));
     }
 
     private boolean isParticipant(ChatSessionEntity session, Long userId) {

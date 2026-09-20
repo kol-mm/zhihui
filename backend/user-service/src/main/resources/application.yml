@@ -30,6 +30,9 @@ auth:
     store: ${AUTH_REVOCATION_STORE:memory}
 
 app:
+  audit:
+    # 管理员操作记录保留天数；0 表示永久保留。
+    retention-days: ${AUDIT_RETENTION_DAYS:365}
   # 邮箱验证码的发信服务器；不配置 SMTP_HOST 时用户仍可绑定邮箱，只是无法验证。
   mail:
     host: ${SMTP_HOST:}

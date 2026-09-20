@@ -314,6 +314,11 @@ public class InMemoryMessageStore implements MessageStore {
     }
 
     @Override
+    public Optional<FeedbackTicketEntity> findTicket(Long ticketId) {
+        return tickets.stream().filter(ticket -> ticket.getId().equals(ticketId)).findFirst();
+    }
+
+    @Override
     public Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId) {
         Optional<FeedbackTicketEntity> found = tickets.stream()
                 .filter(ticket -> ticket.getId().equals(ticketId))

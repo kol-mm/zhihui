@@ -1,6 +1,7 @@
 package com.aiknowledge.knowledge.controller;
 
 import com.aiknowledge.common.AppTime;
+import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -67,6 +68,13 @@ public class KnowledgeController {
      * kept for a minute. Deleting, reviewing or editing a file drops it at once, so a removed file never lingers.
      */
     private final ExpiringValue<List<Map<String, Object>>> analyticsRanking = new ExpiringValue<>(Duration.ofSeconds(60));
+
+    private AdminAudit audit = AdminAudit.NONE;
+
+    @Autowired(required = false)
+    public void setAdminAudit(AdminAudit audit) {
+        this.audit = audit == null ? AdminAudit.NONE : audit;
+    }
 
     @Autowired
     public KnowledgeController(
@@ -386,7 +394,16 @@ public class KnowledgeController {
         category.setParentId(number(request.get("parentId"), 0L));
         category.setSortNo(number(request.get("sortNo"), 0L).intValue());
         if (category.getName().isBlank()) return ApiResponse.fail("category name is required");
-        return ApiResponse.ok(toCategoryView(knowledgeStore.saveCategory(category)));
+        KnowledgeCategoryEntity previous = category.getId() == null ? null : knowledgeStore.listCategories().stream()
+                .filter(item -> category.getId().equals(item.getId())).findFirst().orElse(null);
+        KnowledgeCategoryEntity saved = knowledgeStore.saveCategory(category);
+        audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_CATEGORY_SAVE", AdminAudit.KNOWLEDGE, "CATEGORY",
+                        saved.getId(), saved.getName(), null, previous == null ? "新建知识分类" : "修改知识分类")
+                .withChanges(new AdminAudit.Changes()
+                        .add("name", "名称", previous == null ? null : previous.getName(), saved.getName())
+                        .add("parentId", "上级分类", previous == null ? null : previous.getParentId(), saved.getParentId())
+                        .add("sortNo", "排序", previous == null ? null : previous.getSortNo(), saved.getSortNo())));
+        return ApiResponse.ok(toCategoryView(saved));
     }
 
     @DeleteMapping("/admin/category")
@@ -396,7 +413,14 @@ public class KnowledgeController {
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         Long categoryId = number(request.get("categoryId"), 0L);
-        return ApiResponse.ok(Map.of("categoryId", categoryId, "removed", knowledgeStore.deleteCategory(categoryId)));
+        String name = knowledgeStore.listCategories().stream().filter(item -> categoryId.equals(item.getId()))
+                .map(KnowledgeCategoryEntity::getName).findFirst().orElse("#" + categoryId);
+        boolean removed = knowledgeStore.deleteCategory(categoryId);
+        if (removed) {
+            audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_CATEGORY_DELETE", AdminAudit.KNOWLEDGE, "CATEGORY",
+                    categoryId, name, null, "删除知识分类"));
+        }
+        return ApiResponse.ok(Map.of("categoryId", categoryId, "removed", removed));
     }
 
     @GetMapping("/search")
@@ -507,6 +531,10 @@ public class KnowledgeController {
         boolean removed = knowledgeStore.deleteFile(fileId);
         analyticsRanking.invalidate();
         if (!removed) return ApiResponse.fail("knowledge file not found");
+        if (!userId.equals(file.getUserId())) {
+            audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_DELETE", AdminAudit.KNOWLEDGE, "KNOWLEDGE_FILE",
+                    fileId, file.getTitle(), file.getUserId(), "删除他人上传的知识资源"));
+        }
         boolean indexRemoved = fullTextSearch.remove(fileId);
         boolean storageRemoved = false;
         try {
@@ -734,10 +762,19 @@ public class KnowledgeController {
             @RequestBody Map<String, Object> request
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
-        return knowledgeStore.resolveReport(number(request.get("reportId"), 0L),
-                        String.valueOf(request.getOrDefault("status", "RESOLVED")),
-                        String.valueOf(request.getOrDefault("result", "handled")))
-                .map(ApiResponse::ok).orElseGet(() -> ApiResponse.fail("report not found"));
+        String status = String.valueOf(request.getOrDefault("status", "RESOLVED"));
+        String result = String.valueOf(request.getOrDefault("result", "handled"));
+        return knowledgeStore.resolveReport(number(request.get("reportId"), 0L), status, result)
+                .map(report -> {
+                    Long fileId = report.get("fileId") instanceof Number number ? number.longValue() : null;
+                    KnowledgeFileEntity file = fileId == null ? null : knowledgeStore.find(fileId).orElse(null);
+                    audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_REPORT_RESOLVE", AdminAudit.KNOWLEDGE,
+                                    "KNOWLEDGE_REPORT", report.get("id"), file == null ? "#" + fileId : file.getTitle(),
+                                    file == null ? null : file.getUserId(), "处理知识资源举报")
+                            .with("status", status).with("result", result).with("fileId", fileId));
+                    return ApiResponse.ok(report);
+                })
+                .orElseGet(() -> ApiResponse.fail("report not found"));
     }
 
     @PostMapping("/admin/audit")
@@ -767,8 +804,14 @@ public class KnowledgeController {
         if (!validTransition) {
             return ApiResponse.fail("当前状态不支持此审核操作");
         }
+        String previousStatus = existing.getAuditStatus();
         var audited = knowledgeStore.auditFile(fileId, auditStatus, reason);
         analyticsRanking.invalidate();
+        audited.ifPresent(file -> audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_AUDIT", AdminAudit.KNOWLEDGE,
+                        "KNOWLEDGE_FILE", fileId, file.getTitle(), file.getUserId(),
+                        "APPROVED".equals(auditStatus) ? "审核通过知识资源" : "驳回知识资源")
+                .withChanges(new AdminAudit.Changes().add("auditStatus", "审核状态", previousStatus, auditStatus))
+                .with("reason", reason)));
         return audited
                 .map(file -> ApiResponse.ok(Map.of(
                         "file", toView(file),
@@ -797,8 +840,16 @@ public class KnowledgeController {
         if (categoryId != null && knowledgeStore.listCategories().stream().noneMatch(item -> categoryId.equals(item.getId()))) {
             return ApiResponse.fail("knowledge category not found");
         }
+        AdminAudit.Changes changes = new AdminAudit.Changes()
+                .add("title", "标题", existing.getTitle(), title)
+                .add("categoryId", "分类", existing.getCategoryId(), categoryId)
+                .add("auditStatus", "审核状态", existing.getAuditStatus(), auditStatus);
         var updated = knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus);
         analyticsRanking.invalidate();
+        if (updated.isPresent() && !changes.isEmpty()) {
+            audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_EDIT", AdminAudit.KNOWLEDGE, "KNOWLEDGE_FILE",
+                    fileId, title, existing.getUserId(), "修改了" + changes.labels()).withChanges(changes));
+        }
         return updated
                 .map(file -> {
                     fullTextSearch.find(fileId).ifPresent(document ->

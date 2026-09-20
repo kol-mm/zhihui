@@ -140,4 +140,80 @@ class GatewaySecurityFilterTest {
         }
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, last.getResponse().getStatusCode());
     }
+
+    @Test
+    void internalEndpointsAreNotReachableFromOutside() {
+        GatewaySecurityFilter filter = new GatewaySecurityFilter();
+        AtomicInteger forwarded = new AtomicInteger();
+        GatewayFilterChain chain = exchange -> {
+            forwarded.incrementAndGet();
+            return Mono.empty();
+        };
+        for (String path : java.util.List.of("/user/internal/audit", "/user/internal/relation", "/user/INTERNAL/audit",
+                "/message/internal/notification", "/internal/notification")) {
+            var request = MockServerWebExchange.from(MockServerHttpRequest.post(path)
+                    .remoteAddress(new java.net.InetSocketAddress("203.0.113.30", 12345)).build());
+            filter.filter(request, chain).block(Duration.ofSeconds(1));
+            assertEquals(HttpStatus.NOT_FOUND, request.getResponse().getStatusCode(), path);
+        }
+        // A path that merely contains the word is still routed.
+        var ordinary = MockServerWebExchange.from(MockServerHttpRequest.get("/knowledge/search?keyword=internal")
+                .remoteAddress(new java.net.InetSocketAddress("203.0.113.30", 12345)).build());
+        filter.filter(ordinary, chain).block(Duration.ofSeconds(1));
+        assertEquals(1, forwarded.get());
+    }
+
+    @Test
+    void servicesReceiveTheClientAddressTheGatewayTrusts() {
+        GatewaySecurityFilter filter = new GatewaySecurityFilter();
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        GatewayFilterChain chain = exchange -> {
+            seen.set(exchange.getRequest().getHeaders().getFirst(GatewaySecurityFilter.CLIENT_IP_HEADER));
+            return Mono.empty();
+        };
+
+        // A visitor connecting directly cannot choose the address that is recorded.
+        var direct = MockServerWebExchange.from(MockServerHttpRequest.post("/user/admin/status")
+                .header(GatewaySecurityFilter.CLIENT_IP_HEADER, "10.0.0.1")
+                .header("X-Forwarded-For", "10.0.0.2")
+                .remoteAddress(new java.net.InetSocketAddress("203.0.113.40", 12345)).build());
+        filter.filter(direct, chain).block(Duration.ofSeconds(1));
+        assertEquals("203.0.113.40", seen.get());
+
+        // Behind nginx the last untrusted address in the chain is used.
+        var proxied = MockServerWebExchange.from(MockServerHttpRequest.post("/user/admin/status")
+                .header("X-Forwarded-For", "198.51.100.9, 203.0.113.41")
+                .remoteAddress(new java.net.InetSocketAddress("172.18.0.4", 12345)).build());
+        filter.filter(proxied, chain).block(Duration.ofSeconds(1));
+        assertEquals("203.0.113.41", seen.get());
+
+        // On a private network nothing in the chain is public; the address nginx saw beats naming the proxy.
+        var lan = MockServerWebExchange.from(MockServerHttpRequest.post("/user/admin/status")
+                .header("X-Forwarded-For", "192.168.1.50, 172.18.0.1")
+                .remoteAddress(new java.net.InetSocketAddress("172.18.0.4", 12345)).build());
+        filter.filter(lan, chain).block(Duration.ofSeconds(1));
+        assertEquals("192.168.1.50", seen.get());
+
+        var loopback = MockServerWebExchange.from(MockServerHttpRequest.post("/user/admin/status")
+                .header("X-Forwarded-For", "127.0.0.1, 172.18.0.1")
+                .remoteAddress(new java.net.InetSocketAddress("172.18.0.4", 12345)).build());
+        filter.filter(loopback, chain).block(Duration.ofSeconds(1));
+        assertEquals("127.0.0.1", seen.get());
+
+        // Rate limiting still counts only what the gateway can vouch for, so a made-up chain cannot spread the load.
+        AtomicInteger allowed = new AtomicInteger();
+        GatewayFilterChain counting = exchange -> {
+            allowed.incrementAndGet();
+            return Mono.empty();
+        };
+        MockServerWebExchange last = null;
+        for (int index = 0; index < 11; index++) {
+            last = MockServerWebExchange.from(MockServerHttpRequest.post("/user/login")
+                    .header("X-Forwarded-For", "10.1.1." + index + ", 172.18.0.1")
+                    .remoteAddress(new java.net.InetSocketAddress("172.18.0.4", 54321)).build());
+            filter.filter(last, counting).block(Duration.ofSeconds(1));
+        }
+        assertEquals(10, allowed.get());
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, last.getResponse().getStatusCode());
+    }
 }

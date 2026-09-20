@@ -17,6 +17,8 @@ x-java-common: &java-common
   PLATFORM_USER_RELATION_URL: http://user-service:8101/user/internal/relation
   PLATFORM_INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
   PLATFORM_AI_CONFIG_URL: http://ai:8200/ai/config/public
+  # 各服务把管理员操作记录发给用户服务保存。
+  PLATFORM_AUDIT_URL: http://user-service:8101/user/internal/audit
   # 存储时间统一为 UTC（与 MySQL 容器一致）；按天统计和“今天”使用 APP_TIME_ZONE。
   JAVA_TOOL_OPTIONS: "-Xms64m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -Duser.timezone=UTC"
   APP_TIME_ZONE: ${APP_TIME_ZONE:-Asia/Shanghai}
@@ -89,6 +91,8 @@ services:
       AI_KNOWLEDGE_JWT_SECRET: ${AI_KNOWLEDGE_JWT_SECRET:?AI_KNOWLEDGE_JWT_SECRET is required}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_TIMEOUT: ${AI_API_TIMEOUT:-30}
+      PLATFORM_AUDIT_URL: http://user-service:8101/user/internal/audit
+      PLATFORM_INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
     volumes:
       - app_data:/data
     healthcheck:
@@ -116,6 +120,8 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_SECURITY: ${SMTP_SECURITY:-ssl}
+      # 管理员操作记录保留天数，0 表示永久保留。
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
     volumes: ["app_data:/data"]
     depends_on:
       mysql: { condition: service_healthy }

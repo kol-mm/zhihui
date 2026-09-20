@@ -747,3 +747,17 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .governance-email .is-removed { color: var(--zh-ink-400); text-decoration: line-through; }
 .reset-contact { display: grid; gap: 2px; }
 .reset-contact small { color: var(--zh-ink-400); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* 资料与治理: history link on the left of the footer, note when editing one's own account. */
+.el-dialog__footer .governance-history { float: left; }
+.governance-self-note { margin: -6px 0 14px; color: var(--zh-ink-400); font-size: 12px; line-height: 1.5; }
+@media (max-width: 520px) {
+  .el-dialog__footer .governance-history { float: none; display: flex; margin: 0 0 8px; }
+}
+
+/* 资料审核: the before → after list, in the queue and on the member's own page. */
+.profile-diff { margin: 0; padding-left: 16px; color: var(--zh-ink-600, #4a5a52); font-size: 13px; line-height: 1.7; }
+.profile-diff li { overflow-wrap: anywhere; }
+.profile-audit-notice { margin-bottom: 14px; }
+.profile-audit-notice p { margin: 0; overflow-wrap: anywhere; }
+.profile-audit-notice small { color: var(--zh-ink-400); }

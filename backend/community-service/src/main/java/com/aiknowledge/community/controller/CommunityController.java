@@ -1,6 +1,7 @@
 package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.AppTime;
+import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -50,6 +51,13 @@ public class CommunityController {
     private final CommunityNotificationClient notificationClient;
     private final PlatformConfigClient platformConfig;
     private final UserRelationClient userRelationClient;
+
+    private AdminAudit audit = AdminAudit.NONE;
+
+    @Autowired(required = false)
+    public void setAdminAudit(AdminAudit audit) {
+        this.audit = audit == null ? AdminAudit.NONE : audit;
+    }
 
     @Autowired
     public CommunityController(CommunityStore communityStore, CommunityMediaStorageService mediaStorage,
@@ -160,8 +168,19 @@ public class CommunityController {
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
         post.setStatus(initialPostStatus());
+        String previousTitle = existing.getTitle();
+        String previousStatus = existing.getStatus();
+        boolean contentChanged = !java.util.Objects.equals(existing.getContent(), post.getContent());
         PostEntity updated = communityStore.updatePost(post);
         if (request.containsKey("imageUrls")) communityStore.savePostImages(updated.getId(), imageUrls);
+        if (!existing.getUserId().equals(LocalAuth.userId(authorization))) {
+            AdminAudit.Changes changes = new AdminAudit.Changes()
+                    .add("title", "标题", previousTitle, post.getTitle())
+                    .add("status", "状态", previousStatus, updated.getStatus());
+            if (contentChanged) changes.addHidden("content", "正文");
+            audit.record(authorization, AdminAudit.Event.of("POST_EDIT", AdminAudit.COMMUNITY, "POST", postId,
+                    updated.getTitle(), existing.getUserId(), "编辑他人帖子").withChanges(changes));
+        }
         return ApiResponse.ok(toPostView(updated));
     }
 
@@ -380,7 +399,9 @@ public class CommunityController {
         PostDraftEntity draft = communityStore.findDraft(draftId).orElse(null);
         if (draft == null) return ApiResponse.fail("draft not found");
         if (!LocalAuth.canAccessUser(authorization, draft.getUserId())) return ApiResponse.fail("access to this draft is denied");
-        return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
+        boolean removed = communityStore.removeDraft(draftId);
+        if (removed && !draft.getUserId().equals(LocalAuth.userId(authorization))) recordDraftRemoval(authorization, draft);
+        return ApiResponse.ok(Map.of("draftId", draftId, "removed", removed));
     }
 
     @GetMapping("/post/drafts")
@@ -584,7 +605,15 @@ public class CommunityController {
                 || ("PUBLISHED".equals(existing.getStatus()) && "HIDDEN".equals(status))
                 || ("HIDDEN".equals(existing.getStatus()) && "PUBLISHED".equals(status));
         if (!validTransition) return ApiResponse.fail("当前状态不支持此审核操作");
+        String previousStatus = existing.getStatus();
         return communityStore.auditPost(postId, status, reason)
+                .map(post -> {
+                    audit.record(authorization, AdminAudit.Event.of("POST_AUDIT", AdminAudit.COMMUNITY, "POST", postId,
+                                    post.getTitle(), post.getUserId(), "PUBLISHED".equals(status) ? "发布帖子" : "隐藏帖子")
+                            .withChanges(new AdminAudit.Changes().add("status", "状态", previousStatus, status))
+                            .with("reason", reason));
+                    return post;
+                })
                 .map(post -> ApiResponse.ok(Map.of(
                         "post", toPostView(post),
                         "reason", reason,
@@ -606,7 +635,12 @@ public class CommunityController {
         if (!LocalAuth.isAdmin(authorization) && !userId.equals(post.getUserId())) {
             return ApiResponse.fail("access to this post is denied");
         }
-        return ApiResponse.ok(Map.of("postId", postId, "removed", communityStore.removePost(postId)));
+        boolean removed = communityStore.removePost(postId);
+        if (removed && !userId.equals(post.getUserId())) {
+            audit.record(authorization, AdminAudit.Event.of("POST_DELETE", AdminAudit.COMMUNITY, "POST", postId,
+                    post.getTitle(), post.getUserId(), "删除他人帖子"));
+        }
+        return ApiResponse.ok(Map.of("postId", postId, "removed", removed));
     }
 
     @DeleteMapping("/comment")
@@ -622,7 +656,9 @@ public class CommunityController {
         if (!LocalAuth.isAdmin(authorization) && !userId.equals(comment.getUserId())) {
             return ApiResponse.fail("access to this comment is denied");
         }
-        return ApiResponse.ok(Map.of("commentId", commentId, "removed", communityStore.removeComment(commentId)));
+        boolean removed = communityStore.removeComment(commentId);
+        if (removed && !userId.equals(comment.getUserId())) recordCommentRemoval(authorization, comment);
+        return ApiResponse.ok(Map.of("commentId", commentId, "removed", removed));
     }
 
     @DeleteMapping("/comment/admin")
@@ -632,7 +668,10 @@ public class CommunityController {
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         Long commentId = number(request.get("commentId"), 0L);
-        return ApiResponse.ok(Map.of("commentId", commentId, "removed", communityStore.removeComment(commentId)));
+        CommentEntity comment = communityStore.findComment(commentId).orElse(null);
+        boolean removed = communityStore.removeComment(commentId);
+        if (removed && comment != null) recordCommentRemoval(authorization, comment);
+        return ApiResponse.ok(Map.of("commentId", commentId, "removed", removed));
     }
 
     @PostMapping("/comment/admin/status")
@@ -644,8 +683,18 @@ public class CommunityController {
         Long commentId = number(request.get("commentId"), 0L);
         String status = String.valueOf(request.getOrDefault("status", "HIDDEN"));
         if (!List.of("VISIBLE", "HIDDEN").contains(status)) return ApiResponse.fail("invalid comment status");
+        String previousStatus = communityStore.findComment(commentId).map(CommentEntity::getStatus).orElse(null);
         return communityStore.updateCommentStatus(commentId, status)
-                .map(comment -> ApiResponse.ok(toCommentView(comment)))
+                .map(comment -> {
+                    if (!status.equals(previousStatus)) {
+                        audit.record(authorization, AdminAudit.Event.of("COMMENT_STATUS", AdminAudit.COMMUNITY, "COMMENT",
+                                        commentId, excerpt(comment.getContent()), comment.getUserId(),
+                                        "HIDDEN".equals(status) ? "隐藏评论" : "恢复显示评论")
+                                .withChanges(new AdminAudit.Changes().add("status", "状态", previousStatus, status))
+                                .with("postId", comment.getPostId()));
+                    }
+                    return ApiResponse.ok(toCommentView(comment));
+                })
                 .orElseGet(() -> ApiResponse.fail("comment not found"));
     }
 
@@ -656,7 +705,10 @@ public class CommunityController {
     ) {
         if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
         Long draftId = number(request.get("draftId"), 0L);
-        return ApiResponse.ok(Map.of("draftId", draftId, "removed", communityStore.removeDraft(draftId)));
+        PostDraftEntity draft = communityStore.findDraft(draftId).orElse(null);
+        boolean removed = communityStore.removeDraft(draftId);
+        if (removed && draft != null) recordDraftRemoval(authorization, draft);
+        return ApiResponse.ok(Map.of("draftId", draftId, "removed", removed));
     }
 
     @DeleteMapping("/post/admin/drafts/expired")
@@ -668,7 +720,28 @@ public class CommunityController {
         long retentionDays = number(request.get("retentionDays"), 30L);
         if (retentionDays < 1 || retentionDays > 3650) return ApiResponse.fail("retention days must be between 1 and 3650");
         int removed = communityStore.removeDraftsBefore(LocalDateTime.now().minusDays(retentionDays));
+        audit.record(authorization, AdminAudit.Event.of("DRAFTS_PURGE", AdminAudit.COMMUNITY, "DRAFT", null,
+                        "超过 " + retentionDays + " 天的草稿", null, "清理过期草稿 " + removed + " 篇")
+                .with("retentionDays", retentionDays).with("removed", removed));
         return ApiResponse.ok(Map.of("retentionDays", retentionDays, "removed", removed));
+    }
+
+    private void recordCommentRemoval(String authorization, CommentEntity comment) {
+        audit.record(authorization, AdminAudit.Event.of("COMMENT_DELETE", AdminAudit.COMMUNITY, "COMMENT", comment.getId(),
+                excerpt(comment.getContent()), comment.getUserId(), "删除评论").with("postId", comment.getPostId()));
+    }
+
+    private void recordDraftRemoval(String authorization, PostDraftEntity draft) {
+        audit.record(authorization, AdminAudit.Event.of("DRAFT_DELETE", AdminAudit.COMMUNITY, "DRAFT", draft.getId(),
+                draft.getTitle() == null || draft.getTitle().isBlank() ? "未命名草稿" : draft.getTitle(), draft.getUserId(),
+                "删除他人草稿"));
+    }
+
+    /** The start of a comment, enough to recognise it in the log. */
+    static String excerpt(String text) {
+        if (text == null) return "";
+        String flat = text.replaceAll("\\s+", " ").strip();
+        return flat.length() <= 60 ? flat : flat.substring(0, 60) + "…";
     }
 
     private CommentEntity buildComment(Map<String, Object> request, String source, Long userId) {

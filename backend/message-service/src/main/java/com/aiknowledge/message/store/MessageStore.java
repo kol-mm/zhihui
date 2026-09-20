@@ -122,6 +122,8 @@ public interface MessageStore {
 
     Optional<FeedbackTicketEntity> assignTicket(Long ticketId, Long assigneeUserId);
 
+    Optional<FeedbackTicketEntity> findTicket(Long ticketId);
+
     /** Ticket totals behind the admin analytics page, for tickets created since the cutoff. */
     record TicketAnalytics(long total, long bug, long suggestion, long support, long resolved) { }
 
