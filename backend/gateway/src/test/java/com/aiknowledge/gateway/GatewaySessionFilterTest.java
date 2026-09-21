@@ -137,10 +137,14 @@ class GatewaySessionFilterTest {
         assertTrue(revocations.isRevoked(token).block(Duration.ofSeconds(1)));
         assertEquals(List.of("zh:auth:revoked-token:abc", "zh:auth:revoked-before:5"), keys.get());
 
+        // A session Redis never reported on: with Redis unreachable it keeps working rather than everyone
+        // being signed out. The session above stays refused, because this gateway already knows about it.
+        SessionTokens.Token unknown = new SessionTokens.Token(6L, "never-seen", now - 10, now + 60);
         when(values.multiGet(anyList())).thenReturn(Mono.error(new IllegalStateException("redis down")));
-        assertFalse(revocations.isRevoked(token).block(Duration.ofSeconds(1)));
+        assertFalse(revocations.isRevoked(unknown).block(Duration.ofSeconds(1)));
+        assertTrue(revocations.isRevoked(token).block(Duration.ofSeconds(1)));
         when(values.multiGet(anyList())).thenReturn(Mono.never());
-        assertFalse(revocations.isRevoked(token).block(Duration.ofSeconds(1)));
+        assertFalse(revocations.isRevoked(unknown).block(Duration.ofSeconds(1)));
     }
 
     private MockServerWebExchange run(MockServerHttpRequest.BaseBuilder<?> request) {
