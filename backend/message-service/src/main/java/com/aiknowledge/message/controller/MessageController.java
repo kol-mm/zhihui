@@ -732,6 +732,8 @@ public class MessageController {
         view.put("content", localizeNotificationContent(notification));
         view.put("read", notification.getIsRead() != null && notification.getIsRead() == 1);
         view.put("createdAt", notification.getCreatedAt());
+        // The page shows who replied; the name and picture are resolved from the user service as elsewhere.
+        view.put("actorUserId", notification.getActorUserId());
         Map<String, Object> target = null;
         if (notification.getTargetType() != null && notification.getTargetId() != null) {
             target = new LinkedHashMap<>();

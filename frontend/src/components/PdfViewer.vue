@@ -14,26 +14,39 @@
       </div>
     </header>
     <div class="pdf-reading-progress" aria-hidden="true"><i :style="{ width: `${readingProgress}%` }"></i></div>
-    <div ref="stage" class="pdf-stage" @click="focusViewer" @touchstart.passive="startSwipe" @touchend.passive="finishSwipe">
+    <div ref="stage" class="pdf-stage" @click="focusViewer" @scroll.passive="handleScroll">
       <div v-if="loading" class="pdf-state" role="status"><span class="pdf-spinner"></span><strong>正在载入 PDF{{ loadProgress ? ` ${loadProgress}%` : '…' }}</strong></div>
       <div v-else-if="error" class="pdf-state pdf-error" role="alert"><strong>PDF 暂时无法显示</strong><p>{{ error }}</p><el-button type="primary" plain @click="loadDocument">重新加载</el-button></div>
-      <canvas ref="canvas" v-show="!loading && !error" aria-label="当前 PDF 页面"></canvas>
-      <div v-if="rendering && !loading && !error" class="pdf-rendering" role="status"><span class="pdf-spinner"></span><small>正在绘制第 {{ pageNumber }} 页</small></div>
+      <div v-else class="pdf-pages">
+        <article
+          v-for="page in pages"
+          :key="page.number"
+          :ref="element => registerPage(page.number, element as HTMLElement | null)"
+          class="pdf-page"
+          :class="{ 'is-current': page.number === pageNumber }"
+          :style="{ width: `${pageWidth}px`, height: `${Math.round(pageWidth * page.ratio)}px` }"
+          :data-page="page.number"
+        >
+          <canvas :ref="element => registerCanvas(page.number, element as HTMLCanvasElement | null)" :aria-label="`第 ${page.number} 页`"></canvas>
+          <span v-if="!page.rendered" class="pdf-page-placeholder"><span class="pdf-spinner"></span><small>第 {{ page.number }} 页</small></span>
+        </article>
+      </div>
     </div>
-    <footer v-if="pageCount > 1" class="pdf-mobile-hint">左右滑动翻页 · 方向键翻页 · 点击百分比恢复宽度</footer>
+    <footer v-if="pageCount > 1" class="pdf-mobile-hint">上下滚动连续阅读 · 方向键翻页 · 点击百分比恢复宽度</footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { OnProgressParameters, PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { getStoredValue, setStoredValue } from '../api/client';
 
+type PageState = { number:number; ratio:number; rendered:boolean };
+
 const props = defineProps<{ src:string; documentId?:string|number }>();
 const viewer = ref<HTMLElement>();
 const stage = ref<HTMLElement>();
-const canvas = ref<HTMLCanvasElement>();
 const loading = ref(true);
 const error = ref('');
 const pageNumber = ref(1);
@@ -41,17 +54,26 @@ const pageInput = ref(1);
 const pageCount = ref(0);
 const zoom = ref(1);
 const loadProgress = ref(0);
-const rendering = ref(false);
 const isFullscreen = ref(false);
-const readingProgress = computed(()=>pageCount.value?Math.round(pageNumber.value/pageCount.value*100):0);
+const pages = ref<PageState[]>([]);
+const pageWidth = ref(720);
+const readingProgress = ref(0);
+
+/** Pages this far from the current one keep their pixels; the rest give them back, so long documents stay light. */
+const KEEP_RENDERED_RADIUS = 3;
+
 let pdf:PDFDocumentProxy|undefined;
 let loadingTask:PDFDocumentLoadingTask|undefined;
-let renderTask:RenderTask|undefined;
 let resizeObserver:ResizeObserver|undefined;
-let generation=0;
-let renderSequence=0;
-let resizeFrame=0;
-let swipeStart:{x:number;y:number;time:number}|undefined;
+let visibility:IntersectionObserver|undefined;
+const pageElements = new Map<number, HTMLElement>();
+const canvases = new Map<number, HTMLCanvasElement>();
+const renderTasks = new Map<number, RenderTask>();
+const rendering = new Set<number>();
+let generation = 0;
+let resizeFrame = 0;
+let scrollFrame = 0;
+let restoredPage = 0;
 let pdfJsPromise:Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')>|undefined;
 
 function loadPdfJs(){
@@ -59,16 +81,25 @@ function loadPdfJs(){
   return pdfJsPromise;
 }
 
+function registerPage(number:number, element:HTMLElement|null){
+  if(element){pageElements.set(number,element);visibility?.observe(element);}
+  else pageElements.delete(number);
+}
+function registerCanvas(number:number, element:HTMLCanvasElement|null){
+  if(element)canvases.set(number,element);else canvases.delete(number);
+}
+
 async function releaseDocument(){
-  renderSequence++;
-  renderTask?.cancel();renderTask=undefined;
+  renderTasks.forEach(task=>task.cancel());renderTasks.clear();rendering.clear();
+  visibility?.disconnect();visibility=undefined;
+  canvases.clear();pageElements.clear();pages.value=[];
   if(loadingTask){await loadingTask.destroy().catch(()=>undefined);loadingTask=undefined;}
   else if(pdf){await pdf.cleanup().catch(()=>undefined);}
   pdf=undefined;
 }
 
 async function loadDocument(){
-  const current=++generation;error.value='';loading.value=true;loadProgress.value=0;pageCount.value=0;pageNumber.value=1;pageInput.value=1;zoom.value=1;
+  const current=++generation;error.value='';loading.value=true;loadProgress.value=0;pageCount.value=0;pageNumber.value=1;pageInput.value=1;zoom.value=1;readingProgress.value=0;
   await releaseDocument();
   if(!props.src){error.value='没有可预览的 PDF 文件';loading.value=false;return;}
   try{
@@ -77,71 +108,193 @@ async function loadDocument(){
     loadingTask.onProgress=({loaded,total}:OnProgressParameters)=>{if(current===generation&&total>0)loadProgress.value=Math.min(100,Math.round(loaded/total*100));};
     const loaded=await loadingTask.promise;
     if(current!==generation){await loaded.cleanup();return;}
-    pdf=loaded;pageCount.value=loaded.numPages;restoreReadingState();loading.value=false;loadProgress.value=100;
-    await nextTick();await renderPage();
+    pdf=loaded;pageCount.value=loaded.numPages;
+    // The first page gives the shape of the document; a page of a different size corrects itself as it draws.
+    const first=await loaded.getPage(1);
+    const natural=first.getViewport({scale:1});
+    pages.value=Array.from({length:loaded.numPages},(_,index)=>({number:index+1,ratio:natural.height/natural.width,rendered:false}));
+    restoreReadingState();
+    loading.value=false;loadProgress.value=100;
+    await nextTick();
+    measureWidth();
+    observePages();
+    if(restoredPage>1){await nextTick();scrollToPage(restoredPage,'auto');}
+    restoredPage=0;
+    await renderAround(pageNumber.value);
   }catch(reason){
     if(current!==generation)return;
     loading.value=false;error.value=reason instanceof Error&&reason.message?'请检查文件是否完整，或稍后重试。':'请稍后重试。';
   }
 }
 
-async function renderPage(){
-  const current=generation;const sequence=++renderSequence;if(!pdf||!canvas.value||!stage.value||loading.value)return;
-  renderTask?.cancel();
-  rendering.value=true;
+function measureWidth(){
+  const available=stage.value?Math.max(260,stage.value.clientWidth-24):720;
+  pageWidth.value=Math.round(available*zoom.value);
+}
+
+/** Pages draw themselves shortly before they scroll into view, and only those. */
+function observePages(){
+  visibility?.disconnect();
+  if(!stage.value)return;
+  visibility=new IntersectionObserver(entries=>{
+    entries.forEach(entry=>{
+      if(!entry.isIntersecting)return;
+      const number=Number((entry.target as HTMLElement).dataset.page||0);
+      if(number)void renderPage(number);
+    });
+  },{root:stage.value,rootMargin:'150% 0px',threshold:0.01});
+  pageElements.forEach(element=>visibility?.observe(element));
+}
+
+async function renderPage(number:number){
+  const current=generation;
+  const state=pages.value.find(page=>page.number===number);
+  if(!pdf||!state||state.rendered||rendering.has(number))return;
+  const canvas=canvases.get(number);
+  if(!canvas)return;
+  rendering.add(number);
   try{
-    const page=await pdf.getPage(pageNumber.value);if(current!==generation||sequence!==renderSequence)return;
+    const page=await pdf.getPage(number);
+    if(current!==generation)return;
     const natural=page.getViewport({scale:1});
-    const availableWidth=Math.max(260,stage.value.clientWidth-24);
-    const viewport=page.getViewport({scale:(availableWidth/natural.width)*zoom.value});
+    state.ratio=natural.height/natural.width;
+    const viewport=page.getViewport({scale:pageWidth.value/natural.width});
     const pixelRatio=Math.min(window.devicePixelRatio||1,2);
-    const target=canvas.value;const context=target.getContext('2d',{alpha:false});if(!context)throw new Error('canvas unavailable');
-    target.width=Math.floor(viewport.width*pixelRatio);target.height=Math.floor(viewport.height*pixelRatio);
-    target.style.width=`${Math.floor(viewport.width)}px`;target.style.height=`${Math.floor(viewport.height)}px`;
-    renderTask=page.render({canvas:target,canvasContext:context,viewport,transform:pixelRatio===1?undefined:[pixelRatio,0,0,pixelRatio,0,0]});
-    await renderTask.promise;
-    if(sequence===renderSequence){saveReadingState();prefetchAdjacentPages();}
+    const context=canvas.getContext('2d',{alpha:false});
+    if(!context)throw new Error('canvas unavailable');
+    canvas.width=Math.floor(viewport.width*pixelRatio);canvas.height=Math.floor(viewport.height*pixelRatio);
+    canvas.style.width=`${Math.floor(viewport.width)}px`;canvas.style.height=`${Math.floor(viewport.height)}px`;
+    const task=page.render({canvas,canvasContext:context,viewport,transform:pixelRatio===1?undefined:[pixelRatio,0,0,pixelRatio,0,0]});
+    renderTasks.set(number,task);
+    await task.promise;
+    if(current!==generation)return;
+    state.rendered=true;
+    releaseDistantPages();
   }catch(reason){
     if(reason instanceof Error&&reason.name==='RenderingCancelledException')return;
-    if(current===generation&&sequence===renderSequence)error.value='当前页面渲染失败，请重新加载。';
-  }finally{if(sequence===renderSequence)rendering.value=false;}
+    if(current===generation&&!error.value&&!pages.value.some(page=>page.rendered))error.value='页面渲染失败，请重新加载。';
+  }finally{
+    rendering.delete(number);renderTasks.delete(number);
+  }
+}
+
+/** Draws the page the reader is on plus its neighbours, so paging never lands on a blank sheet. */
+async function renderAround(number:number){
+  for(const page of [number,number+1,number-1,number+2].filter(value=>value>=1&&value<=pageCount.value)){
+    await renderPage(page);
+  }
+}
+
+function releaseDistantPages(){
+  pages.value.forEach(page=>{
+    if(!page.rendered||Math.abs(page.number-pageNumber.value)<=KEEP_RENDERED_RADIUS)return;
+    const canvas=canvases.get(page.number);
+    if(!canvas)return;
+    canvas.width=0;canvas.height=0;canvas.style.width='';canvas.style.height='';
+    page.rendered=false;
+  });
+}
+
+function redrawAll(){
+  renderTasks.forEach(task=>task.cancel());renderTasks.clear();rendering.clear();
+  pages.value.forEach(page=>{
+    const canvas=canvases.get(page.number);
+    if(canvas){canvas.width=0;canvas.height=0;canvas.style.width='';canvas.style.height='';}
+    page.rendered=false;
+  });
+  void renderAround(pageNumber.value);
+}
+
+function handleScroll(){
+  cancelAnimationFrame(scrollFrame);
+  scrollFrame=requestAnimationFrame(()=>{
+    const element=stage.value;
+    if(!element)return;
+    const scrollable=element.scrollHeight-element.clientHeight;
+    readingProgress.value=scrollable>0?Math.min(100,Math.max(0,Math.round(element.scrollTop/scrollable*100))):0;
+    const marker=element.scrollTop+element.clientHeight*0.35;
+    let current=pageNumber.value;
+    pageElements.forEach((node,number)=>{
+      if(node.offsetTop<=marker&&node.offsetTop+node.offsetHeight>marker)current=number;
+    });
+    if(current!==pageNumber.value){
+      pageNumber.value=current;pageInput.value=current;
+      saveReadingState();releaseDistantPages();
+    }
+  });
+}
+
+function scrollToPage(number:number,behavior:ScrollBehavior='smooth'){
+  const node=pageElements.get(number);
+  if(!node||!stage.value)return;
+  stage.value.scrollTo({top:Math.max(0,node.offsetTop-8),behavior});
 }
 
 function goToPage(value:number){
-  if(!pageCount.value)return;const next=Math.min(pageCount.value,Math.max(1,Number(value)||1));
-  pageNumber.value=next;pageInput.value=next;void renderPage();stage.value?.scrollTo({top:0,behavior:'smooth'});
+  if(!pageCount.value)return;
+  const next=Math.min(pageCount.value,Math.max(1,Number(value)||1));
+  pageNumber.value=next;pageInput.value=next;
+  scrollToPage(next);
+  void renderAround(next);
+  saveReadingState();
 }
-function setZoom(value:number){zoom.value=Math.min(2.5,Math.max(.75,value));void renderPage();}
+
+function setZoom(value:number){
+  const next=Math.min(2.5,Math.max(.75,value));
+  if(next===zoom.value)return;
+  zoom.value=next;measureWidth();saveReadingState();
+  void nextTick().then(()=>{redrawAll();scrollToPage(pageNumber.value,'auto');});
+}
+
 function readingStateKey(){return props.documentId===undefined?'':`ai-knowledge-pdf-state-${props.documentId}`;}
 function restoreReadingState(){
   const key=readingStateKey();if(!key)return;
-  try{const saved=JSON.parse(getStoredValue(key,'{}')) as {page?:number;zoom?:number};pageNumber.value=Math.min(pageCount.value,Math.max(1,saved.page||1));pageInput.value=pageNumber.value;zoom.value=Math.min(2.5,Math.max(.75,saved.zoom||1));}catch{/* 使用默认阅读位置。 */}
+  try{
+    const saved=JSON.parse(getStoredValue(key,'{}')) as {page?:number;zoom?:number};
+    pageNumber.value=Math.min(pageCount.value,Math.max(1,saved.page||1));pageInput.value=pageNumber.value;
+    zoom.value=Math.min(2.5,Math.max(.75,saved.zoom||1));restoredPage=pageNumber.value;
+  }catch{/* 使用默认阅读位置。 */}
 }
 function saveReadingState(){const key=readingStateKey();if(key)setStoredValue(key,JSON.stringify({page:pageNumber.value,zoom:zoom.value}));}
-function prefetchAdjacentPages(){if(!pdf)return;[pageNumber.value-1,pageNumber.value+1].filter(page=>page>=1&&page<=pageCount.value).forEach(page=>void pdf?.getPage(page).catch(()=>undefined));}
+
 function focusViewer(){viewer.value?.focus({preventScroll:true});}
 function handleKeydown(event:KeyboardEvent){
   if(event.key==='ArrowLeft'||event.key==='PageUp'){event.preventDefault();goToPage(pageNumber.value-1);}
-  else if(event.key==='ArrowRight'||event.key==='PageDown'||event.key===' '){event.preventDefault();goToPage(pageNumber.value+1);}
+  else if(event.key==='ArrowRight'||event.key==='PageDown'){event.preventDefault();goToPage(pageNumber.value+1);}
   else if(event.key==='+'||event.key==='='){event.preventDefault();setZoom(zoom.value+.25);}
   else if(event.key==='-'){event.preventDefault();setZoom(zoom.value-.25);}
   else if(event.key==='0'){event.preventDefault();setZoom(1);}
   else if(event.key==='Escape'&&isFullscreen.value&&!document.fullscreenElement){event.preventDefault();void toggleFullscreen();}
 }
-function startSwipe(event:TouchEvent){const touch=event.changedTouches[0];if(touch)swipeStart={x:touch.clientX,y:touch.clientY,time:Date.now()};}
-function finishSwipe(event:TouchEvent){
-  const start=swipeStart;swipeStart=undefined;const touch=event.changedTouches[0];if(!start||!touch||zoom.value!==1)return;
-  const x=touch.clientX-start.x;const y=touch.clientY-start.y;if(Date.now()-start.time>800||Math.abs(x)<60||Math.abs(x)<Math.abs(y)*1.4)return;
-  goToPage(pageNumber.value+(x<0?1:-1));
-}
+
 async function toggleFullscreen(){
   const element=viewer.value;if(!element)return;
   if(document.fullscreenEnabled&&element.requestFullscreen){try{if(document.fullscreenElement)await document.exitFullscreen();else await element.requestFullscreen();return;}catch{/* 使用兼容移动浏览器的页面内全屏。 */}}
-  isFullscreen.value=!isFullscreen.value;document.body.classList.toggle('pdf-reader-fullscreen',isFullscreen.value);await nextTick();void renderPage();
+  isFullscreen.value=!isFullscreen.value;document.body.classList.toggle('pdf-reader-fullscreen',isFullscreen.value);
+  await nextTick();measureWidth();redrawAll();scrollToPage(pageNumber.value,'auto');
 }
-function syncFullscreen(){isFullscreen.value=document.fullscreenElement===viewer.value;void renderPage();}
+function syncFullscreen(){
+  isFullscreen.value=document.fullscreenElement===viewer.value;
+  void nextTick().then(()=>{measureWidth();redrawAll();scrollToPage(pageNumber.value,'auto');});
+}
 
 watch(()=>props.src,()=>void loadDocument(),{immediate:true});
-onMounted(()=>{resizeObserver=new ResizeObserver(()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>void renderPage());});if(viewer.value)resizeObserver.observe(viewer.value);document.addEventListener('fullscreenchange',syncFullscreen);});
-onBeforeUnmount(()=>{generation++;cancelAnimationFrame(resizeFrame);resizeObserver?.disconnect();document.removeEventListener('fullscreenchange',syncFullscreen);document.body.classList.remove('pdf-reader-fullscreen');void releaseDocument();});
+onMounted(()=>{
+  resizeObserver=new ResizeObserver(()=>{
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame=requestAnimationFrame(()=>{
+      const before=pageWidth.value;
+      measureWidth();
+      if(Math.abs(before-pageWidth.value)>1){redrawAll();scrollToPage(pageNumber.value,'auto');}
+    });
+  });
+  if(viewer.value)resizeObserver.observe(viewer.value);
+  document.addEventListener('fullscreenchange',syncFullscreen);
+});
+onBeforeUnmount(()=>{
+  generation++;cancelAnimationFrame(resizeFrame);cancelAnimationFrame(scrollFrame);
+  resizeObserver?.disconnect();document.removeEventListener('fullscreenchange',syncFullscreen);
+  document.body.classList.remove('pdf-reader-fullscreen');
+  void releaseDocument();
+});
 </script>

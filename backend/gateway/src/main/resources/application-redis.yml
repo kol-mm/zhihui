@@ -10,7 +10,7 @@ spring:
       default-filters:
         - name: RequestSize
           args:
-            maxSize: 100MB
+            maxSize: 220MB
         - name: RequestRateLimiter
           args:
             key-resolver: "#{@clientKeyResolver}"

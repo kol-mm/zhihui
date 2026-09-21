@@ -98,6 +98,7 @@ class AiConfigRequest(BaseModel):
     request_url: str = Field(default="", max_length=2000)
     temperature: float = Field(default=0.2, ge=0, le=1)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
+    pdf_max_upload_mb: int = Field(default=200, ge=1, le=200)
     notifications_enabled: bool = True
     community_enabled: bool = True
     selected_file_ids: list[int] = Field(default_factory=list, max_length=1000)
@@ -290,6 +291,7 @@ AI_CONFIG_LABELS = {
     "request_url": "请求地址",
     "temperature": "温度",
     "max_upload_mb": "上传大小上限",
+    "pdf_max_upload_mb": "PDF 上传大小上限",
     "notifications_enabled": "通知",
     "community_enabled": "社区",
     "selected_file_ids": "指定知识文件",
@@ -402,6 +404,7 @@ def read_ai_config() -> dict[str, Any]:
         "request_url": "",
         "temperature": 0.2,
         "max_upload_mb": 25,
+        "pdf_max_upload_mb": 200,
         "notifications_enabled": True,
         "community_enabled": True,
         "selected_file_ids": [],
@@ -415,7 +418,8 @@ def read_ai_config() -> dict[str, Any]:
         elif row["config_key"] == "temperature":
             defaults[row["config_key"]] = max(0.0, min(1.0, float(value)))
         elif row["config_key"] in {
-            "max_upload_mb", "max_post_images", "max_comment_length", "max_message_length", "draft_retention_days"
+            "max_upload_mb", "pdf_max_upload_mb", "max_post_images", "max_comment_length", "max_message_length",
+            "draft_retention_days"
         }:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] in {
@@ -695,6 +699,7 @@ def public_config() -> ApiResponse:
         "max_message_length": int(config.get("max_message_length", 2000)),
         "draft_retention_days": int(config.get("draft_retention_days", 30)),
         "max_upload_mb": int(config.get("max_upload_mb", 25)),
+        "pdf_max_upload_mb": int(config.get("pdf_max_upload_mb", 200)),
         "notifications_enabled": bool(config.get("notifications_enabled", True)),
         "community_enabled": bool(config.get("community_enabled", True)),
     })

@@ -17,7 +17,7 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndOneConversationPerPair() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_message_fresh")) {
             db.flyway().migrate();
-            assertEquals("1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(1, db.number("SELECT COUNT(*) FROM faq"));
             assertTrue(db.hasIndex("chat_session", "uk_session_pair"));
             assertFalse(db.hasIndex("chat_session", "idx_session_pair"));
@@ -53,7 +53,7 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals("1:3:5:2026-02-01 00:00:00,3:3:7:2026-01-15 00:00:00", db.text(
                     "SELECT GROUP_CONCAT(CONCAT(id, ':', user_a_id, ':', user_b_id, ':', updated_at) ORDER BY id) FROM chat_session"));
             assertEquals("1:1,2:1,3:3", db.text("SELECT GROUP_CONCAT(CONCAT(id, ':', session_id) ORDER BY id) FROM chat_message"));
@@ -62,6 +62,20 @@ class FlywayMigrationTest {
             assertTrue(db.hasColumn("notification", "anchor_id"));
             assertTrue(db.hasIndex("notification", "idx_notification_user_id"));
             assertThrows(SQLException.class, () -> db.execute("INSERT INTO chat_session (user_a_id, user_b_id) VALUES (3, 5)"));
+            assertEquals(0, db.flyway().migrate().migrationsExecuted);
+        }
+    }
+
+    @Test
+    void notificationsRememberWhoCausedThem() throws Exception {
+        try (MigrationDatabase db = new MigrationDatabase("zc_mig_message_actor")) {
+            db.flyway().migrate();
+            assertTrue(db.hasColumn("notification", "actor_user_id"));
+            db.execute("INSERT INTO notification (user_id, type, title, content, actor_user_id) VALUES (5, 'COMMENT', '新回复', '内容', 9)",
+                    // A notification from before this migration simply has no actor.
+                    "INSERT INTO notification (user_id, type, title, content) VALUES (5, 'SYSTEM', '公告', '内容')");
+            assertEquals(9, db.number("SELECT actor_user_id FROM notification WHERE type = 'COMMENT'"));
+            assertEquals(1, db.number("SELECT COUNT(*) FROM notification WHERE actor_user_id IS NULL"));
             assertEquals(0, db.flyway().migrate().migrationsExecuted);
         }
     }

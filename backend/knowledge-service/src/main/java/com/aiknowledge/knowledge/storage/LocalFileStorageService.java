@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -76,6 +77,49 @@ public class LocalFileStorageService {
         return result;
     }
 
+    /**
+     * Stores a file without holding it in memory. Large uploads (a 200 MB PDF) would not fit in this service's
+     * heap, so they travel from the request straight to storage.
+     */
+    public Map<String, Object> saveStream(String filename, InputStream content, long size, String contentType, String fileType) {
+        String safeName = safeFilename(filename, fileType);
+        String objectName = DATE_PATH.format(LocalDateTime.now()) + "/" + UUID.randomUUID() + "-" + safeName;
+        if ("minio".equalsIgnoreCase(storageMode)) {
+            streamToMinio(objectName, content, size, contentType);
+        } else {
+            streamLocally(objectName, content);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("storageMode", storageMode);
+        result.put("objectName", objectName.replace("\\", "/"));
+        result.put("fileUrl", "storage://" + objectName.replace("\\", "/"));
+        result.put("filename", safeName);
+        result.put("size", size);
+        result.put("contentType", contentType == null ? "application/octet-stream" : contentType);
+        result.put("minioReady", "minio".equalsIgnoreCase(storageMode));
+        return result;
+    }
+
+    /** Reads a stored file as a stream; the caller closes it. */
+    public StoredStream readStream(String fileUrl) {
+        String objectName = objectName(fileUrl);
+        try {
+            if ("minio".equalsIgnoreCase(storageMode)) {
+                ensureBucket();
+                var response = minioClient.getObject(GetObjectArgs.builder().bucket(minioBucket).object(objectName).build());
+                long length = minioClient.statObject(io.minio.StatObjectArgs.builder()
+                        .bucket(minioBucket).object(objectName).build()).size();
+                return new StoredStream(response, length, objectName);
+            }
+            Path target = storageRoot.resolve(objectName).normalize();
+            if (!target.startsWith(storageRoot)) throw new IllegalArgumentException("invalid storage path");
+            return new StoredStream(Files.newInputStream(target), Files.size(target), objectName);
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to read stored file", error);
+        }
+    }
+
     public StoredContent read(String fileUrl) {
         String objectName = objectName(fileUrl);
         try {
@@ -120,6 +164,33 @@ public class LocalFileStorageService {
             Files.write(target, content);
         } catch (IOException error) {
             throw new IllegalStateException("failed to save local file", error);
+        }
+    }
+
+    private void streamLocally(String objectName, InputStream content) {
+        Path target = storageRoot.resolve(objectName).normalize();
+        if (!target.startsWith(storageRoot)) {
+            throw new IllegalArgumentException("invalid storage path");
+        }
+        try {
+            Files.createDirectories(target.getParent());
+            Files.copy(content, target);
+        } catch (IOException error) {
+            throw new IllegalStateException("failed to save local file", error);
+        }
+    }
+
+    private void streamToMinio(String objectName, InputStream content, long size, String contentType) {
+        try {
+            ensureBucket();
+            minioClient.putObject(PutObjectArgs.builder()
+                    .bucket(minioBucket)
+                    .object(objectName)
+                    .contentType(contentType == null ? "application/octet-stream" : contentType)
+                    .stream(content, size, -1)
+                    .build());
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to save file to MinIO", error);
         }
     }
 
@@ -172,5 +243,8 @@ public class LocalFileStorageService {
     }
 
     public record StoredContent(byte[] bytes, String objectName) {
+    }
+
+    public record StoredStream(InputStream stream, long length, String objectName) {
     }
 }

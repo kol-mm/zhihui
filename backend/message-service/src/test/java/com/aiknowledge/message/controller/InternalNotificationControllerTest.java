@@ -2,6 +2,7 @@ package com.aiknowledge.message.controller;
 
 import com.aiknowledge.message.entity.NotificationEntity;
 import com.aiknowledge.message.store.MessageStore;
+import com.aiknowledge.message.store.InMemoryMessageStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -87,5 +88,20 @@ class InternalNotificationControllerTest {
             assertNull(entity.getAnchorId());
             return entity.getTargetType() == null && entity.getTargetId() == null;
         }));
+    }
+
+    @Test
+    void theMemberWhoRepliedIsKept() {
+        InMemoryMessageStore store = new InMemoryMessageStore();
+        InternalNotificationController controller = new InternalNotificationController(store, "test-token");
+
+        controller.create("test-token", Map.of("userId", 5, "actorUserId", 9, "type", "COMMENT",
+                "title", "你的帖子收到新评论", "content", "《帖子》：内容", "targetType", "POST", "targetId", 3));
+        assertEquals(9L, store.listNotifications(5L).get(0).getActorUserId());
+
+        // Without an actor the notification is still delivered, just unattributed.
+        controller.create("test-token", Map.of("userId", 5, "type", "SYSTEM", "title", "系统公告", "content", "内容"));
+        assertNull(store.listNotifications(5L).stream()
+                .filter(notification -> "SYSTEM".equals(notification.getType())).findFirst().orElseThrow().getActorUserId());
     }
 }

@@ -56,6 +56,7 @@ public class InternalNotificationController {
         notification.setType(String.valueOf(request.getOrDefault("type", "SYSTEM")));
         notification.setTitle(title);
         notification.setContent(content);
+        notification.setActorUserId(actorUserId != null && actorUserId > 0 ? actorUserId : null);
         // Optional link: an unknown type or a missing id leaves the notification as plain text.
         String targetType = String.valueOf(request.getOrDefault("targetType", "")).trim();
         Long targetId = number(request.get("targetId"));

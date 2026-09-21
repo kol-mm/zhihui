@@ -300,7 +300,7 @@ class KnowledgeControllerTest {
         assertEquals("INDEXED", uploaded.data().get("parseStatus"));
         var download = controller.fileContent(userAuth, fileId);
         assertEquals(200, download.getStatusCode().value());
-        assertTrue(new String(download.getBody()).contains("signed identities"));
+        assertTrue(bodyText(download).contains("signed identities"));
     }
 
     @Test
@@ -786,4 +786,21 @@ class KnowledgeControllerTest {
         assertEquals(500, controller.adminFilesByIds(userAuth, String.valueOf(first)).code());
     }
 
+
+    /** The stored-file endpoints stream their body; tests read it back in full. */
+    private static String bodyText(org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> response) {
+        return new String(bodyBytes(response), java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static int bodyLength(org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> response) {
+        return bodyBytes(response).length;
+    }
+
+    private static byte[] bodyBytes(org.springframework.http.ResponseEntity<org.springframework.core.io.Resource> response) {
+        try (var stream = java.util.Objects.requireNonNull(response.getBody()).getInputStream()) {
+            return stream.readAllBytes();
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("could not read the streamed body", error);
+        }
+    }
 }

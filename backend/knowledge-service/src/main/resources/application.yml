@@ -6,8 +6,10 @@ server:
 spring:
   servlet:
     multipart:
-      max-file-size: 25MB
-      max-request-size: 25MB
+      # PDFs may be whole books; anything this large is streamed to storage, never held in the heap.
+      max-file-size: 210MB
+      max-request-size: 220MB
+      file-size-threshold: 1MB
   application:
     name: knowledge-service
   profiles:

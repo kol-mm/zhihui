@@ -761,3 +761,26 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .profile-audit-notice { margin-bottom: 14px; }
 .profile-audit-notice p { margin: 0; overflow-wrap: anywhere; }
 .profile-audit-notice small { color: var(--zh-ink-400); }
+
+/* The reader dialog reports progress instead of opening empty. */
+.reader-state { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; color: var(--zh-ink-500); font-size: 13px; }
+.reader-state .el-alert { flex: 1; }
+.reader-spinner { width: 16px; height: 16px; border: 2px solid var(--zh-line, #e1e8e4); border-top-color: var(--el-color-primary); border-radius: 50%; animation: reader-spin .8s linear infinite; }
+@keyframes reader-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .reader-spinner { animation-duration: 2.4s; } }
+
+/* Continuous PDF reading: one column of pages, each drawn as it comes into view. */
+.pdf-pages { display: grid; gap: 14px; justify-items: center; padding-bottom: 8px; }
+.pdf-page { position: relative; overflow: hidden; background: #fff; border-radius: 3px; box-shadow: 0 3px 16px rgba(26, 42, 34, .18); }
+.pdf-page canvas { display: block; box-shadow: none; }
+.pdf-page.is-current { box-shadow: 0 3px 16px rgba(26, 42, 34, .18), 0 0 0 2px rgba(23, 107, 77, .28); }
+.pdf-page-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--zh-ink-400, #8a978f); font-size: 12px; }
+.pdf-page-placeholder .pdf-spinner { width: 20px; height: 20px; border-width: 2px; }
+@media (prefers-reduced-motion: reduce) { .pdf-page-placeholder .pdf-spinner { animation-duration: 2.4s; } }
+
+/* Notifications name the member who replied. */
+.notification-avatar { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; overflow: hidden; color: #fff; font-size: 14px; background: var(--el-color-primary); border-radius: 50%; flex: 0 0 auto; }
+.notification-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.notification-actor { margin: 2px 0 4px !important; color: var(--zh-ink-600, #4a5a52); font-size: 13px; }
+.notification-actor small { color: var(--zh-ink-400, #8a978f); }
+

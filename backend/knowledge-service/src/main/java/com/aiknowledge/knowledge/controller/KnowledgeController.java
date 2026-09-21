@@ -118,15 +118,18 @@ public class KnowledgeController {
         if (userId == null) return ApiResponse.fail("valid user authorization is required");
         if (!LocalAuth.isAdmin(authorization) && !knowledgeUploadEnabled()) return ApiResponse.fail("平台当前未开放用户上传知识资料");
         if (multipartFile.isEmpty()) return ApiResponse.fail("file is required");
-        int maxUploadMb = platformConfig == null ? 25 : platformConfig.maxUploadMb();
-        if (multipartFile.getSize() > maxUploadMb * 1024L * 1024L) return ApiResponse.fail("file size must not exceed " + maxUploadMb + " MB");
         String filename = multipartFile.getOriginalFilename() == null ? "knowledge.txt" : multipartFile.getOriginalFilename();
+        int maxUploadMb = uploadLimitMb(textExtractor.extension(filename));
+        if (multipartFile.getSize() > maxUploadMb * 1024L * 1024L) return ApiResponse.fail("file size must not exceed " + maxUploadMb + " MB");
         String storedFileUrl = null;
         List<String> storedMediaUrls = new ArrayList<>();
         Long savedFileId = null;
         try {
-            byte[] bytes = multipartFile.getBytes();
             String fileType = textExtractor.extension(filename);
+            if (multipartFile.getSize() > TEXT_EXTRACTION_MAX_BYTES) {
+                return ApiResponse.ok(storeWithoutExtraction(userId, multipartFile, filename, fileType, title, categoryId, imageUrls));
+            }
+            byte[] bytes = multipartFile.getBytes();
             DocumentTextExtractor.ParsedDocument parsed = textExtractor.parse(filename, bytes);
             String extractedContent = parsed.text().trim();
             if (imageUrls != null && !imageUrls.isEmpty()) {
@@ -206,29 +209,76 @@ public class KnowledgeController {
     }
 
     @GetMapping("/file/{fileId}")
-    public ResponseEntity<byte[]> fileContent(
+    public ResponseEntity<org.springframework.core.io.Resource> fileContent(
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @PathVariable Long fileId
     ) {
         return storedFileResponse(authorization, fileId, true);
     }
 
+    /**
+     * Files this large are stored without reading them into memory: parsing a 200 MB PDF would not fit in this
+     * service's heap, and the reader streams the original anyway. They are searchable by title only.
+     */
+    private static final long TEXT_EXTRACTION_MAX_BYTES = 30L * 1024 * 1024;
+
+    /** Beyond the servlet's own ceiling the request never reaches the handler; answer it in the same words. */
+    @org.springframework.web.bind.annotation.ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ApiResponse<Map<String, Object>> uploadTooLarge() {
+        return ApiResponse.fail("file size must not exceed " + uploadLimitMb("pdf") + " MB");
+    }
+
+    private int uploadLimitMb(String fileType) {
+        if (platformConfig == null) return "pdf".equalsIgnoreCase(fileType) ? 200 : 25;
+        return "pdf".equalsIgnoreCase(fileType) ? platformConfig.pdfMaxUploadMb() : platformConfig.maxUploadMb();
+    }
+
+    private Map<String, Object> storeWithoutExtraction(Long userId, MultipartFile multipartFile, String filename,
+                                                       String fileType, String title, Long categoryId,
+                                                       List<String> imageUrls) throws java.io.IOException {
+        if (imageUrls != null && !imageUrls.isEmpty()) {
+            throw new IllegalArgumentException("正文图片必须包含在原始文件中，不能单独上传");
+        }
+        Map<String, Object> stored;
+        try (java.io.InputStream content = multipartFile.getInputStream()) {
+            stored = fileStorage.saveStream(filename, content, multipartFile.getSize(), multipartFile.getContentType(), fileType);
+        }
+        KnowledgeFileEntity file = new KnowledgeFileEntity();
+        file.setUserId(userId);
+        file.setCategoryId(categoryId);
+        file.setTitle(title == null || title.isBlank() ? filename : title.trim());
+        file.setFileUrl(String.valueOf(stored.get("fileUrl")));
+        file.setFileType(fileType);
+        file.setParseStatus("TOO_LARGE");
+        file.setAuditStatus("PENDING");
+        file.setViews(0);
+        file.setDownloads(0);
+        KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
+        // Indexed by title alone, so a large document can still be found and reviewed.
+        fullTextSearch.index(saved.getId(), saved.getTitle(), "", saved.getFileUrl(), List.of());
+        Map<String, Object> view = toView(saved);
+        view.put("size", multipartFile.getSize());
+        view.put("storageMode", stored.get("storageMode"));
+        view.put("textExtracted", false);
+        return view;
+    }
+
     @GetMapping("/file/{fileId}/preview")
-    public ResponseEntity<byte[]> filePreview(
+    public ResponseEntity<org.springframework.core.io.Resource> filePreview(
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @PathVariable Long fileId
     ) {
         return storedFileResponse(authorization, fileId, false);
     }
 
-    private ResponseEntity<byte[]> storedFileResponse(String authorization, Long fileId, boolean download) {
+    private ResponseEntity<org.springframework.core.io.Resource> storedFileResponse(String authorization, Long fileId, boolean download) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED);
         KnowledgeFileEntity file = knowledgeStore.find(fileId)
                 .orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND));
         boolean allowed = "APPROVED".equals(file.getAuditStatus()) || userId.equals(file.getUserId()) || LocalAuth.isAdmin(authorization);
         if (!allowed) throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
-        LocalFileStorageService.StoredContent stored = fileStorage.read(file.getFileUrl());
+        LocalFileStorageService.StoredStream stored = fileStorage.readStream(file.getFileUrl());
         if (download) knowledgeStore.download(userId, fileId);
         String downloadName = file.getTitle() + (file.getFileType() == null || file.getFileType().isBlank() ? "" : "." + file.getFileType());
         ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
@@ -238,8 +288,8 @@ public class KnowledgeController {
                 .header(HttpHeaders.CACHE_CONTROL, download ? "no-store" : "private, max-age=300")
                 .header("X-Content-Type-Options", "nosniff")
                 .contentType(download ? MediaType.APPLICATION_OCTET_STREAM : previewMediaType(file.getFileType()))
-                .contentLength(stored.bytes().length)
-                .body(stored.bytes());
+                .contentLength(stored.length())
+                .body(new org.springframework.core.io.InputStreamResource(stored.stream()));
     }
 
     private MediaType previewMediaType(String fileType) {

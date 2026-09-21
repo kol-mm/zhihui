@@ -27,6 +27,11 @@ public class PlatformConfigClient {
         return Math.max(1, integer("max_upload_mb", 25));
     }
 
+    /** PDFs are whole books and scans, so they have their own, larger ceiling. */
+    public int pdfMaxUploadMb() {
+        return Math.max(maxUploadMb(), integer("pdf_max_upload_mb", 200));
+    }
+
     public boolean enabled(String key, boolean fallback) {
         JsonNode data = read();
         return data == null ? fallback : data.path(key).asBoolean(fallback);

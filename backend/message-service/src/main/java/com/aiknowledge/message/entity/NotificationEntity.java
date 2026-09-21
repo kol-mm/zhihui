@@ -23,6 +23,8 @@ public class NotificationEntity {
     private String targetType;
     private Long targetId;
     private Long anchorId;
+    /** Who caused the notification: the member who replied or commented. */
+    private Long actorUserId;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -51,4 +53,6 @@ public class NotificationEntity {
         this.anchorId = anchorId;
         return this;
     }
+    public Long getActorUserId() { return actorUserId; }
+    public void setActorUserId(Long actorUserId) { this.actorUserId = actorUserId; }
 }
