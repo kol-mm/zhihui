@@ -452,12 +452,14 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
+    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason, String source) {
         KnowledgeFileEntity file = fileMapper.selectById(fileId);
         if (file == null) {
             return Optional.empty();
         }
         file.setAuditStatus(auditStatus);
+        file.setAuditSource(source);
+        file.setAuditReason(reason == null || reason.isBlank() ? null : reason.trim());
         fileMapper.updateById(file);
         return Optional.of(file);
     }

@@ -2,6 +2,7 @@ package com.aiknowledge.knowledge.controller;
 
 import com.aiknowledge.common.AppTime;
 import com.aiknowledge.common.AdminAudit;
+import com.aiknowledge.common.AiContentReview;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -61,6 +62,7 @@ public class KnowledgeController {
     private final LocalFullTextSearchService fullTextSearch;
     private final DocumentTextExtractor textExtractor;
     private final PlatformConfigClient platformConfig;
+    private AiContentReview contentReview = new AiContentReview();
     private final KnowledgeMediaStorageService mediaStorage;
     /**
      * The all-time ranking on the analytics page. It sorts the whole file table and groups every like, a few
@@ -150,7 +152,7 @@ public class KnowledgeController {
             file.setFileUrl(storedFileUrl);
             file.setFileType(fileType);
             file.setParseStatus(content.isBlank() ? "EMPTY" : "INDEXED");
-            file.setAuditStatus("PENDING");
+            applyVerdict(file, reviewForPublication(file.getTitle(), content));
             file.setViews(0);
             file.setDownloads(0);
             KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
@@ -211,10 +213,10 @@ public class KnowledgeController {
     @GetMapping("/file/{fileId}")
     public ResponseEntity<org.springframework.core.io.Resource> fileContent(
             @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestHeader(name = "Range", required = false) String range,
             @PathVariable Long fileId
     ) {
-            @RequestHeader(name = "Range", required = false) String range,
-        return storedFileResponse(authorization, fileId, true);
+        return storedFileResponse(authorization, fileId, true, range);
     }
 
     /**
@@ -227,6 +229,32 @@ public class KnowledgeController {
     @org.springframework.web.bind.annotation.ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
     public ApiResponse<Map<String, Object>> uploadTooLarge() {
         return ApiResponse.fail("file size must not exceed " + uploadLimitMb("pdf") + " MB");
+    }
+
+    /**
+     * AI review is the first pass. It is off until an operator turns it on, and anything it cannot judge —
+     * including the service being unreachable — leaves the file PENDING for a person, exactly as before.
+     */
+    private AiContentReview.Verdict reviewForPublication(String title, String content) {
+        if (contentReview == null || platformConfig == null || !platformConfig.enabled("ai_audit_enabled", false)) {
+            return AiContentReview.Verdict.escalate("AI 审核未开启");
+        }
+        return contentReview.review("KNOWLEDGE", title, content);
+    }
+
+    /** Writes the verdict onto a file that has not been saved yet. */
+    private void applyVerdict(KnowledgeFileEntity file, AiContentReview.Verdict verdict) {
+        if (verdict.approved() || verdict.rejected()) {
+            file.setAuditStatus(verdict.approved() ? "APPROVED" : "REJECTED");
+            file.setAuditSource("AI");
+            file.setAuditReason(verdict.reason() == null || verdict.reason().isBlank() ? null : verdict.reason());
+            return;
+        }
+        file.setAuditStatus("PENDING");
+    }
+
+    public void setContentReview(AiContentReview contentReview) {
+        this.contentReview = contentReview;
     }
 
     private int uploadLimitMb(String fileType) {
@@ -251,7 +279,8 @@ public class KnowledgeController {
         file.setFileUrl(String.valueOf(stored.get("fileUrl")));
         file.setFileType(fileType);
         file.setParseStatus("TOO_LARGE");
-        file.setAuditStatus("PENDING");
+        // Only the title is known here, so the reviewer rarely has enough to judge; that means a person does.
+        applyVerdict(file, reviewForPublication(file.getTitle(), ""));
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
@@ -267,6 +296,7 @@ public class KnowledgeController {
     @GetMapping("/file/{fileId}/preview")
     public ResponseEntity<org.springframework.core.io.Resource> filePreview(
             @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestHeader(name = "Range", required = false) String range,
             @PathVariable Long fileId
     ) {
         return storedFileResponse(authorization, fileId, false, range);
@@ -311,6 +341,10 @@ public class KnowledgeController {
     }
 
     private ResponseEntity<org.springframework.core.io.Resource> storedFileResponse(String authorization, Long fileId, boolean download) {
+        return storedFileResponse(authorization, fileId, download, null);
+    }
+
+    private ResponseEntity<org.springframework.core.io.Resource> storedFileResponse(String authorization, Long fileId, boolean download, String rangeHeader) {
         Long userId = LocalAuth.userId(authorization);
         if (userId == null) throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED);
         KnowledgeFileEntity file = knowledgeStore.find(fileId)
@@ -352,15 +386,14 @@ public class KnowledgeController {
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
                 .header(HttpHeaders.CONTENT_RANGE, "bytes " + range.start() + "-" + range.end() + "/" + size)
                 .header("X-Content-Type-Options", "nosniff")
-                .contentType(download ? MediaType.APPLICATION_OCTET_STREAM : previewMediaType(file.getFileType()))
-                .contentLength(stored.length())
-                .body(new org.springframework.core.io.InputStreamResource(stored.stream()));
+                .contentType(mediaType)
+                .contentLength(range.length())
+                .body(new org.springframework.core.io.InputStreamResource(part.stream()));
     }
 
     private MediaType previewMediaType(String fileType) {
         return switch (fileType == null ? "" : fileType.toLowerCase()) {
             case "pdf" -> MediaType.APPLICATION_PDF;
-            @RequestHeader(name = "Range", required = false) String range,
             case "txt", "md", "markdown", "csv" -> new MediaType("text", "plain", StandardCharsets.UTF_8);
             case "docx" -> MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
             default -> MediaType.APPLICATION_OCTET_STREAM;
@@ -426,7 +459,7 @@ public class KnowledgeController {
         file.setFileType(fileType);
         // Decided before the row is written: setting it afterwards only changed the copy being returned.
         file.setParseStatus(content.isBlank() ? "EMPTY" : "INDEXED");
-        file.setAuditStatus("PENDING");
+        applyVerdict(file, reviewForPublication(file.getTitle(), content));
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
@@ -1006,6 +1039,8 @@ public class KnowledgeController {
         view.put("fileType", file.getFileType());
         view.put("parseStatus", file.getParseStatus());
         view.put("auditStatus", file.getAuditStatus());
+        view.put("auditSource", file.getAuditSource());
+        view.put("auditReason", file.getAuditReason());
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         return view;
@@ -1025,6 +1060,8 @@ public class KnowledgeController {
         view.put("fileType", file.getFileType());
         view.put("parseStatus", file.getParseStatus());
         view.put("auditStatus", file.getAuditStatus());
+        view.put("auditSource", file.getAuditSource());
+        view.put("auditReason", file.getAuditReason());
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));

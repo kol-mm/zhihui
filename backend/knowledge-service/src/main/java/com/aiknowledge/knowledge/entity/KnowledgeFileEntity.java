@@ -17,6 +17,9 @@ public class KnowledgeFileEntity {
     private String fileType;
     private String parseStatus;
     private String auditStatus;
+    /** MANUAL or AI: who decided, so a reviewer can tell them apart. */
+    private String auditSource;
+    private String auditReason;
     private Integer views;
     private Integer downloads;
     private LocalDateTime createdAt;
@@ -35,6 +38,12 @@ public class KnowledgeFileEntity {
     public void setFileType(String fileType) { this.fileType = fileType; }
     public String getParseStatus() { return parseStatus; }
     public void setParseStatus(String parseStatus) { this.parseStatus = parseStatus; }
+    public String getAuditSource() { return auditSource; }
+    public void setAuditSource(String auditSource) { this.auditSource = auditSource; }
+
+    public String getAuditReason() { return auditReason; }
+    public void setAuditReason(String auditReason) { this.auditReason = auditReason; }
+
     public String getAuditStatus() { return auditStatus; }
     public void setAuditStatus(String auditStatus) { this.auditStatus = auditStatus; }
     public Integer getViews() { return views; }

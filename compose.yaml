@@ -17,6 +17,8 @@ x-java-common: &java-common
   PLATFORM_USER_RELATION_URL: http://user-service:8101/user/internal/relation
   PLATFORM_INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
   PLATFORM_AI_CONFIG_URL: http://ai:8200/ai/config/public
+  # 知识与社区服务在内容发布前先请 AI 审核；不可用时自动回退到人工审核。
+  AI_REVIEW_URL: http://ai:8200/ai/internal/review
   # 各服务把管理员操作记录发给用户服务保存。
   PLATFORM_AUDIT_URL: http://user-service:8101/user/internal/audit
   # 存储时间统一为 UTC（与 MySQL 容器一致）；按天统计和“今天”使用 APP_TIME_ZONE。

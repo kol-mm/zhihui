@@ -84,6 +84,10 @@ class AiConfigRequest(BaseModel):
     feedback_enabled: bool = True
     post_audit_required: bool = True
     profile_audit_required: bool = False
+    # Off until an operator turns it on: nobody should find their content auto-reviewed by an upgrade.
+    ai_audit_enabled: bool = False
+    ai_audit_approve_confidence: float = Field(default=0.75, ge=0.5, le=1)
+    ai_audit_reject_confidence: float = Field(default=0.85, ge=0.5, le=1)
     default_publish_policy: str = Field(default="STANDARD", pattern="^(STANDARD|PRE_REVIEW|BLOCKED)$")
     max_post_images: int = Field(default=9, ge=0, le=9)
     max_comment_length: int = Field(default=2000, ge=100, le=5000)
@@ -259,10 +263,6 @@ def require_admin(authorization: str | None) -> dict[str, Any]:
     return claims
 
 
-# ---- Admin action log -------------------------------------------------------------------------------------------
-# Settings changes and index rebuilds are reported to the user service, which keeps the platform's action log.
-# Delivery happens in the background and never fails the request; undeliverable entries go to this service's log.
-audit_log = logging.getLogger("ai.admin_audit")
 def is_super_admin(claims: dict[str, Any] | None) -> bool:
     """The claim only counts on an administrator's token; on its own it grants nothing."""
     return bool(claims) and claims.get("role") == "ADMIN" and claims.get("sa") is True
@@ -272,6 +272,10 @@ def is_super_admin(claims: dict[str, Any] | None) -> bool:
 SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url")
 
 
+# ---- Admin action log -------------------------------------------------------------------------------------------
+# Settings changes and index rebuilds are reported to the user service, which keeps the platform's action log.
+# Delivery happens in the background and never fails the request; undeliverable entries go to this service's log.
+audit_log = logging.getLogger("ai.admin_audit")
 _audit_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="admin-audit")
 AUDIT_RETRY_DELAYS = (0, 1, 5)
 AI_CONFIG_LABELS = {
@@ -286,6 +290,9 @@ AI_CONFIG_LABELS = {
     "feedback_enabled": "反馈工单",
     "post_audit_required": "帖子先审后发",
     "profile_audit_required": "资料修改先审后改",
+    "ai_audit_enabled": "AI 内容审核",
+    "ai_audit_approve_confidence": "AI 自动通过门槛",
+    "ai_audit_reject_confidence": "AI 自动驳回门槛",
     "default_publish_policy": "默认发帖策略",
     "max_post_images": "帖子配图上限",
     "max_comment_length": "评论字数上限",
@@ -399,6 +406,9 @@ def read_ai_config() -> dict[str, Any]:
         "feedback_enabled": True,
         "post_audit_required": True,
         "profile_audit_required": False,
+        "ai_audit_enabled": False,
+        "ai_audit_approve_confidence": 0.75,
+        "ai_audit_reject_confidence": 0.85,
         "default_publish_policy": "STANDARD",
         "max_post_images": 9,
         "max_comment_length": 2000,
@@ -424,7 +434,7 @@ def read_ai_config() -> dict[str, Any]:
         value = row["config_value"]
         if row["config_key"] == "match_limit":
             defaults[row["config_key"]] = int(value)
-        elif row["config_key"] == "temperature":
+        elif row["config_key"] in {"temperature", "ai_audit_approve_confidence", "ai_audit_reject_confidence"}:
             defaults[row["config_key"]] = max(0.0, min(1.0, float(value)))
         elif row["config_key"] in {
             "max_upload_mb", "pdf_max_upload_mb", "max_post_images", "max_comment_length", "max_message_length",
@@ -434,7 +444,7 @@ def read_ai_config() -> dict[str, Any]:
         elif row["config_key"] in {
             "registration_enabled", "ai_chat_enabled", "knowledge_upload_enabled", "user_ranking_enabled",
             "comments_enabled", "private_messages_enabled", "feedback_enabled", "post_audit_required",
-            "profile_audit_required",
+            "profile_audit_required", "ai_audit_enabled",
             "notifications_enabled", "community_enabled"
         }:
             defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
@@ -620,6 +630,96 @@ def validate_upstream_url(value: str, resolve_dns: bool) -> None:
         raise ValueError("private AI upstream addresses are disabled")
 
 
+# A review must never hold up publishing for long; past this the decision goes to a person.
+REVIEW_TIMEOUT_SECONDS = float(os.getenv("AI_REVIEW_TIMEOUT_SECONDS", "8"))
+
+REVIEW_DECISIONS = ("APPROVE", "REJECT", "ESCALATE")
+
+REVIEW_PROMPT = (
+    "你是知识社区的内容审核员。判断下面的内容是否可以公开发布。\n"
+    "只输出 JSON：{\"decision\": \"APPROVE\" 或 \"REJECT\", \"confidence\": 0 到 1 的小数, \"reason\": \"简短中文理由\"}。\n"
+    "违反法律法规、包含辱骂攻击、色情暴力、广告垃圾或泄露他人隐私的内容应当 REJECT；\n"
+    "正常的知识、讨论与提问应当 APPROVE。无法判断时给出较低的 confidence。\n\n"
+)
+
+
+def escalate(reason: str) -> dict[str, Any]:
+    """Hand the decision back to a person. Every failure path ends here."""
+    return {"decision": "ESCALATE", "confidence": 0.0, "reason": reason}
+
+
+def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any] | None:
+    """Ask the configured model. Returns None when there is no usable answer, so the caller can escalate."""
+    api_key = os.getenv("AI_API_KEY", "").strip()
+    base_url = str(config.get("base_url", "")).strip().rstrip("/")
+    request_url = str(config.get("request_url", "")).strip()
+    endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
+    if not api_key or not endpoint or str(config.get("provider")) != "openai-compatible":
+        return None
+    try:
+        validate_upstream_url(endpoint, resolve_dns=True)
+    except ValueError:
+        return None
+
+    payload = {
+        "model": str(config.get("model", "")),
+        "messages": [{"role": "user", "content": f"{REVIEW_PROMPT}标题：{title}\n正文：{body[:4000]}"}],
+        "temperature": 0,
+    }
+    request = urllib.request.Request(
+        endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=REVIEW_TIMEOUT_SECONDS) as response:
+            answer = json.loads(response.read().decode("utf-8"))
+        content = answer["choices"][0]["message"]["content"]
+        start, end = content.find("{"), content.rfind("}")
+        verdict = json.loads(content[start:end + 1]) if start >= 0 < end else None
+    except Exception:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
+        return None
+    if not isinstance(verdict, dict) or verdict.get("decision") not in ("APPROVE", "REJECT"):
+        return None
+    try:
+        confidence = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
+    except (TypeError, ValueError):
+        return None
+    return {"decision": verdict["decision"], "confidence": confidence,
+            "reason": str(verdict.get("reason", ""))[:200]}
+
+
+def review_content(title: str, body: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    The verdict on one piece of content. REJECT and APPROVE are acted on; ESCALATE means a person decides,
+    and is also what every failure returns, so an unavailable model never publishes anything by itself.
+    """
+    settings = config if config is not None else read_ai_config()
+    if not settings.get("ai_audit_enabled", True):
+        return escalate("AI 审核未开启")
+
+    combined = f"{title or ''}\n{body or ''}".strip()
+    if not combined:
+        return escalate("没有可供审核的内容")
+    if contains_sensitive_content(combined):
+        return {"decision": "REJECT", "confidence": 1.0, "reason": "命中平台敏感词规则"}
+
+    approve_at = float(settings.get("ai_audit_approve_confidence", 0.75))
+    reject_at = float(settings.get("ai_audit_reject_confidence", 0.85))
+
+    verdict = model_review(title or "", body or "", settings)
+    if verdict is None:
+        # No model configured, or it could not be reached: the local rules only clear obviously ordinary text.
+        if len(combined) < 20:
+            return escalate("内容过短，无法自动判断")
+        return {"decision": "APPROVE", "confidence": approve_at,
+                "reason": "未命中敏感规则（本地规则判断）"}
+
+    threshold = approve_at if verdict["decision"] == "APPROVE" else reject_at
+    if verdict["confidence"] < threshold:
+        return escalate(f"模型把握不足（{verdict['confidence']:.2f}）：{verdict['reason']}")
+    return verdict
+
+
 def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
     api_key = os.getenv("AI_API_KEY", "").strip()
     base_url = str(config.get("base_url", "")).strip().rstrip("/")
@@ -702,6 +802,8 @@ def public_config() -> ApiResponse:
         "feedback_enabled": bool(config.get("feedback_enabled", True)),
         "post_audit_required": bool(config.get("post_audit_required", True)),
         "profile_audit_required": bool(config.get("profile_audit_required", False)),
+        # The knowledge and community services read this to decide whether to ask for a review at all.
+        "ai_audit_enabled": bool(config.get("ai_audit_enabled", False)),
         "default_publish_policy": str(config.get("default_publish_policy", "STANDARD")),
         "max_post_images": int(config.get("max_post_images", 9)),
         "max_comment_length": int(config.get("max_comment_length", 2000)),
@@ -995,6 +1097,21 @@ def remove_indexed_file(file_id: int, authorization: str | None = Header(default
     return ApiResponse(data={"file_id": file_id, "removed_chunks": cursor.rowcount})
 
 
+class ReviewRequest(BaseModel):
+    kind: str = Field(default="KNOWLEDGE", max_length=32)
+    title: str = Field(default="", max_length=500)
+    text: str = Field(default="", max_length=200_000)
+
+
+@app.post("/ai/internal/review", response_model=ApiResponse)
+def internal_review(request: ReviewRequest, x_internal_token: str | None = Header(default=None)) -> ApiResponse:
+    """Called by the knowledge and community services before content is published."""
+    expected = os.getenv("PLATFORM_INTERNAL_USER_TOKEN", "ai-knowledge-local-internal")
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(status_code=403, detail="internal authorization is required")
+    return ApiResponse(data=review_content(request.title, request.text))
+
+
 @app.post("/ai/admin/config", response_model=ApiResponse)
 def save_ai_config(
     request: AiConfigRequest,
@@ -1004,6 +1121,13 @@ def save_ai_config(
     claims = require_admin(authorization)
     before = read_ai_config()
     values = request.model_dump()
+    if not is_super_admin(claims):
+        # Settings are saved as one object, so an ordinary administrator's form carries these fields even when
+        # it never showed them. Their stored values are put back instead of the save being refused, which keeps
+        # every other setting editable while the upstream stays where the super administrator left it.
+        for key in SUPER_ADMIN_ONLY_SETTINGS:
+            if key in before:
+                values[key] = before[key]
     values["selected_file_ids"] = sorted({int(item) for item in values.get("selected_file_ids", []) if int(item) > 0})
     for key in ("base_url", "request_url"):
         value = str(values.get(key, "")).strip()
@@ -1071,10 +1195,3 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
             "created_at": assistant_message["created_at"],
         }
     )
-    if not is_super_admin(claims):
-        # Settings are saved as one object, so an ordinary administrator's form carries these fields even when
-        # it never showed them. Their stored values are put back instead of the save being refused, which keeps
-        # every other setting editable while the upstream stays where the super administrator left it.
-        for key in SUPER_ADMIN_ONLY_SETTINGS:
-            if key in before:
-                values[key] = before[key]

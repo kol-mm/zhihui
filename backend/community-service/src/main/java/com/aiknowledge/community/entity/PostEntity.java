@@ -14,6 +14,9 @@ public class PostEntity {
     private String title;
     private String content;
     private String status;
+    /** MANUAL or AI: who decided, so a reviewer can tell them apart. */
+    private String auditSource;
+    private String auditReason;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -25,6 +28,12 @@ public class PostEntity {
     public void setTitle(String title) { this.title = title; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+    public String getAuditSource() { return auditSource; }
+    public void setAuditSource(String auditSource) { this.auditSource = auditSource; }
+
+    public String getAuditReason() { return auditReason; }
+    public void setAuditReason(String auditReason) { this.auditReason = auditReason; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getCreatedAt() { return createdAt; }

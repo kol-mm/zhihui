@@ -2,6 +2,7 @@ package com.aiknowledge.community.controller;
 
 import com.aiknowledge.common.AppTime;
 import com.aiknowledge.common.AdminAudit;
+import com.aiknowledge.common.AiContentReview;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -50,6 +51,7 @@ public class CommunityController {
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
     private final PlatformConfigClient platformConfig;
+    private AiContentReview contentReview = new AiContentReview();
     private final UserRelationClient userRelationClient;
 
     private AdminAudit audit = AdminAudit.NONE;
@@ -145,7 +147,7 @@ public class CommunityController {
         post.setUserId(userId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus(initialPostStatus());
+        decidePostStatus(post);
         PostEntity saved = communityStore.savePost(post);
         communityStore.savePostImages(saved.getId(), imageUrls);
         return ApiResponse.ok(toPostView(saved));
@@ -167,7 +169,7 @@ public class CommunityController {
         post.setId(postId);
         post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
         post.setContent(String.valueOf(request.getOrDefault("content", "")));
-        post.setStatus(initialPostStatus());
+        decidePostStatus(post);
         String previousTitle = existing.getTitle();
         String previousStatus = existing.getStatus();
         boolean contentChanged = !java.util.Objects.equals(existing.getContent(), post.getContent());
@@ -381,7 +383,7 @@ public class CommunityController {
         post.setUserId(draft.getUserId());
         post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
         post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
-        post.setStatus(initialPostStatus());
+        decidePostStatus(post);
         PostEntity saved = communityStore.savePost(post);
         List<String> imageUrls = request.containsKey("imageUrls")
                 ? stringList(request.get("imageUrls")) : decodeImageUrls(draft.getImageUrlsJson());
@@ -766,6 +768,8 @@ public class CommunityController {
         view.put("title", post.getTitle());
         view.put("content", post.getContent());
         view.put("status", post.getStatus());
+        view.put("auditSource", post.getAuditSource());
+        view.put("auditReason", post.getAuditReason());
         view.put("imageUrls", communityStore.listPostImages(post.getId()));
         view.put("likes", communityStore.countPostLikes(post.getId()));
         view.put("liked", communityStore.hasPostLike(viewerUserId, post.getId()));
@@ -790,6 +794,8 @@ public class CommunityController {
             view.put("title", post.getTitle());
             view.put("content", post.getContent());
             view.put("status", post.getStatus());
+        view.put("auditSource", post.getAuditSource());
+        view.put("auditReason", post.getAuditReason());
             view.put("imageUrls", images.getOrDefault(post.getId(), List.of()));
             view.put("likes", likes.getOrDefault(post.getId(), 0L));
             view.put("liked", liked.contains(post.getId()));
@@ -899,6 +905,27 @@ public class CommunityController {
 
     private String initialPostStatus() {
         return postAuditRequired() ? "PENDING" : "PUBLISHED";
+    }
+
+    /**
+     * AI review is the first pass over a post that would otherwise wait for a person. It is off until an
+     * operator turns it on, and anything it cannot judge stays PENDING, which is the behaviour it replaces.
+     */
+    private void decidePostStatus(PostEntity post) {
+        String initial = initialPostStatus();
+        post.setStatus(initial);
+        if (!"PENDING".equals(initial)) return;
+        if (contentReview == null || platformConfig == null || !platformConfig.enabled("ai_audit_enabled", false)) return;
+
+        AiContentReview.Verdict verdict = contentReview.review("POST", post.getTitle(), post.getContent());
+        if (!verdict.approved() && !verdict.rejected()) return;
+        post.setStatus(verdict.approved() ? "PUBLISHED" : "HIDDEN");
+        post.setAuditSource("AI");
+        post.setAuditReason(verdict.reason() == null || verdict.reason().isBlank() ? null : verdict.reason());
+    }
+
+    public void setContentReview(AiContentReview contentReview) {
+        this.contentReview = contentReview;
     }
 
     private int maxPostImages() {

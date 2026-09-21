@@ -322,12 +322,14 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
-    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
+    public Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason, String source) {
         Optional<KnowledgeFileEntity> found = files.stream()
                 .filter(file -> file.getId().equals(fileId))
                 .findFirst();
         found.ifPresent(file -> {
             file.setAuditStatus(auditStatus);
+            file.setAuditSource(source);
+            file.setAuditReason(reason == null || reason.isBlank() ? null : reason.trim());
             persist();
         });
         return found;

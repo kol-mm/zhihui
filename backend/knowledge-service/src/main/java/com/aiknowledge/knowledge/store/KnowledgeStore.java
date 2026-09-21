@@ -62,7 +62,13 @@ public interface KnowledgeStore {
     void report(Long userId, Long fileId, String reason);
     List<Map<String, Object>> listReports(Long userId);
     Optional<Map<String, Object>> resolveReport(Long reportId, String status, String result);
-    Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason);
+    /** A decision made by a person. */
+    default Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason) {
+        return auditFile(fileId, auditStatus, reason, "MANUAL");
+    }
+
+    /** {@code source} is MANUAL or AI; the reason is kept either way. */
+    Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason, String source);
     Optional<KnowledgeFileEntity> updateFileMetadata(Long fileId, String title, Long categoryId, String auditStatus);
     boolean deleteFile(Long fileId);
     List<KnowledgeCategoryEntity> listCategories();

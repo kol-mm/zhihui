@@ -17,8 +17,11 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchema() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_community_fresh")) {
             db.flyway(new V2__Backfill_comment_roots()).migrate();
-            assertEquals("1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertTrue(db.hasColumn("comment", "is_root"));
+            // V3: who decided a post's fate, and why.
+            assertTrue(db.hasColumn("post", "audit_source"));
+            assertTrue(db.hasColumn("post", "audit_reason"));
             assertTrue(db.hasIndex("comment", "idx_comment_root"));
             assertEquals(0, db.flyway(new V2__Backfill_comment_roots()).migrate().migrationsExecuted);
         }
@@ -42,7 +45,8 @@ class FlywayMigrationTest {
 
             db.flyway(new V2__Backfill_comment_roots()).migrate();
 
-            assertEquals("0,1,2", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertTrue(db.hasColumn("post", "audit_source"));
             assertEquals("1:1:1,2:1:0,3:1:0,4:4:1,5:5:1",
                     db.text("SELECT GROUP_CONCAT(CONCAT(id, ':', root_id, ':', is_root) ORDER BY id) FROM comment"));
             assertTrue(db.hasIndex("comment", "idx_comment_thread"));
