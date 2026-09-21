@@ -177,5 +177,40 @@ class InternalReviewEndpointTest(unittest.TestCase):
         self.assertIn("未开启", answer.data["reason"])
 
 
+class UpstreamSchemeTest(unittest.TestCase):
+    """A public upstream must be reachable over TLS, so a rebound name fails before the key is sent."""
+
+    def setUp(self) -> None:
+        from app import main
+
+        self.main = main
+        os.environ.pop("AI_ALLOW_PRIVATE_UPSTREAM", None)
+
+    def tearDown(self) -> None:
+        os.environ.pop("AI_ALLOW_PRIVATE_UPSTREAM", None)
+
+    def test_a_public_http_upstream_is_refused(self) -> None:
+        with self.assertRaises(ValueError) as refused:
+            self.main.validate_upstream_url("http://api.example.com/v1/chat/completions", resolve_dns=False)
+
+        self.assertIn("https", str(refused.exception))
+
+    def test_a_public_https_upstream_is_accepted(self) -> None:
+        self.main.validate_upstream_url("https://api.example.com/v1/chat/completions", resolve_dns=False)
+
+    def test_a_private_address_is_still_refused_over_https(self) -> None:
+        with self.assertRaises(ValueError):
+            self.main.validate_upstream_url("https://127.0.0.1:11434/v1/chat/completions", resolve_dns=False)
+
+    def test_local_development_can_still_opt_out(self) -> None:
+        os.environ["AI_ALLOW_PRIVATE_UPSTREAM"] = "true"
+
+        self.main.validate_upstream_url("http://127.0.0.1:11434/v1/chat/completions", resolve_dns=False)
+
+    def test_credentials_in_the_url_are_still_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            self.main.validate_upstream_url("https://user:secret@api.example.com/v1", resolve_dns=False)
+
+
 if __name__ == "__main__":
     unittest.main()

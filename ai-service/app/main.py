@@ -611,6 +611,12 @@ def validate_upstream_url(value: str, resolve_dns: bool) -> None:
     if os.getenv("AI_ALLOW_PRIVATE_UPSTREAM", "").strip().lower() in {"1", "true", "yes", "on"}:
         return
 
+    # Without TLS there is nothing tying the connection to the hostname that was checked: a name that answers
+    # differently a moment later would receive the API key over a plain socket. With TLS the certificate has
+    # to match before the request is sent, so a rebound name fails the handshake instead.
+    if parsed.scheme.lower() != "https":
+        raise ValueError("AI request URL must use https")
+
     hostname = parsed.hostname.rstrip(".").lower()
     if hostname == "localhost" or hostname.endswith(".localhost") or hostname.endswith(".local"):
         raise ValueError("private AI upstream addresses are disabled")
