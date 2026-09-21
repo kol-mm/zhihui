@@ -17,9 +17,12 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndTheStarterAccounts() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_fresh")) {
             db.flyway().migrate();
-            assertEquals("1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3,4,5", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(2, db.number("SELECT COUNT(*) FROM user"));
             assertEquals("ADMIN", db.text("SELECT role FROM user WHERE username = 'admin'"));
+            // Exactly one super administrator, and it is the seeded admin account.
+            assertEquals(1, db.number("SELECT COUNT(*) FROM user WHERE super_admin = 1"));
+            assertEquals("admin", db.text("SELECT username FROM user WHERE super_admin = 1"));
             assertTrue(db.hasIndex("password_reset_request", "idx_reset_status_id"));
             assertTrue(db.hasIndex("user", "uk_user_verified_email"));
             assertEquals(0, db.number("SELECT COUNT(*) FROM email_verification"));
@@ -50,7 +53,11 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1,2,3,4", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3,4,5", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            // The operator's own admin account becomes the super administrator; the member does not.
+            assertEquals(1, db.number("SELECT COUNT(*) FROM user WHERE super_admin = 1"));
+            assertEquals("admin", db.text("SELECT username FROM user WHERE super_admin = 1"));
+            assertEquals(0, db.number("SELECT super_admin FROM user WHERE username = 'alice'"));
             assertTrue(db.hasColumn("user", "email"));
             assertEquals(0, db.number("SELECT COUNT(*) FROM user WHERE email IS NOT NULL"));
             assertTrue(db.hasIndex("user", "idx_user_status_id"));

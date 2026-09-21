@@ -31,12 +31,15 @@ class AiServicePersistenceTest(unittest.TestCase):
         os.environ.pop("AI_API_KEY", None)
 
     @staticmethod
-    def issue_token(username: str, user_id: int, role: str) -> str:
+    def issue_token(username: str, user_id: int, role: str, super_admin: bool = False) -> str:
         def segment(value: dict) -> str:
             return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
 
         header = segment({"alg": "HS256", "typ": "JWT"})
-        payload = segment({"sub": username, "uid": user_id, "role": role, "iat": int(time.time()), "exp": int(time.time()) + 600})
+        claims = {"sub": username, "uid": user_id, "role": role, "iat": int(time.time()), "exp": int(time.time()) + 600}
+        if super_admin:
+            claims["sa"] = True
+        payload = segment(claims)
         signing_input = f"{header}.{payload}"
         signature = base64.urlsafe_b64encode(hmac.new(
             b"local-dev-secret-change-before-production", signing_input.encode(), hashlib.sha256
@@ -213,7 +216,8 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(history.data["messages"], [])
 
     def test_admin_can_manage_ai_configuration(self) -> None:
-        auth = self.issue_token("admin", 2, "ADMIN")
+        # request_url decides where the API key is sent, so this is a super administrator's change.
+        auth = self.issue_token("admin", 2, "ADMIN", super_admin=True)
 
         saved = self.main.save_ai_config(self.main.AiConfigRequest(
             platform_name="测试知识社区", registration_enabled=False, max_post_images=5,
@@ -229,7 +233,8 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertIn("configuration", overview.data)
 
     def test_disabled_ai_chat_rejects_requests_without_creating_history(self) -> None:
-        admin_auth = self.issue_token("admin", 2, "ADMIN")
+        # A whole-object save carries the upstream fields with it, so this needs the same claim.
+        admin_auth = self.issue_token("admin", 2, "ADMIN", super_admin=True)
         self.main.save_ai_config(
             self.main.AiConfigRequest(ai_chat_enabled=False),
             authorization=admin_auth,
@@ -391,7 +396,8 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual(urlopen.call_args.args[0].full_url, endpoint)
 
     def test_admin_cannot_configure_private_ai_upstream(self) -> None:
-        auth = self.issue_token("admin", 2, "ADMIN")
+        # Even a super administrator may not point the upstream at a private address.
+        auth = self.issue_token("admin", 2, "ADMIN", super_admin=True)
         with self.assertRaises(self.main.HTTPException) as raised:
             self.main.save_ai_config(self.main.AiConfigRequest(
                 provider="openai-compatible", request_url="http://127.0.0.1:11434/v1/chat/completions"

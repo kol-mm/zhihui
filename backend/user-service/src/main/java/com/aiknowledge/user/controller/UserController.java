@@ -834,6 +834,14 @@ public class UserController {
         if (!ACCOUNT_STATUSES.contains(status)) return ApiResponse.fail("invalid account status");
         String selfProblem = selfChangeProblem(authorization, user, status, role);
         if (selfProblem != null) return ApiResponse.fail(selfProblem);
+        if (!role.equals(role(user)) && !LocalAuth.isSuperAdmin(authorization)) {
+            return ApiResponse.fail("只有超级管理员可以任命或撤销管理员");
+        }
+        // A super administrator is not an ordinary account: another administrator must not be able to demote,
+        // disable or rename the one account that can appoint administrators.
+        if (superAdmin(user) && !user.getId().equals(LocalAuth.userId(authorization))) {
+            return ApiResponse.fail("超级管理员账号只能由本人修改");
+        }
         if (!List.of("STANDARD", "PRE_REVIEW", "BLOCKED").contains(publishPolicy)) return ApiResponse.fail("invalid publish policy");
         String nickname = String.valueOf(request.getOrDefault("nickname", user.getNickname())).trim();
         String avatarUrl = String.valueOf(request.getOrDefault("avatarUrl", user.getAvatarUrl() == null ? "" : user.getAvatarUrl()));
@@ -929,6 +937,7 @@ public class UserController {
         view.put("signature", user.getSignature());
         view.put("status", user.getStatus());
         view.put("role", role(user));
+        view.put("superAdmin", superAdmin(user));
         view.put("publishPolicy", publishPolicy(user));
         view.put("messagingEnabled", messagingEnabled(user));
         // Only the member and administrators see this view; public cards never carry the address.
@@ -990,10 +999,15 @@ public class UserController {
     private Map<String, Object> authResult(UserEntity user) {
         String role = role(user);
         return Map.of(
-                "token", LocalAuth.issueToken(user.getUsername(), user.getId(), role),
+                "token", LocalAuth.issueToken(user.getUsername(), user.getId(), role, superAdmin(user)),
                 "role", role,
                 "user", toView(user)
         );
+    }
+
+    /** Only an administrator can be a super administrator; the flag alone grants nothing. */
+    private boolean superAdmin(UserEntity user) {
+        return user != null && Boolean.TRUE.equals(user.getSuperAdmin()) && "ADMIN".equals(role(user));
     }
 
     private String role(UserEntity user) {

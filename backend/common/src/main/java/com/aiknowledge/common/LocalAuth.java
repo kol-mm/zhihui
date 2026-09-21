@@ -32,11 +32,21 @@ public final class LocalAuth {
     }
 
     public static String issueToken(String username, Long userId, String role) {
+        return issueToken(username, userId, role, false);
+    }
+
+    /**
+     * The super administrator claim rides alongside the ordinary role, so a token still says ADMIN and every
+     * existing administrator check keeps working; only the few places that guard account creation and the AI
+     * upstream settings look for the extra claim.
+     */
+    public static String issueToken(String username, Long userId, String role, boolean superAdmin) {
         long issuedAt = Instant.now().getEpochSecond();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", username);
         payload.put("uid", userId);
         payload.put("role", role);
+        if (superAdmin) payload.put("sa", true);
         payload.put("iat", issuedAt);
         payload.put("exp", issuedAt + expirySeconds());
         payload.put("jti", UUID.randomUUID().toString());
@@ -52,6 +62,12 @@ public final class LocalAuth {
     public static boolean isAdmin(String authorization) {
         Claims claims = claims(authorization);
         return claims != null && "ADMIN".equals(claims.role());
+    }
+
+    /** Only ever true for an administrator: the claim alone grants nothing. */
+    public static boolean isSuperAdmin(String authorization) {
+        Claims claims = claims(authorization);
+        return claims != null && "ADMIN".equals(claims.role()) && claims.superAdmin();
     }
 
     public static String username(String authorization) {
@@ -88,6 +104,13 @@ public final class LocalAuth {
         return ApiResponse.fail("admin authorization is required");
     }
 
+    public static ApiResponse<Map<String, Object>> requireSuperAdmin(String authorization) {
+        if (isSuperAdmin(authorization)) {
+            return null;
+        }
+        return ApiResponse.fail("需要超级管理员权限");
+    }
+
     public static Map<String, Object> session(String authorization) {
         Claims claims = claims(authorization);
         if (claims == null) {
@@ -98,6 +121,7 @@ public final class LocalAuth {
                 "userId", claims.userId(),
                 "username", claims.username(),
                 "role", claims.role(),
+                "superAdmin", claims.superAdmin(),
                 "issuedAt", claims.issuedAt(),
                 "expiresAt", claims.expiresAt()
         );
@@ -131,6 +155,7 @@ public final class LocalAuth {
             String username = String.valueOf(payload.getOrDefault("sub", ""));
             long userId = number(payload.get("uid"));
             String role = String.valueOf(payload.getOrDefault("role", ""));
+            boolean superAdmin = Boolean.TRUE.equals(payload.get("sa"));
             long issuedAt = number(payload.get("iat"));
             long expiresAt = number(payload.get("exp"));
             long now = Instant.now().getEpochSecond();
@@ -139,7 +164,7 @@ public final class LocalAuth {
                     || expiresAt - issuedAt > expirySeconds() + 60) {
                 return null;
             }
-            return new Claims(username, userId, role, issuedAt, expiresAt, String.valueOf(payload.getOrDefault("jti", "")));
+            return new Claims(username, userId, role, superAdmin, issuedAt, expiresAt, String.valueOf(payload.getOrDefault("jti", "")));
         } catch (Exception ignored) {
             return null;
         }
@@ -195,6 +220,6 @@ public final class LocalAuth {
         return value instanceof Number number ? number.longValue() : Long.parseLong(String.valueOf(value));
     }
 
-    private record Claims(String username, long userId, String role, long issuedAt, long expiresAt, String tokenId) {
+    private record Claims(String username, long userId, String role, boolean superAdmin, long issuedAt, long expiresAt, String tokenId) {
     }
 }

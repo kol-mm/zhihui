@@ -610,7 +610,8 @@ class UserControllerTest {
     void suspensionsAndRoleChangesEndOpenSessions() {
         RecordingRevocations revocations = new RecordingRevocations();
         UserController sessions = controllerWith(revocations);
-        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
+        // Appointing an administrator is the super administrator's to do; the rest is ordinary governance.
+        String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN", true);
         String username = "governed-" + System.nanoTime();
         long userId = ((Number) ((Map<?, ?>) sessions.register(credentials(sessions, username, "secret123"))
                 .data().get("user")).get("id")).longValue();

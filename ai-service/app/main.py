@@ -263,6 +263,15 @@ def require_admin(authorization: str | None) -> dict[str, Any]:
 # Settings changes and index rebuilds are reported to the user service, which keeps the platform's action log.
 # Delivery happens in the background and never fails the request; undeliverable entries go to this service's log.
 audit_log = logging.getLogger("ai.admin_audit")
+def is_super_admin(claims: dict[str, Any] | None) -> bool:
+    """The claim only counts on an administrator's token; on its own it grants nothing."""
+    return bool(claims) and claims.get("role") == "ADMIN" and claims.get("sa") is True
+
+
+# Where the API key gets sent. An ordinary administrator keeps every other setting but may not repoint these.
+SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url")
+
+
 _audit_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="admin-audit")
 AUDIT_RETRY_DELAYS = (0, 1, 5)
 AI_CONFIG_LABELS = {
@@ -1062,3 +1071,10 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
             "created_at": assistant_message["created_at"],
         }
     )
+    if not is_super_admin(claims):
+        # Settings are saved as one object, so an ordinary administrator's form carries these fields even when
+        # it never showed them. Their stored values are put back instead of the save being refused, which keeps
+        # every other setting editable while the upstream stays where the super administrator left it.
+        for key in SUPER_ADMIN_ONLY_SETTINGS:
+            if key in before:
+                values[key] = before[key]

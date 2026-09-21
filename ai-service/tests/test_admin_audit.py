@@ -19,7 +19,8 @@ class AdminAuditTest(unittest.TestCase):
 
         self.main = main
         self.main.init_db()
-        self.admin = self.issue_token("admin", 2, "ADMIN")
+        # The seeded admin is the super administrator, which is what the migration sets up.
+        self.admin = self.issue_token("admin", 2, "ADMIN", super_admin=True)
         self.member = self.issue_token("demo", 1, "USER")
         self.sent: list[dict] = []
         patcher = mock.patch.object(self.main, "record_admin_action", side_effect=self.capture)
@@ -35,12 +36,15 @@ class AdminAuditTest(unittest.TestCase):
                                                      target_label, summary, detail))
 
     @staticmethod
-    def issue_token(username: str, user_id: int, role: str) -> str:
+    def issue_token(username: str, user_id: int, role: str, super_admin: bool = False) -> str:
         secret = os.getenv("AI_KNOWLEDGE_JWT_SECRET", "local-dev-secret-change-before-production").encode()
         encode = lambda data: base64.urlsafe_b64encode(data).rstrip(b"=").decode()
         now = int(time.time())
         header = encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-        payload = encode(json.dumps({"sub": username, "uid": user_id, "role": role, "iat": now, "exp": now + 600}).encode())
+        claims = {"sub": username, "uid": user_id, "role": role, "iat": now, "exp": now + 600}
+        if super_admin:
+            claims["sa"] = True
+        payload = encode(json.dumps(claims).encode())
         signature = encode(hmac.new(secret, f"{header}.{payload}".encode(), hashlib.sha256).digest())
         return f"Bearer {header}.{payload}.{signature}"
 

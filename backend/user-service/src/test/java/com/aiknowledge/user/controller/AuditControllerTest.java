@@ -120,7 +120,8 @@ class AuditControllerTest {
         userController.setAdminAudit(new LocalAdminAudit(store));
         UserEntity admin = save(users, "audit-admin-" + System.nanoTime(), "ADMIN");
         UserEntity member = save(users, "audit-member-" + System.nanoTime(), "USER");
-        String adminAuth = "Bearer " + LocalAuth.issueToken(admin.getUsername(), admin.getId(), "ADMIN");
+        // This test appoints an administrator further down, which is the super administrator's to do.
+        String adminAuth = "Bearer " + LocalAuth.issueToken(admin.getUsername(), admin.getId(), "ADMIN", true);
 
         // Item 10: no self-suspension, self-deletion or self-demotion, through either endpoint.
         assertEquals("administrators cannot disable their own account",

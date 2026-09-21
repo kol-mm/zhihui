@@ -86,6 +86,7 @@ public class InMemoryUserStore implements UserStore {
             admin.setNickname("Local Admin");
             admin.setStatus("ACTIVE");
             admin.setRole("ADMIN");
+            admin.setSuperAdmin(true);
             admin.setPublishPolicy("STANDARD");
             admin.setMessagingEnabled(true);
             admin.setCreatedAt(LocalDateTime.now());
