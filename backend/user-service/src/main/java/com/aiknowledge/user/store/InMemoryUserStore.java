@@ -144,8 +144,10 @@ public class InMemoryUserStore implements UserStore {
         Optional<UserEntity> found = findById(userId);
         found.ifPresent(user -> {
             user.setNickname(nickname);
-            user.setAvatarUrl(avatarUrl);
-            user.setSignature(signature);
+            // An admin dialog sends "" for a field it never showed; keeping the column NULL means
+            // "no avatar" stays distinguishable from "an avatar set to nothing".
+            user.setAvatarUrl(blankToNull(avatarUrl));
+            user.setSignature(blankToNull(signature));
             user.setUpdatedAt(LocalDateTime.now());
             persist();
         });
@@ -344,5 +346,10 @@ public class InMemoryUserStore implements UserStore {
     }
 
     public record BlockRecord(Long id, Long userId, Long targetUserId, LocalDateTime createdAt) {
+    }
+
+    /** Optional text columns hold NULL when there is nothing in them. */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

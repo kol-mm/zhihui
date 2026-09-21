@@ -71,8 +71,10 @@ public class MySqlUserStore implements UserStore {
             return Optional.empty();
         }
         user.setNickname(nickname);
-        user.setAvatarUrl(avatarUrl);
-        user.setSignature(signature);
+        // An admin dialog sends "" for a field it never showed; keeping the column NULL means
+        // "no avatar" stays distinguishable from "an avatar set to nothing".
+        user.setAvatarUrl(blankToNull(avatarUrl));
+        user.setSignature(blankToNull(signature));
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
         return Optional.of(user);
@@ -347,4 +349,9 @@ public class MySqlUserStore implements UserStore {
         return wrapper;
     }
 
+
+    /** Optional text columns hold NULL when there is nothing in them. */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
 }

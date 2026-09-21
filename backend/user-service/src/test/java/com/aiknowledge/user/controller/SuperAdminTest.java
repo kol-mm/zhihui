@@ -13,6 +13,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -135,5 +136,32 @@ class SuperAdminTest {
 
         assertEquals(0, signedIn.code(), signedIn.message());
         assertFalse(LocalAuth.isSuperAdmin("Bearer " + signedIn.data().get("token")));
+    }
+
+    @Test
+    void anAdminSaveLeavesAnAbsentAvatarAndSignatureAsNull() {
+        UserEntity member = register("blank-fields");
+        assertNull(member.getAvatarUrl(), "a new account starts with neither");
+        assertNull(member.getSignature());
+
+        // The dialog posts every field it knows, including the ones it never showed.
+        assertEquals(0, controller.updateUserGovernance(superAdminAuth(),
+                Map.of("userId", member.getId(), "publishPolicy", "PRE_REVIEW")).code());
+
+        UserEntity saved = store.findById(member.getId()).orElseThrow();
+        assertNull(saved.getAvatarUrl(), "an untouched avatar must not become an empty string");
+        assertNull(saved.getSignature(), "nor an untouched signature");
+        assertEquals("PRE_REVIEW", saved.getPublishPolicy());
+    }
+
+    @Test
+    void clearingASignatureStoresNothingRatherThanAnEmptyString() {
+        UserEntity member = register("clears-signature");
+        store.updateProfile(member.getId(), member.getNickname(), null, "写了一段签名");
+        assertEquals("写了一段签名", store.findById(member.getId()).orElseThrow().getSignature());
+
+        store.updateProfile(member.getId(), member.getNickname(), null, "   ");
+
+        assertNull(store.findById(member.getId()).orElseThrow().getSignature());
     }
 }
