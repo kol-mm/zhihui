@@ -784,3 +784,10 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .notification-actor { margin: 2px 0 4px !important; color: var(--zh-ink-600, #4a5a52); font-size: 13px; }
 .notification-actor small { color: var(--zh-ink-400, #8a978f); }
 
+
+.knowledge-parse-hint { margin: 0 0 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+  color: var(--el-color-warning-dark-2); background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-7); }
+.stacked-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.audit-reason { display: block; margin-top: 4px; line-height: 1.4; word-break: break-word; }

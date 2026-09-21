@@ -78,7 +78,7 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
         sample.setUserId(1L);
         sample.setTitle("AI Knowledge Platform Design");
         sample.setFileType("docx");
-        sample.setParseStatus("READY");
+        sample.setParseStatus("INDEXED");
         sample.setAuditStatus("APPROVED");
         sample.setViews(0);
         sample.setDownloads(0);

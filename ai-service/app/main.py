@@ -865,8 +865,7 @@ def delete_chat_session(
 def ai_admin_overview(authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
     health_data = health().data
-    return ApiResponse(data={**health_data, "configuration": read_ai_config(),
-                             "capabilities": ["data-source-scope", "matching-rules", "chat-audit", "chunk-review"]})
+    return ApiResponse(data={**health_data, "configuration": read_ai_config()})
 
 
 @app.get("/ai/admin/chunks", response_model=ApiResponse)

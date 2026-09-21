@@ -803,4 +803,29 @@ class KnowledgeControllerTest {
             throw new IllegalStateException("could not read the streamed body", error);
         }
     }
+
+    @Test
+    void knowledgeCreatedFromContentKeepsItsParseStatusInTheRow() {
+        KnowledgeController ownController = new KnowledgeController(
+                new InMemoryKnowledgeStore(),
+                new LocalFileStorageService("target/test-uploads", "local", "http://127.0.0.1:9000", "ai-knowledge"),
+                new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge"),
+                new com.aiknowledge.knowledge.storage.DocumentTextExtractor());
+
+        ApiResponse<Map<String, Object>> indexed = ownController.upload(userAuth, Map.of(
+                "title", "解析状态样本", "fileType", "txt", "content", "可以被检索的正文"));
+        Long indexedId = ((Number) indexed.data().get("id")).longValue();
+        assertEquals("INDEXED", indexed.data().get("parseStatus"));
+        // saveFile keeps the very object it was handed, so asking this store back would see any later mutation
+        // of it. A store built afresh reads what was written when the row was saved, which is what MySQL keeps
+        // and what the bug got wrong: the status was set on the response after the write, so the row said
+        // PENDING for ever.
+        assertEquals("INDEXED", new InMemoryKnowledgeStore().find(indexedId).orElseThrow().getParseStatus());
+
+        ApiResponse<Map<String, Object>> blank = ownController.upload(userAuth, Map.of(
+                "title", "空正文样本", "fileType", "txt", "content", ""));
+        Long blankId = ((Number) blank.data().get("id")).longValue();
+        assertEquals("EMPTY", blank.data().get("parseStatus"));
+        assertEquals("EMPTY", new InMemoryKnowledgeStore().find(blankId).orElseThrow().getParseStatus());
+    }
 }

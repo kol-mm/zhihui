@@ -358,14 +358,14 @@ public class KnowledgeController {
         file.setTitle(String.valueOf(request.getOrDefault("title", "未命名知识文件")));
         file.setFileUrl(String.valueOf(request.getOrDefault("fileUrl", "")));
         file.setFileType(fileType);
-        file.setParseStatus("PENDING");
+        // Decided before the row is written: setting it afterwards only changed the copy being returned.
+        file.setParseStatus(content.isBlank() ? "EMPTY" : "INDEXED");
         file.setAuditStatus("PENDING");
         file.setViews(0);
         file.setDownloads(0);
         KnowledgeFileEntity saved = knowledgeStore.saveFile(file);
         if (!content.isBlank()) {
             fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
-            saved.setParseStatus("INDEXED");
         }
         return ApiResponse.ok(toView(saved));
     }

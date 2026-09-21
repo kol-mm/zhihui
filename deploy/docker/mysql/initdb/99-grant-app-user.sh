@@ -14,9 +14,8 @@ GRANT ALL PRIVILEGES ON user_db.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON knowledge_db.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON community_db.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON message_db.* TO '${MYSQL_USER}'@'%';
-GRANT ALL PRIVILEGES ON ai_db.* TO '${MYSQL_USER}'@'%';
-GRANT ALL PRIVILEGES ON audit_db.* TO '${MYSQL_USER}'@'%';
-GRANT ALL PRIVILEGES ON statistics_db.* TO '${MYSQL_USER}'@'%';
+-- ai_db, audit_db and statistics_db were granted here but no service ever connected to them.
+-- An existing deployment keeps the old grants until they are revoked by hand; see docs/server-deployment.md.
 FLUSH PRIVILEGES;
 SQL
 
