@@ -371,14 +371,14 @@ import { detailPath, linkedCommentFrom, noticeDestination, type NoticeTarget } f
 import { knowledgeCache } from './utils/knowledgeCache';
 import { markOnboardingSeen, shouldShowOnboarding } from './utils/onboarding';
 import { uploadSizeProblem } from './utils/uploadLimits';
+import { parseStatusLabel, parseStatusTone } from './utils/parseStatus';
+import { auditDecisionNote, auditSourceLabel, auditSourceTone } from './utils/auditSource';
 import { pendingChanges, profileAuditChanges, profileAuditStatusLabel, profileAuditStatusType, type ProfileAuditState, type ProfileChange } from './utils/profileAudit';
 import { clearLegacyAuthToken, deleteData, downloadData, getData, getLegacyAuthToken, getStoredValue, isSessionExpiredError, onSessionExpired, postData, postFormData, putData, removeStoredValue, resolveApiUrl, setStoredValue, toUserMessage } from './api/client';
 // Loaded when first shown: most visits never open a detail page or a PDF.
 const CommunityDetailPage = defineAsyncComponent(() => import('./components/CommunityDetailPage.vue'));
 const KnowledgeDetailPage = defineAsyncComponent(() => import('./components/KnowledgeDetailPage.vue'));
 const PdfViewer = defineAsyncComponent(() => import('./components/PdfViewer.vue'));
-import { parseStatusLabel, parseStatusTone } from './utils/parseStatus';
-import { auditDecisionNote, auditSourceLabel, auditSourceTone } from './utils/auditSource';
 const EmailBinding = defineAsyncComponent(() => import('./components/EmailBinding.vue'));
 const AdminAuditLog = defineAsyncComponent(() => import('./components/AdminAuditLog.vue'));
 const OnboardingGuide = defineAsyncComponent(() => import('./components/OnboardingGuide.vue'));
@@ -427,6 +427,8 @@ const username = ref(getStoredValue('ai-knowledge-username'));
 const displayName = ref(getStoredValue('ai-knowledge-name',username.value || '用户'));
 const avatarUrl = ref(getStoredValue('ai-knowledge-avatar'));
 const role = ref(getStoredValue('ai-knowledge-role','USER'));
+/** Appoints administrators and owns the AI upstream settings; an ordinary administrator keeps the rest. */
+const superAdmin = ref(getStoredValue('ai-knowledge-super-admin','') === '1');
 const currentUserId = ref(Number(getStoredValue('ai-knowledge-user-id','1')));
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
@@ -434,8 +436,6 @@ const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeT
 const adminModerationKeyword = ref(''); const adminModerationStatus = ref(''); const adminUserRoleFilter = ref(''); const adminUserStatusFilter = ref(''); const adminTicketKeyword = ref(''); const adminTicketStatus = ref('');
 const ADMIN_USER_PAGE_SIZE = 20; const ADMIN_TICKET_PAGE_SIZE = 20; const ADMIN_EXPORT_PAGE_SIZE = 100; const ADMIN_EXPORT_MAX_PAGES = 50;
 const adminUserTotal = ref(0); const adminUserCursor = ref<number|string|null>(null); const adminUserHasMore = ref(false); const adminUserLoading = ref(false); const adminUserExporting = ref(false); let adminUserToken = 0;
-/** Appoints administrators and owns the AI upstream settings; an ordinary administrator keeps the rest. */
-const superAdmin = ref(getStoredValue('ai-knowledge-super-admin','') === '1');
 const adminTicketTotal = ref(0); const adminTicketCursor = ref<number|string|null>(null); const adminTicketHasMore = ref(false); const adminTicketLoading = ref(false); let adminTicketToken = 0;
 const assignableAdmins = ref<UserRecord[]>([]);
 const adminConfigSnapshot = ref('');
