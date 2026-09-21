@@ -120,6 +120,82 @@ public class LocalFileStorageService {
         }
     }
 
+    /** The size of a stored file, without opening it. */
+    public long size(String fileUrl) {
+        String objectName = objectName(fileUrl);
+        try {
+            if ("minio".equalsIgnoreCase(storageMode)) {
+                ensureBucket();
+                return minioClient.statObject(io.minio.StatObjectArgs.builder()
+                        .bucket(minioBucket).object(objectName).build()).size();
+            }
+            Path target = storageRoot.resolve(objectName).normalize();
+            if (!target.startsWith(storageRoot)) throw new IllegalArgumentException("invalid storage path");
+            return Files.size(target);
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to read stored file", error);
+        }
+    }
+
+    /**
+     * The bytes from {@code offset} for at most {@code length}, read without touching what comes before them:
+     * a file is positioned, an object is fetched with a range, so a reader asking for page one does not pay
+     * for the rest of the document.
+     */
+    public StoredStream readStream(String fileUrl, long offset, long length) {
+        String objectName = objectName(fileUrl);
+        try {
+            if ("minio".equalsIgnoreCase(storageMode)) {
+                ensureBucket();
+                long total = minioClient.statObject(io.minio.StatObjectArgs.builder()
+                        .bucket(minioBucket).object(objectName).build()).size();
+                var response = minioClient.getObject(GetObjectArgs.builder()
+                        .bucket(minioBucket).object(objectName).offset(offset).length(length).build());
+                return new StoredStream(response, total, objectName);
+            }
+            Path target = storageRoot.resolve(objectName).normalize();
+            if (!target.startsWith(storageRoot)) throw new IllegalArgumentException("invalid storage path");
+            java.nio.channels.SeekableByteChannel channel = Files.newByteChannel(target);
+            channel.position(offset);
+            return new StoredStream(new BoundedInputStream(java.nio.channels.Channels.newInputStream(channel), length),
+                    Files.size(target), objectName);
+        } catch (Exception error) {
+            throw new IllegalStateException("failed to read stored file", error);
+        }
+    }
+
+    /** Stops at the end of the requested range, so the rest of the file is never sent. */
+    private static final class BoundedInputStream extends InputStream {
+        private final InputStream source;
+        private long remaining;
+
+        private BoundedInputStream(InputStream source, long remaining) {
+            this.source = source;
+            this.remaining = remaining;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (remaining <= 0) return -1;
+            int value = source.read();
+            if (value >= 0) remaining--;
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            if (remaining <= 0) return -1;
+            int read = source.read(buffer, offset, (int) Math.min(length, remaining));
+            if (read > 0) remaining -= read;
+            return read;
+        }
+
+        @Override
+        public void close() throws IOException {
+            source.close();
+        }
+    }
+
     public StoredContent read(String fileUrl) {
         String objectName = objectName(fileUrl);
         try {

@@ -213,6 +213,7 @@ public class KnowledgeController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @PathVariable Long fileId
     ) {
+            @RequestHeader(name = "Range", required = false) String range,
         return storedFileResponse(authorization, fileId, true);
     }
 
@@ -268,7 +269,45 @@ public class KnowledgeController {
             @RequestHeader(name = "Authorization", required = false) String authorization,
             @PathVariable Long fileId
     ) {
-        return storedFileResponse(authorization, fileId, false);
+        return storedFileResponse(authorization, fileId, false, range);
+    }
+
+    /** A single byte range, as far as this endpoint is concerned; readers never ask for more than one. */
+    record ByteRange(long start, long end) {
+        long length() { return end - start + 1; }
+    }
+
+    /**
+     * Parses one range out of a Range header against a known file size. Returns null when the header is absent
+     * or asks for something this endpoint does not serve, in which case the whole file is sent as before.
+     */
+    static ByteRange parseRange(String header, long size) {
+        if (header == null || !header.startsWith("bytes=") || size <= 0) return null;
+        String spec = header.substring("bytes=".length()).trim();
+        if (spec.isEmpty() || spec.contains(",")) return null;
+        int dash = spec.indexOf('-');
+        if (dash < 0) return null;
+        String from = spec.substring(0, dash).trim();
+        String to = spec.substring(dash + 1).trim();
+        try {
+            long start;
+            long end;
+            if (from.isEmpty()) {
+                if (to.isEmpty()) return null;
+                long suffix = Long.parseLong(to);
+                if (suffix <= 0) return null;
+                start = Math.max(0, size - suffix);
+                end = size - 1;
+            } else {
+                start = Long.parseLong(from);
+                end = to.isEmpty() ? size - 1 : Long.parseLong(to);
+            }
+            if (start < 0 || end < start) return null;
+            if (start >= size) return new ByteRange(-1, -1);
+            return new ByteRange(start, Math.min(end, size - 1));
+        } catch (NumberFormatException error) {
+            return null;
+        }
     }
 
     private ResponseEntity<org.springframework.core.io.Resource> storedFileResponse(String authorization, Long fileId, boolean download) {
@@ -278,14 +317,40 @@ public class KnowledgeController {
                 .orElseThrow(() -> new ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND));
         boolean allowed = "APPROVED".equals(file.getAuditStatus()) || userId.equals(file.getUserId()) || LocalAuth.isAdmin(authorization);
         if (!allowed) throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
-        LocalFileStorageService.StoredStream stored = fileStorage.readStream(file.getFileUrl());
-        if (download) knowledgeStore.download(userId, fileId);
+        long size = fileStorage.size(file.getFileUrl());
+        ByteRange range = parseRange(rangeHeader, size);
         String downloadName = file.getTitle() + (file.getFileType() == null || file.getFileType().isBlank() ? "" : "." + file.getFileType());
         ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
                 .filename(downloadName, StandardCharsets.UTF_8).build();
-        return ResponseEntity.ok()
+        MediaType mediaType = download ? MediaType.APPLICATION_OCTET_STREAM : previewMediaType(file.getFileType());
+        String cacheControl = download ? "no-store" : "private, max-age=300";
+
+        if (range != null && range.start() < 0) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                    .header(HttpHeaders.CONTENT_RANGE, "bytes */" + size)
+                    .build();
+        }
+        // A range is part of one read, not a new one: counting it would multiply a single download by however
+        // many pieces the reader happened to ask for.
+        if (download && range == null) knowledgeStore.download(userId, fileId);
+        if (range == null) {
+            LocalFileStorageService.StoredStream stored = fileStorage.readStream(file.getFileUrl());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                    .header(HttpHeaders.CACHE_CONTROL, cacheControl)
+                    .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .contentType(mediaType)
+                    .contentLength(stored.length())
+                    .body(new org.springframework.core.io.InputStreamResource(stored.stream()));
+        }
+        LocalFileStorageService.StoredStream part = fileStorage.readStream(file.getFileUrl(), range.start(), range.length());
+        return ResponseEntity.status(org.springframework.http.HttpStatus.PARTIAL_CONTENT)
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .header(HttpHeaders.CACHE_CONTROL, download ? "no-store" : "private, max-age=300")
+                .header(HttpHeaders.CACHE_CONTROL, cacheControl)
+                .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+                .header(HttpHeaders.CONTENT_RANGE, "bytes " + range.start() + "-" + range.end() + "/" + size)
                 .header("X-Content-Type-Options", "nosniff")
                 .contentType(download ? MediaType.APPLICATION_OCTET_STREAM : previewMediaType(file.getFileType()))
                 .contentLength(stored.length())
@@ -295,6 +360,7 @@ public class KnowledgeController {
     private MediaType previewMediaType(String fileType) {
         return switch (fileType == null ? "" : fileType.toLowerCase()) {
             case "pdf" -> MediaType.APPLICATION_PDF;
+            @RequestHeader(name = "Range", required = false) String range,
             case "txt", "md", "markdown", "csv" -> new MediaType("text", "plain", StandardCharsets.UTF_8);
             case "docx" -> MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
             default -> MediaType.APPLICATION_OCTET_STREAM;

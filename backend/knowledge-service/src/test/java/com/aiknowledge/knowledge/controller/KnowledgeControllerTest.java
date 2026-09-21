@@ -298,7 +298,7 @@ class KnowledgeControllerTest {
         assertEquals(0, uploaded.code());
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
         assertEquals("INDEXED", uploaded.data().get("parseStatus"));
-        var download = controller.fileContent(userAuth, fileId);
+        var download = controller.fileContent(userAuth, null, fileId);
         assertEquals(200, download.getStatusCode().value());
         assertTrue(bodyText(download).contains("signed identities"));
     }
@@ -315,7 +315,7 @@ class KnowledgeControllerTest {
         var uploaded = controller.uploadFile(userAuth, multipart, "Preview only", null);
         Long fileId = ((Number) uploaded.data().get("id")).longValue();
 
-        var preview = controller.filePreview(userAuth, fileId);
+        var preview = controller.filePreview(userAuth, null, fileId);
         assertEquals(200, preview.getStatusCode().value());
         assertEquals("application/pdf", preview.getHeaders().getContentType().toString());
         assertTrue(preview.getHeaders().getFirst("Content-Disposition").startsWith("inline"));
@@ -323,7 +323,7 @@ class KnowledgeControllerTest {
                 "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin"), fileId
         ).data().get("downloads")).intValue());
 
-        controller.fileContent(userAuth, fileId);
+        controller.fileContent(userAuth, null, fileId);
         assertEquals(1, ((Number) controller.adminPreview(
                 "Bearer " + com.aiknowledge.common.LocalAuth.issueToken("admin"), fileId
         ).data().get("downloads")).intValue());

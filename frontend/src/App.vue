@@ -804,7 +804,7 @@ function endLocalSession(){ ['ai-knowledge-local-token','ai-knowledge-username',
 async function restoreSession(){try{if(getLegacyAuthToken()){try{await postData('/user/session/adopt',{});}catch{/* an expired stored token is simply dropped */}finally{clearLegacyAuthToken();}}const session=await getData<{userId:number;username:string;role:string}>('/user/session');currentUserId.value=session.userId;username.value=session.username;role.value=session.role;setStoredValue('ai-knowledge-user-id',String(session.userId));syncUserForms();maybeShowOnboarding();await loadPublicConfig();await refreshCurrentView();await loadDetailRoute();}catch{logout();}}
 async function loadPublicConfig(){try{platformConfig.value={...platformConfig.value,...await getData<typeof platformConfig.value>('/ai/config/public')};}catch{/* 配置服务短暂不可用时继续使用安全默认值。 */}}
 function syncUserForms(){ profileForm.value.userId=currentUserId.value; knowledgeForm.value.userId=currentUserId.value; postForm.value.userId=currentUserId.value; messageForm.value.senderId=currentUserId.value; feedbackForm.value.userId=currentUserId.value; }
-function resetDetailState(){detailRoute.value=undefined;detailFocusCommentId.value=0;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;resetDetailCommentPaging();if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}}
+function resetDetailState(){detailRoute.value=undefined;detailFocusCommentId.value=0;detailError.value='';detailKnowledge.value=undefined;detailKnowledgeBlocks.value=[];detailPost.value=undefined;resetDetailCommentPaging();detailPdfPreviewUrl.value='';}
 function returnToRoot(){if(window.location.pathname!=='/')window.history.pushState({},'', '/');resetDetailState();}
 async function confirmDiscardAdminConfig(){if(!aiConfigDirty.value)return true;try{await ElMessageBox.confirm('平台配置还有未保存的更改，离开后这些更改会丢失。','离开配置页面？',{confirmButtonText:'放弃更改并离开',cancelButtonText:'继续编辑',type:'warning'});return true;}catch{return false;}}
 async function switchPortal(value:'client'|'admin'){ if(value!==portal.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return;returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; await refreshCurrentView(); }
@@ -867,13 +867,12 @@ function showKnowledgeDetail(detail:KnowledgeFile){
   void loadUserSummaries([detail.userId]);
 }
 /** The PDF is fetched once per opened document; switching away cancels nothing but the URL is always released. */
-async function loadKnowledgePreview(detail:KnowledgeFile){
-  if(detailPdfPreviewUrl.value){URL.revokeObjectURL(detailPdfPreviewUrl.value);detailPdfPreviewUrl.value='';}
+/** The address of the document itself: pdf.js reads it in pieces, so nothing is downloaded up front. */
+function knowledgePreviewUrl(file:KnowledgeFile){return resolveApiUrl(`/knowledge/file/${file.id}/preview`);}
+function loadKnowledgePreview(detail:KnowledgeFile){
+  detailPdfPreviewUrl.value='';
   if(detail.fileType?.toLowerCase()!=='pdf'||!detail.fileUrl)return;
-  try{
-    const blob=await downloadData(`/knowledge/file/${detail.id}/preview`);
-    if(detailRoute.value?.kind==='knowledge'&&detailRoute.value.id===detail.id)detailPdfPreviewUrl.value=URL.createObjectURL(blob);
-  }catch(error){if(detailRoute.value?.id===detail.id)ElMessage.warning(toUserMessage(error,'PDF 预览加载失败，可下载后查看'));}
+  detailPdfPreviewUrl.value=knowledgePreviewUrl(detail);
 }
 /** New members see a short guide once; it can be skipped, and reopened from 个人中心. */
 function maybeShowOnboarding(){
@@ -998,17 +997,13 @@ async function uploadKnowledge(){
   }catch(error){notifyError(error);}finally{busy.value=false;}
 }
 function openKnowledge(file:KnowledgeFile){navigateToDetail('knowledge',file.id);}
-async function prepareKnowledgePreview(file:KnowledgeFile,token=readerToken){
-  if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}
+function prepareKnowledgePreview(file:KnowledgeFile,token=readerToken){
+  pdfPreviewUrl.value='';
   if(file.fileType?.toLowerCase()!=='pdf'||!file.fileUrl)return;
-  readerPreviewLoading.value=true;
-  try{
-    const blob=await downloadData(`/knowledge/file/${file.id}/preview`);
-    if(token!==readerToken)return;
-    pdfPreviewUrl.value=URL.createObjectURL(blob);
-  }catch(error){
-    if(token===readerToken)readerError.value=toUserMessage(error,'PDF 预览加载失败，可下载后查看');
-  }finally{if(token===readerToken)readerPreviewLoading.value=false;}
+  if(token!==readerToken)return;
+  // No fetch here any more: the viewer loads the document itself and shows its own progress.
+  readerPreviewLoading.value=false;
+  pdfPreviewUrl.value=knowledgePreviewUrl(file);
 }
 async function viewKnowledge(file:KnowledgeFile){
   openReader(file,false);
@@ -1039,7 +1034,7 @@ async function reviewKnowledge(file:KnowledgeFile){
 }
 function openReader(file:KnowledgeFile,reviewing:boolean){
   readerToken++;
-  if(pdfPreviewUrl.value){URL.revokeObjectURL(pdfPreviewUrl.value);pdfPreviewUrl.value='';}
+  pdfPreviewUrl.value='';
   reviewingKnowledge.value=reviewing;selectedKnowledge.value=file;readerError.value='';
   readerLoading.value=true;readerPreviewLoading.value=false;readerDialog.value=true;
 }
@@ -1830,5 +1825,5 @@ function handleBeforeUnload(event:BeforeUnloadEvent){if(!aiConfigDirty.value)ret
 watch(mobileMenuOpen,open=>document.body.classList.toggle('mobile-menu-active',open));
 watch(moderationTab,()=>adminModerationStatus.value='');
 onMounted(async()=>{onSessionExpired(()=>{if(!authenticated.value)return;endLocalSession();ElMessage.warning('登录已失效，请重新登录');});syncUserForms();window.addEventListener('popstate',handlePopState);window.addEventListener('keydown',handleGlobalKeydown);window.addEventListener('beforeunload',handleBeforeUnload);document.addEventListener('visibilitychange',handleVisibilityChange);await loadPublicConfig();if(authenticated.value)await restoreSession();else await loadCaptcha();});
-onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();knowledgeObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);if(pdfPreviewUrl.value)URL.revokeObjectURL(pdfPreviewUrl.value);if(detailPdfPreviewUrl.value)URL.revokeObjectURL(detailPdfPreviewUrl.value);});
+onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();knowledgeObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);pdfPreviewUrl.value='';detailPdfPreviewUrl.value='';});
 </script>

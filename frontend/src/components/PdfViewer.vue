@@ -40,6 +40,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { OnProgressParameters, PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import { getLegacyAuthToken } from '../api/client';
 import { getStoredValue, setStoredValue } from '../api/client';
 
 type PageState = { number:number; ratio:number; rendered:boolean };
@@ -76,6 +77,8 @@ let scrollFrame = 0;
 let restoredPage = 0;
 let pdfJsPromise:Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')>|undefined;
 
+/** The cookie rides on withCredentials; a visitor still on a stored token needs the header. */
+function authHeaders(){const token=getLegacyAuthToken();return token?{Authorization:`Bearer ${token}`}:undefined;}
 function loadPdfJs(){
   pdfJsPromise??=import('pdfjs-dist/legacy/build/pdf.mjs').then(module=>{module.GlobalWorkerOptions.workerSrc=workerUrl;return module;});
   return pdfJsPromise;
@@ -104,7 +107,10 @@ async function loadDocument(){
   if(!props.src){error.value='没有可预览的 PDF 文件';loading.value=false;return;}
   try{
     const pdfJs=await loadPdfJs();if(current!==generation)return;
-    loadingTask=pdfJs.getDocument({url:props.src});
+    // Given a URL on a server that serves ranges, pdf.js fetches only the pages it is about to draw; a
+    // blob: URL cannot do that, which is why opening a large document used to wait for the whole file.
+    loadingTask=pdfJs.getDocument({url:props.src,withCredentials:true,httpHeaders:authHeaders(),
+      rangeChunkSize:262144,disableAutoFetch:true});
     loadingTask.onProgress=({loaded,total}:OnProgressParameters)=>{if(current===generation&&total>0)loadProgress.value=Math.min(100,Math.round(loaded/total*100));};
     const loaded=await loadingTask.promise;
     if(current!==generation){await loaded.cleanup();return;}
