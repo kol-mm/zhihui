@@ -3,12 +3,16 @@ server {
     listen [::]:80;
     server_name __DOMAIN__;
 
-    client_max_body_size 100m;
+    # Must not be smaller than the app's own ceiling (deploy/docker/nginx.conf), or a large PDF is refused here
+    # with a bare 413 before the app can explain why.
+    client_max_body_size 220m;
+    server_tokens off;
 
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # The app behind this proxy sends X-Frame-Options, Referrer-Policy, Permissions-Policy and its own CSP, so
+    # they are not repeated here: a second, differing value reaches the browser as a conflicting duplicate.
+    # HSTS is the one header only the TLS terminator can set, because the app never sees the https scheme.
+    # Browsers ignore it on plain HTTP, and certbot moves this block to 443 when it installs the certificate.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
     location / {
         proxy_pass http://127.0.0.1:__UPSTREAM_PORT__;
