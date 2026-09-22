@@ -55,6 +55,33 @@ and ensures the default `demo` and `admin` accounts and basic lookup data exist.
 Set `AI_KNOWLEDGE_JWT_SECRET`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and
 `AI_API_KEY` through the server environment. Do not store these values in the repository.
 
+## Narrowing the application database account
+
+The application account is granted only the four databases a service actually connects to: `user_db`,
+`knowledge_db`, `community_db` and `message_db`. `ai_db`, `audit_db` and `statistics_db` were granted in
+earlier deployments but no service has ever connected to them — the AI service keeps its own SQLite file, and
+the audit log lives in `user_db`.
+
+A deployment created before this change keeps the old grants until they are revoked by hand. Check what the
+account currently holds, as root:
+
+```sql
+SHOW GRANTS FOR 'zhihui'@'%';
+```
+
+If `ai_db`, `audit_db` or `statistics_db` appear, remove them:
+
+```sql
+REVOKE ALL PRIVILEGES ON ai_db.* FROM 'zhihui'@'%';
+REVOKE ALL PRIVILEGES ON audit_db.* FROM 'zhihui'@'%';
+REVOKE ALL PRIVILEGES ON statistics_db.* FROM 'zhihui'@'%';
+FLUSH PRIVILEGES;
+```
+
+Substitute the account name in `MYSQL_USER` if it is not `zhihui`. Nothing needs restarting, and no service
+loses access, because none of them opens those databases. Revoking a database that was never granted is an
+error rather than a no-op, so run `SHOW GRANTS` first and revoke only what it lists.
+
 ## Reverse proxy and HTTPS
 
 The production frontend uses the same-origin `/api` path by default. A ready-to-edit Nginx template is
