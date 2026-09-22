@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { ADMIN, SUPER_ADMIN, openAdminSection, signIn } from './session';
+import { ADMIN, DEMO, SUPER_ADMIN, api, openAdminSection, signIn } from './session';
 
 /**
  * What an ordinary administrator may not do, and what the settings screen says about AI review.
@@ -62,5 +62,61 @@ test.describe('administration', () => {
     // Whichever state it is in, it must say something rather than leave silence to be interpreted.
     await expect(health).toContainText(/未开启|没有收到请求|模型始终失败|部分调用失败|仅本地规则|运行正常/);
     await expect(page.locator('.review-health-counters')).toContainText('收到请求');
+  });
+
+  /**
+   * 用户管理 is a component of its own, reached through props and an emit. These cover the seams: that the page
+   * can still refresh it, that its filters reach the server, that the counts handed to it are shown, and that
+   * the password-reset queue below the table came along with it.
+   */
+  test('refreshing the page reloads the user list without losing the filter', async ({ page }) => {
+    const token = await signIn(page, ADMIN);
+    await page.goto('/');
+    await openAdminSection(page, '用户管理');
+    const users = page.locator('.admin-list-surface:not(.reset-request-surface) .admin-desktop-table');
+    await expect(users.locator('tr', { hasText: '@admin' })).toBeVisible();
+
+    await page.getByPlaceholder('搜索 ID、用户名、昵称或邮箱').fill('demo');
+    await expect(users.locator('tr', { hasText: '@admin' })).toHaveCount(0);
+    await expect(users.locator('tr', { hasText: '@demo' })).toContainText('正常');
+
+    try {
+      // Changed behind the page's back, so the refresh has to actually fetch again to show it — a refresh that
+      // quietly did nothing would leave the row reading 正常 and fail here.
+      await api(token, 'POST', '/user/admin/status', { userId: DEMO.userId, status: 'DISABLED' });
+      await page.locator('.topbar-refresh').filter({ visible: true }).first().click();
+
+      await expect(users.locator('tr', { hasText: '@demo' })).toContainText('已停用');
+      // And the keyword the administrator typed is still in force.
+      await expect(users.locator('tr', { hasText: '@admin' })).toHaveCount(0);
+    } finally {
+      await api(token, 'POST', '/user/admin/status', { userId: DEMO.userId, status: 'ACTIVE' });
+    }
+
+    await page.locator('.topbar-refresh').filter({ visible: true }).first().click();
+    await expect(users.locator('tr', { hasText: '@demo' })).toContainText('正常');
+  });
+
+  test('the summary strip keeps counting the whole site while the table is filtered', async ({ page }) => {
+    await signIn(page, ADMIN);
+    await page.goto('/');
+    await openAdminSection(page, '用户管理');
+    const strip = page.locator('.admin-summary-strip');
+    await expect(strip).toContainText(/全部\s*[1-9]/);
+
+    await page.getByPlaceholder('搜索 ID、用户名、昵称或邮箱').fill('demo');
+
+    await expect(page.locator('.admin-user-filters')).toContainText('找到');
+    await expect(strip).toContainText(/全部\s*[1-9]/);
+  });
+
+  test('the password reset queue sits under the user table', async ({ page }) => {
+    await signIn(page, ADMIN);
+    await page.goto('/');
+    await openAdminSection(page, '用户管理');
+
+    const resets = page.locator('.reset-request-surface');
+    await expect(resets).toContainText('密码重置申请');
+    await expect(resets.getByRole('combobox', { name: '按状态筛选重置申请' })).toBeVisible();
   });
 });
