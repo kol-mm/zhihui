@@ -365,6 +365,7 @@ import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
 import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, CollectionTag, DataAnalysis, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Notebook, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
+import { createListLoader, emptyModerationList, useModeration, type ModerationList, type ModerationPage, type OverviewSections } from './composables/moderation';
 import { detailPath, linkedCommentFrom, noticeDestination, type NoticeTarget } from './utils/noticeTargets';
 import { knowledgeCache } from './utils/knowledgeCache';
 import { markOnboardingSeen, shouldShowOnboarding } from './utils/onboarding';
@@ -434,13 +435,13 @@ const currentUserId = ref(Number(getStoredValue('ai-knowledge-user-id','1')));
 const portal = ref<'client'|'admin'>(role.value === 'ADMIN' ? 'admin' : 'client');
 const activeView = ref(portal.value === 'admin' ? 'dashboard' : 'home');
 const globalSearch = ref(''); const knowledgeKeyword = ref(''); const knowledgeType = ref(''); const knowledgeCategoryId = ref(0);
-const adminModerationKeyword = ref(''); const adminModerationStatus = ref(''); const adminTicketKeyword = ref(''); const adminTicketStatus = ref('');
+const adminTicketKeyword = ref(''); const adminTicketStatus = ref('');
 const ADMIN_TICKET_PAGE_SIZE = 20;
 const adminTicketTotal = ref(0); const adminTicketCursor = ref<number|string|null>(null); const adminTicketHasMore = ref(false); const adminTicketLoading = ref(false); let adminTicketToken = 0;
 const assignableAdmins = ref<UserRecord[]>([]);
 const adminConfigSnapshot = ref('');
 const viewLoading = ref(false); const viewError = ref('');
-const feedMode = ref<'all'|'following'|'mine'|'author'>('all'); const authorFilterUserId = ref(0); const moderationTab = ref('knowledge'); const governanceTab = ref('comments');
+const feedMode = ref<'all'|'following'|'mine'|'author'>('all'); const authorFilterUserId = ref(0); const governanceTab = ref('comments');
 const governanceKeyword = ref('');
 const profileToolTab = ref('activity');
 const onboardingVisible = ref(false);
@@ -585,17 +586,20 @@ const filteredAiSessions = computed(() => {const keyword=aiHistoryKeyword.value.
 const governanceResultCount = computed(() => ({ messages:governanceChats.value.total, comments:governanceComments.value.total, drafts:governanceDrafts.value.total, sessions:governanceAiSessions.value.total, chunks:governanceChunks.value.total }[governanceTab.value] || 0));
 
 
-type ModerationList<T> = { items:T[]; cursor:number|string|null; hasMore:boolean; total:number; loading:boolean };
-const emptyModerationList = <T,>():ModerationList<T> => ({items:[],cursor:null,hasMore:false,total:0,loading:false});
-const MODERATION_PAGE_SIZE = 20;
-const moderationKnowledge = ref<ModerationList<KnowledgeFile>>(emptyModerationList());
-const moderationPendingPosts = ref<ModerationList<Post>>(emptyModerationList());
-const moderationManagedPosts = ref<ModerationList<Post>>(emptyModerationList());
-const moderationKnowledgeReports = ref<ModerationList<Report>>(emptyModerationList());
-const moderationUserReports = ref<ModerationList<Report>>(emptyModerationList());
-const moderationProfileChanges = ref<ModerationList<ProfileChange>>(emptyModerationList());
 const auditingProfileChangeId = ref(0);
-const moderationTokens: Record<string, number> = {};
+// 内容审核 keeps its lists, filters and loaders in a composable; the page keeps the dialogs that act on a row
+// and the overview these counts feed.
+const loadModerationList = createListLoader(<T,>(url:string)=>getData<ModerationPage<T>>(url));
+const moderation = useModeration<KnowledgeFile,Post,Report,ProfileChange>({
+  loadList: loadModerationList,
+  fetchOverview: (url:string)=>getData<Record<string,unknown>>(url),
+  onOverview: (sections:OverviewSections)=>{adminOverview.value={...adminOverview.value,...sections};},
+  onError: (error:unknown)=>notifyError(error),
+  isActive: ()=>portal.value==='admin'&&activeView.value==='moderation',
+});
+const { moderationTab, adminModerationKeyword, adminModerationStatus, moderationKnowledge, moderationPendingPosts,
+  moderationManagedPosts, moderationKnowledgeReports, moderationUserReports, moderationProfileChanges,
+  moderationStatusOptions, moderationResultCount, loadModerationTab, loadMoreModeration, loadModeration } = moderation;
 const governanceChats = ref<ModerationList<ChatSession>>(emptyModerationList());
 const governanceComments = ref<ModerationList<Comment>>(emptyModerationList());
 const governanceDrafts = ref<ModerationList<Draft>>(emptyModerationList());
@@ -605,8 +609,6 @@ const governanceChunks = ref<ModerationList<AiChunk>>(emptyModerationList());
 
 
 
-const moderationStatusOptions = computed(()=>['reports','users'].includes(moderationTab.value)?[{label:'待处理',value:'PENDING'},{label:'处理中',value:'PROCESSING'},{label:'已结案',value:'RESOLVED'}]:moderationTab.value==='post-management'?[{label:'已发布',value:'PUBLISHED'},{label:'已隐藏',value:'HIDDEN'}]:['posts'].includes(moderationTab.value)?[{label:'待审核',value:'PENDING'}]:moderationTab.value==='profiles'?[{label:'待审核',value:'PENDING'},{label:'已通过',value:'APPROVED'},{label:'已驳回',value:'REJECTED'}]:[{label:'待审核',value:'PENDING'},{label:'已通过',value:'APPROVED'},{label:'已驳回',value:'REJECTED'},{label:'已下架',value:'HIDDEN'}]);
-const moderationResultCount = computed(()=>({knowledge:moderationKnowledge.value.total,reports:moderationKnowledgeReports.value.total,users:moderationUserReports.value.total,posts:moderationPendingPosts.value.total,profiles:moderationProfileChanges.value.total,'post-management':moderationManagedPosts.value.total}[moderationTab.value]||0));
 
 const moderationOpenCount = computed(()=>metricValue('knowledgeAdmin','pendingAudit')+metricValue('forumAdmin','pendingAudit')+metricValue('userAdmin','pendingAudits')+metricValue('knowledgeAdmin','openReports')+metricValue('userAdmin','openReports'));
 const ticketOpenCount = computed(()=>metricValue('feedbackAdmin','pendingTickets')+metricValue('feedbackAdmin','processingTickets'));
@@ -1444,57 +1446,6 @@ async function loadFeedback(){tickets.value=await getData(`/feedback/tickets?use
 async function createTicket(){if(!feedbackForm.value.content.trim())return;await postData('/feedback/ticket',feedbackForm.value);feedbackDialog.value=false;feedbackForm.value.content='';await loadFeedback();ElMessage.success('反馈已提交');}
 
 async function loadAdminDashboard(){const [userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin,checks]=await Promise.all([getData<Record<string,unknown>>('/user/admin/overview'),getData<Record<string,unknown>>('/knowledge/admin/overview'),getData<Record<string,unknown>>('/post/admin/overview'),getData<Record<string,unknown>>('/message/admin/overview?userId=1'),getData<Record<string,unknown>>('/feedback/admin/overview'),Promise.allSettled(['/user/health','/knowledge/health','/post/health','/message/health','/ai/health'].map(url=>getData(url)))]);adminOverview.value={userAdmin,knowledgeAdmin,forumAdmin,messageAdmin,feedbackAdmin};systemHealth.value={user:checks[0].status==='fulfilled',knowledge:checks[1].status==='fulfilled',community:checks[2].status==='fulfilled',message:checks[3].status==='fulfilled',ai:checks[4].status==='fulfilled'};}
-function moderationPageUrl(tab:string,cursor:number|string|null){
-  const params=new URLSearchParams({limit:String(MODERATION_PAGE_SIZE)});
-  if(cursor)params.set('cursor',String(cursor));
-  const keyword=adminModerationKeyword.value.trim();
-  if(keyword)params.set('keyword',keyword);
-  if(tab==='knowledge'||tab==='reports'||tab==='users'){
-    if(adminModerationStatus.value)params.set('status',adminModerationStatus.value);
-    const base=({knowledge:'/knowledge/admin/files/page',reports:'/knowledge/admin/reports/page',users:'/user/admin/reports/page'} as Record<string,string>)[tab];
-    return `${base}?${params.toString()}`;
-  }
-  if(tab==='profiles'){
-    params.set('status',adminModerationStatus.value||'PENDING');
-    return `/user/admin/profile-changes/page?${params.toString()}`;
-  }
-  params.set('status',tab==='posts'?'PENDING':adminModerationStatus.value||'PUBLISHED,HIDDEN');
-  return `/post/admin/posts/page?${params.toString()}`;
-}
-async function loadModerationList<T extends {id:number}>(tab:string,list:{value:ModerationList<T>},reset:boolean,url:(cursor:number|string|null)=>string=cursor=>moderationPageUrl(tab,cursor)){
-  const token=(moderationTokens[tab]||0)+1;moderationTokens[tab]=token;
-  list.value={...list.value,loading:true};
-  try{
-    const page=await getData<AdminPage<T>>(url(reset?null:list.value.cursor));
-    if(token!==moderationTokens[tab])return;
-    const known=new Set(reset?[]:list.value.items.map(item=>item.id));
-    list.value={items:reset?page.items:[...list.value.items,...page.items.filter(item=>!known.has(item.id))],cursor:page.nextCursor,hasMore:page.hasMore,total:page.total??list.value.total,loading:false};
-  } finally { if(token===moderationTokens[tab]&&list.value.loading)list.value={...list.value,loading:false}; }
-}
-// Only the open tab is fetched; the report tabs keep filtering their short lists in the browser.
-async function loadModerationTab(tab=moderationTab.value,reset=true){
-  if(tab==='knowledge')await loadModerationList(tab,moderationKnowledge,reset);
-  else if(tab==='posts')await loadModerationList(tab,moderationPendingPosts,reset);
-  else if(tab==='profiles')await loadModerationList(tab,moderationProfileChanges,reset);
-  else if(tab==='post-management')await loadModerationList(tab,moderationManagedPosts,reset);
-  else if(tab==='reports')await loadModerationList(tab,moderationKnowledgeReports,reset);
-  else if(tab==='users')await loadModerationList(tab,moderationUserReports,reset);
-}
-async function loadMoreModeration(){ await loadModerationTab(moderationTab.value,false); }
-async function loadModeration(){
-  const [knowledgeAdmin,forumAdmin,userAdmin]=await Promise.all([
-    getData<Record<string,unknown>>('/knowledge/admin/overview'),
-    getData<Record<string,unknown>>('/post/admin/overview'),
-    getData<Record<string,unknown>>('/user/admin/overview'),
-    loadModerationTab(moderationTab.value,true)]);
-  adminOverview.value={...adminOverview.value,knowledgeAdmin,forumAdmin,userAdmin};
-}
-let moderationFilterTimer:ReturnType<typeof setTimeout>|undefined;
-watch([moderationTab,adminModerationKeyword,adminModerationStatus],([tab],[previousTab])=>{
-  if(portal.value!=='admin'||activeView.value!=='moderation')return;
-  clearTimeout(moderationFilterTimer);
-  moderationFilterTimer=setTimeout(()=>void loadModerationTab(moderationTab.value,true).catch(notifyError),tab!==previousTab?0:250);
-});
 async function openAdminKnowledgeUpload(){knowledgeCategories.value=await getData<KnowledgeCategory[]>('/knowledge/categories');knowledgeDialog.value=true;}
 async function openKnowledgeMetadata(file:KnowledgeFile){knowledgeCategories.value=await getData<KnowledgeCategory[]>('/knowledge/categories');knowledgeMetadataForm.value={fileId:file.id,title:file.title,categoryId:file.categoryId||null,auditStatus:file.auditStatus};knowledgeMetadataDialog.value=true;}
 async function saveKnowledgeMetadata(){const updated=await putData<KnowledgeFile>('/knowledge/admin/file',knowledgeMetadataForm.value);knowledgeCache.invalidate(updated.id);knowledgeMetadataDialog.value=false;await syncKnowledgeIndex(updated);await loadModeration();ElMessage.success('知识资源已更新');}
@@ -1733,7 +1684,6 @@ async function rebuildAiIndex(){
 function handleGlobalKeydown(event:KeyboardEvent){if(event.key==='Escape')mobileMenuOpen.value=false;}
 function handleBeforeUnload(event:BeforeUnloadEvent){if(!aiConfigDirty.value)return;event.preventDefault();event.returnValue='';}
 watch(mobileMenuOpen,open=>document.body.classList.toggle('mobile-menu-active',open));
-watch(moderationTab,()=>adminModerationStatus.value='');
 onMounted(async()=>{onSessionExpired(()=>{if(!authenticated.value)return;endLocalSession();ElMessage.warning('登录已失效，请重新登录');});syncUserForms();window.addEventListener('popstate',handlePopState);window.addEventListener('keydown',handleGlobalKeydown);window.addEventListener('beforeunload',handleBeforeUnload);document.addEventListener('visibilitychange',handleVisibilityChange);await loadPublicConfig();if(authenticated.value)await restoreSession();else await loadCaptcha();});
 onBeforeUnmount(()=>{window.removeEventListener('popstate',handlePopState);window.removeEventListener('keydown',handleGlobalKeydown);window.removeEventListener('beforeunload',handleBeforeUnload);document.removeEventListener('visibilitychange',handleVisibilityChange);stopMessagePolling();feedObserver?.disconnect();knowledgeObserver?.disconnect();document.body.classList.remove('mobile-menu-active');if(captchaCooldownTimer)clearInterval(captchaCooldownTimer);if(captchaExpiryTimer)clearTimeout(captchaExpiryTimer);pdfPreviewUrl.value='';detailPdfPreviewUrl.value='';});
 </script>

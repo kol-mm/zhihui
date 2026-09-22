@@ -72,4 +72,26 @@ test.describe('the review queue', () => {
       await removeKnowledge(SUPER_ADMIN, fileId);
     }
   });
+
+  /**
+   * The six queues share one loader, and each reads a different endpoint. Opening them in turn checks that
+   * every tab fetches and renders; which statuses each one may ask for is covered by the composable's tests.
+   */
+  test('every queue loads through the shared loader', async ({ page }) => {
+    await signIn(page, SUPER_ADMIN);
+    await page.goto('/');
+    await openAdminSection(page, '内容审核');
+
+    const tabs = ['知识资源', '知识举报', '用户举报', '资料审核', '待审帖子', '帖子管理'];
+    for (const name of tabs) {
+      await page.getByRole('tab', { name: new RegExp('^' + name) }).click();
+
+      // The counter is written from the open tab's own list, so it only appears once that list has answered.
+      await expect(page.locator('.admin-filter-bar')).toContainText('找到');
+      // Rows or an empty state, but never a failed page. Element Plus keeps the closed tabs in the page, so
+      // this has to look inside the open one.
+      await expect(page.locator('.el-tab-pane:visible').locator('.admin-desktop-table, .el-empty').first())
+        .toBeVisible();
+    }
+  });
 });
