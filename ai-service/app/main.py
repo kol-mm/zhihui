@@ -198,8 +198,40 @@ def init_db() -> None:
     _initialized_databases.add(path)
 
 
+DEVELOPMENT_JWT_SECRET = "local-dev-secret-change-before-production"
+DEVELOPMENT_INTERNAL_TOKEN = "ai-knowledge-local-internal"
+
+
+def deployment_secret_problem(jwt_secret: str | None, internal_token: str | None,
+                              allow_defaults: bool) -> str | None:
+    """
+    Why this deployment must not serve traffic, or None when it may.
+
+    Both secrets have a development default so that a checkout runs without configuration. Anywhere else that
+    is a hole: the signing key is published here, so anyone could mint an administrator session for a service
+    that trusts it. Compose supplies real values; this catches the runs that bypass it. Set
+    AI_ALLOW_DEFAULT_SECRETS when the defaults are what you actually want, as the local run script does.
+    """
+    if allow_defaults:
+        return None
+    if not jwt_secret or not jwt_secret.strip() or jwt_secret.strip() == DEVELOPMENT_JWT_SECRET:
+        return ("AI_KNOWLEDGE_JWT_SECRET is missing or still the development value, which is published in this "
+                "repository. Set it to a secret of your own, or set AI_ALLOW_DEFAULT_SECRETS for local work.")
+    if internal_token and internal_token.strip() == DEVELOPMENT_INTERNAL_TOKEN:
+        return ("PLATFORM_INTERNAL_USER_TOKEN is still the development value, which is published in this "
+                "repository. Set it to a secret of your own, or set AI_ALLOW_DEFAULT_SECRETS for local work.")
+    return None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    problem = deployment_secret_problem(
+        os.getenv("AI_KNOWLEDGE_JWT_SECRET"),
+        os.getenv("PLATFORM_INTERNAL_USER_TOKEN"),
+        os.getenv("AI_ALLOW_DEFAULT_SECRETS", "").strip().lower() in {"1", "true", "yes", "on"},
+    )
+    if problem:
+        raise RuntimeError(problem)
     init_db()
     yield
 

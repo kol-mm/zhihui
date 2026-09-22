@@ -12,6 +12,11 @@ if ([string]::IsNullOrWhiteSpace([string]$env:AI_KNOWLEDGE_JWT_SECRET)) {
     }
 }
 
+# 本地开发没有配置密钥时沿用仓库内的默认值；服务在其他情况下会拒绝启动。
+if ([string]::IsNullOrWhiteSpace([string]$env:AI_KNOWLEDGE_JWT_SECRET)) {
+    $env:AI_ALLOW_DEFAULT_SECRETS = "true"
+}
+
 function Assert-NativeSuccess {
     param([string]$Step)
     if ($LASTEXITCODE -ne 0) { throw "$Step failed with exit code $LASTEXITCODE." }

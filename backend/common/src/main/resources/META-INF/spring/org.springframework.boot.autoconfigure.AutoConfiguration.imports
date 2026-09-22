@@ -1,2 +1,3 @@
 com.aiknowledge.common.StoredTimeJsonModule$Registration
 com.aiknowledge.common.AdminAuditAutoConfiguration
+com.aiknowledge.common.DeploymentSecrets
