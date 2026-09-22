@@ -148,83 +148,9 @@
         <div v-else-if="viewLoading" class="view-loading" role="status"><el-icon class="is-loading"><Loading /></el-icon><span>正在加载当前页面...</span></div>
         <div v-else-if="viewError" class="view-error"><el-icon><Warning /></el-icon><span>{{ viewError }}</span><el-button size="small" type="primary" @click="refreshCurrentView">重试</el-button></div>
         <template v-else-if="portal === 'client'">
-          <section v-if="activeView === 'home'" class="page-stack">
-            <el-alert v-if="platformConfig.platform_notice" :title="platformConfig.platform_notice" type="info" :closable="false" show-icon />
-            <div class="welcome-row">
-              <div><p class="section-kicker">今日概览</p><h3>{{ greeting }}，{{ displayName }}</h3><p>继续探索知识、社区动态和你的 AI 对话。</p></div>
-              <el-button v-if="platformConfig.knowledge_upload_enabled" type="primary" :icon="Upload" @click="knowledgeDialog = true">上传知识</el-button>
-            </div>
-            <div class="metrics-grid">
-              <div class="metric-tile"><span class="metric-icon green"><Files /></span><div><strong>{{ knowledgeTotal }}</strong><span>知识资源</span></div></div>
-              <div class="metric-tile"><span class="metric-icon blue"><ChatDotRound /></span><div><strong>{{ communityPostCount }}</strong><span>社区动态</span></div></div>
-              <div class="metric-tile"><span class="metric-icon amber"><Bell /></span><div><strong>{{ notificationUnread }}</strong><span>未读通知</span></div></div>
-              <div class="metric-tile"><span class="metric-icon red"><Tickets /></span><div><strong>{{ tickets.length }}</strong><span>反馈工单</span></div></div>
-            </div>
-            <div class="two-column">
-              <section class="surface">
-                <div class="surface-head"><div><h3>最新知识</h3><p>最近收录和更新的资源</p></div><el-button text type="primary" @click="selectView('knowledge')">查看全部</el-button></div>
-                <div v-if="knowledgeFiles.length" class="resource-list compact">
-                  <button v-for="file in knowledgeFiles.slice(0, 4)" :key="file.id" @click="openKnowledge(file)">
-                    <span class="file-type">{{ file.fileType?.toUpperCase() || 'DOC' }}</span>
-                    <span><strong>{{ file.title }}</strong><small>浏览 {{ file.views || 0 }} · 下载 {{ file.downloads || 0 }}</small></span>
-                    <ArrowRight />
-                  </button>
-                </div><el-empty v-else description="暂无知识资源" />
-              </section>
-              <section class="surface">
-                <div class="surface-head"><div><h3>关注动态</h3><p>查看已关注作者的最新内容</p></div><el-button text type="primary" @click="selectView('square')">进入广场</el-button></div>
-                <div v-if="feedPosts.length" class="feed-mini">
-                  <article v-for="post in feedPosts.slice(0, 3)" :key="post.id" class="feed-mini-link" @click="openPostDetail(post)"><div class="mini-avatar">{{ communityUser(post.userId).nickname.slice(0, 1) }}</div><div><strong>{{ post.title }}</strong><p>{{ post.content }}</p><small>{{ communityUser(post.userId).nickname }} · {{ post.likes || 0 }} 赞</small></div></article>
-                </div><el-empty v-else description="暂无社区动态" />
-              </section>
-            </div>
-          </section>
-
-          <section v-else-if="activeView === 'knowledge'" class="page-stack">
-            <div class="page-toolbar"><div><h3>知识库</h3><p>检索、阅读并管理社区知识资源</p></div><el-button v-if="platformConfig.knowledge_upload_enabled" type="primary" :icon="Upload" @click="knowledgeDialog = true">上传资料</el-button></div>
-            <section class="surface filter-bar"><el-input v-model="knowledgeKeyword" placeholder="输入标题或正文关键词" :prefix-icon="Search" clearable @keyup.enter="searchKnowledge" /><el-select v-model="knowledgeType" placeholder="全部格式" clearable><el-option label="Word" value="docx" /><el-option label="PDF" value="pdf" /><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select><el-button :icon="Search" @click="searchKnowledge">搜索</el-button></section>
-            <section class="surface">
-              <div class="category-filter">
-                <el-radio-group v-model="knowledgeCategoryId" size="small">
-                  <el-radio-button :value="0">全部 {{ knowledgeSearchMode ? knowledgeFiles.length : knowledgeTotal }}</el-radio-button>
-                  <el-radio-button v-for="category in knowledgeCategories" :key="category.id" :value="category.id">
-                    {{ category.name }} {{ categoryCount(category.id) }}
-                  </el-radio-button>
-                </el-radio-group>
-              </div>
-              <div v-if="filteredKnowledge.length" class="knowledge-grid">
-                <article v-for="file in filteredKnowledge" :key="file.id" class="knowledge-card">
-                  <el-tag v-if="file.collected" class="knowledge-collected-badge" type="success" effect="plain">已收藏</el-tag>
-                  <img v-if="file.coverUrl" class="knowledge-cover" loading="lazy" decoding="async" :src="resolveApiUrl(file.coverUrl)" :alt="`${file.title}封面`" />
-                  <div class="knowledge-card-top"><span class="file-type large">{{ file.fileType?.toUpperCase() || '文档' }}</span><el-tag :type="file.auditStatus === 'APPROVED' ? 'success' : 'warning'" effect="plain">{{ auditLabel(file.auditStatus) }}</el-tag></div>
-                  <h4>{{ file.title }}</h4><p>{{ communityUser(file.userId).nickname }} · @{{ communityUser(file.userId).username }}</p>
-                  <div class="card-stats"><span><View />{{ file.views || 0 }}</span><span><Download />{{ file.downloads || 0 }}</span><span><Star />{{ file.likes || 0 }}</span></div>
-                  <div class="card-actions"><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button><el-button v-if="file.userId !== currentUserId" text :type="isFollowing(file.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(file.userId)">{{ isFollowing(file.userId) ? '取消关注' : '关注作者' }}</el-button><el-button v-if="file.fileUrl" text @click="downloadKnowledge(file)">下载</el-button><el-dropdown trigger="click"><el-button text :icon="MoreFilled" /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="likeKnowledge(file)">{{ file.liked ? '取消点赞' : '点赞' }}</el-dropdown-item><el-dropdown-item @click="collectKnowledge(file)">{{ file.collected ? '取消收藏' : '收藏' }}</el-dropdown-item><el-dropdown-item @click="forwardKnowledge(file)">转发</el-dropdown-item><el-dropdown-item v-if="file.userId === currentUserId" divided @click="deleteKnowledge(file)">删除资源</el-dropdown-item><el-dropdown-item v-else divided @click="reportKnowledge(file)">举报</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
-                </article>
-              </div>              <div v-if="!knowledgeSearchMode && (knowledgeHasMore || knowledgeLoadingMore || knowledgeLoadError)" ref="knowledgeSentinelRef" class="knowledge-load-more"><el-button :loading="knowledgeLoadingMore" @click="loadMoreKnowledge">{{ knowledgeLoadingMore ? '正在加载资源' : knowledgeLoadError ? `${knowledgeLoadError}，点击重试` : '加载更多资源' }}</el-button></div>
-              <el-empty v-if="!filteredKnowledge.length" description="没有匹配的知识资源" />
-            </section>
-            <section v-if="platformConfig.user_ranking_enabled" class="surface"><div class="surface-head"><div><h3>知识贡献榜</h3><p>综合上传量、浏览量、下载量和违规频次排序</p></div><el-tag type="info">前 {{ knowledgeRanking.length }} 名</el-tag></div><div class="ranking-list"><article v-for="item in knowledgeRanking" :key="item.userId"><strong>{{ item.rank }}</strong><div class="mini-avatar">{{ communityUser(item.userId).nickname.slice(0,1) }}</div><span><b>{{ communityUser(item.userId).nickname }}</b><small>上传 {{ item.uploads }} · 浏览 {{ item.views }} · 下载 {{ item.downloads }} · 违规 {{ item.violations }}</small></span><em>{{ item.score }} 分</em></article></div><el-empty v-if="!knowledgeRanking.length" description="暂无榜单数据" /></section>
-          </section>
-
-          <section v-else-if="activeView === 'forum' || activeView === 'square'" class="page-stack community-page">
-            <div class="page-toolbar"><div><h3>{{ activeView === 'forum' ? '社区论坛' : '关注广场' }}</h3><p>{{ activeView === 'forum' ? '浏览全站已审核帖子并参与讨论' : '查看已关注用户的最新动态' }}</p></div><el-button type="primary" :icon="EditPen" @click="postDialog = true">发布帖子</el-button></div>
-            <div class="feed-layout">
-              <section class="feed-column">
-                <div class="feed-tabs"><button v-if="activeView === 'forum'" :class="{ active: feedMode === 'all' }" @click="loadFeed('all')">全部帖子</button><button v-if="activeView === 'square'" :class="{ active: feedMode === 'following' }" @click="loadFeed('following')">关注动态</button><button :class="{ active: feedMode === 'mine' }" @click="loadMyPosts">我的帖子</button><button v-if="feedMode === 'author'" class="active" @click="loadFeed(activeView === 'square' ? 'following' : 'all')">{{ communityUser(authorFilterUserId).nickname }} 的帖子</button></div>
-                <article v-for="post in feedPosts" :key="post.id" class="post-card">
-                  <div class="post-author"><button class="post-author-link" @click="loadAuthorPosts(post.userId)"><div class="user-avatar"><img v-if="communityUser(post.userId).avatarUrl" loading="lazy" decoding="async" :src="resolveApiUrl(communityUser(post.userId).avatarUrl || '')" alt="头像" /><span v-else>{{ communityUser(post.userId).nickname.slice(0, 1).toUpperCase() }}</span></div><div><strong>{{ communityUser(post.userId).nickname }}</strong><span>@{{ communityUser(post.userId).username }} · 帖子 #{{ post.id }}</span></div></button><el-tag v-if="post.status !== 'PUBLISHED'" type="warning">{{ postStatusLabel(post.status) }}</el-tag></div>
-                  <button class="post-title-button" @click="openPostDetail(post)"><h3>{{ post.title }}</h3></button><p>{{ post.content }}</p>
-                  <div v-if="post.imageUrls?.length" class="post-images"><img v-for="image in post.imageUrls" :key="image" loading="lazy" decoding="async" :src="resolveApiUrl(image)" alt="帖子配图" /></div>
-                  <div class="post-actions"><el-button text :icon="View" @click="openPostDetail(post)">查看详情</el-button><el-button v-if="post.userId !== currentUserId" text :type="isFollowing(post.userId) ? 'success' : 'default'" @click="toggleFollowAuthor(post.userId)">{{ isFollowing(post.userId) ? '取消关注' : '关注作者' }}</el-button><el-button text :type="post.liked ? 'primary' : 'default'" :icon="Star" @click="likePost(post)">{{ post.liked ? '取消点赞' : '点赞' }} {{ post.likes || 0 }}</el-button><el-button v-if="platformConfig.comments_enabled" text :icon="ChatDotRound" @click="quickComment(post)">快捷评论</el-button><el-button text :type="post.collected ? 'primary' : 'default'" :icon="CollectionTag" @click="collectPost(post)">{{ post.collected ? '取消收藏' : '收藏' }}</el-button><el-button v-if="post.userId === currentUserId" text :icon="Edit" @click="editPost(post)">编辑</el-button><el-button v-if="post.userId === currentUserId" text type="danger" :icon="Delete" @click="deletePost(post)">删除</el-button></div>
-                </article>
-                <div v-if="feedPosts.length && (feedHasMore || feedLoadingMore || feedLoadError)" ref="feedSentinelRef" class="feed-load-more"><el-button :loading="feedLoadingMore" @click="loadMoreFeed">{{ feedLoadingMore ? '正在加载帖子' : feedLoadError ? `${feedLoadError}，点击重试` : '加载更多帖子' }}</el-button></div>
-                <el-empty v-if="!feedPosts.length" :description="activeView === 'square' ? '暂时没有关注动态' : '还没有已发布的帖子'" />
-              </section>
-              <aside class="surface community-side"><h3>我的创作</h3><button @click="openDrafts"><Document />草稿箱<span>{{ drafts.length }}</span></button><button :class="{ active: feedMode === 'mine' }" @click="loadMyPosts"><EditPen />我的帖子<ArrowRight /></button><h3>社区提示</h3><p>尊重原创，理性交流。发现不当内容可通过举报交由管理员处理。</p></aside>
-            </div>
-          </section>
-
+         <WorkbenchView v-if="activeView === 'home'" :page="workbenchViewPage" />
+         <KnowledgeLibraryView v-else-if="activeView === 'knowledge'" :page="knowledgeLibraryViewPage" />
+         <CommunityFeedView v-else-if="activeView === 'forum' || activeView === 'square'" :page="communityFeedViewPage" />
          <MessagesView v-else-if="activeView === 'messages'" :page="messagesViewPage" />
          <AiChatView v-else-if="activeView === 'ai'" :page="aiChatViewPage" />
           <section v-else class="page-stack">
@@ -340,6 +266,9 @@ import AdminAnalyticsView from './components/AdminAnalyticsView.vue';
 import AdminTicketsView from './components/AdminTicketsView.vue';
 import AiChatView from './components/AiChatView.vue';
 import MessagesView from './components/MessagesView.vue';
+import CommunityFeedView from './components/CommunityFeedView.vue';
+import KnowledgeLibraryView from './components/KnowledgeLibraryView.vue';
+import WorkbenchView from './components/WorkbenchView.vue';
 import AdminModerationView from './components/AdminModerationView.vue';
 import AdminSettingsView from './components/AdminSettingsView.vue';
 import AdminUsersView from './components/AdminUsersView.vue';
@@ -524,11 +453,7 @@ const mobileNavigation = computed(() => {
 });
 const notificationsDialogTitle = computed(() => notificationUnread.value ? `通知中心（${notificationUnread.value} 条未读）` : '通知中心');
 const currentTitle = computed(() => detailKnowledge.value?.title || detailPost.value?.title || currentNavigation.value.find(item => item.key === activeView.value)?.label || '工作台');
-const greeting = computed(() => { const hour = new Date().getHours(); return hour < 12 ? '上午好' : hour < 18 ? '下午好' : '晚上好'; });
 // Paged results are already filtered by the server; full-text search results keep the client-side filters.
-const filteredKnowledge = computed(() => knowledgeSearchMode.value
-  ? knowledgeFiles.value.filter(file => (!knowledgeType.value || file.fileType === knowledgeType.value) && (!knowledgeCategoryId.value || file.categoryId === knowledgeCategoryId.value))
-  : knowledgeFiles.value);
 
 
 const currentMessageSession = computed(() => sessions.value.find(session => session.id === messageForm.value.sessionId));
@@ -602,7 +527,6 @@ function knowledgeTableRows(text?:string){return(text||'').split('\n').filter(Bo
 const usersRefreshKey = ref(0);
 function applyUserOverview(overview:Record<string,unknown>){adminOverview.value={...adminOverview.value,userAdmin:overview};}
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
-function categoryCount(categoryId:number){ return knowledgeSearchMode.value ? knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length : (knowledgeCategoryCounts.value[categoryId] || 0); }
 function ticketStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已解决'} as Record<string,string>)[status] || status; }
 function ticketTypeLabel(type:string){ return ({BUG:'系统问题',SUGGESTION:'产品建议',SUPPORT:'客服咨询'} as Record<string,string>)[type] || type; }
 function notificationTypeLabel(type?:string){ return ({SYSTEM:'系统通知',MESSAGE:'私信通知',COMMENT:'评论通知',REPLY:'回复通知',FEEDBACK:'反馈通知'} as Record<string,string>)[type || 'SYSTEM'] || '系统通知'; }
@@ -979,7 +903,6 @@ async function retryReader(){const file=selectedKnowledge.value;if(!file)return;
 function reviewPost(post:Post){selectedReviewPost.value=post;postReviewDialog.value=true;}
 async function downloadKnowledge(file:KnowledgeFile){try{const blob=await downloadData(`/knowledge/file/${file.id}`);const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=`${file.title}.${file.fileType||'bin'}`;anchor.click();URL.revokeObjectURL(url);await recordBehavior('DOWNLOAD','KNOWLEDGE',file.id);await loadKnowledge();}catch(error){notifyError(error);}}
 async function downloadDetailKnowledge(file:KnowledgeFile){await downloadKnowledge(file);if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,downloads:(detailKnowledge.value.downloads||0)+1};}
-async function likeKnowledge(file:KnowledgeFile){const result=await postData<KnowledgeLikeResult>('/knowledge/like',{fileId:file.id});file.likes=result.likes;file.liked=result.liked;knowledgeCache.invalidate(file.id);if(result.liked){await recordBehavior('LIKE','KNOWLEDGE',file.id);ElMessage.success('已点赞');}else{if(knowledgeActivityType.value==='LIKED')myKnowledge.value=myKnowledge.value.filter(item=>item.id!==file.id);ElMessage.success('已取消点赞');}}
 async function likeDetailKnowledge(file:KnowledgeFile){const result=await postData<KnowledgeLikeResult>('/knowledge/like',{fileId:file.id});if(detailKnowledge.value?.id===file.id)detailKnowledge.value={...detailKnowledge.value,likes:result.likes,liked:result.liked};if(result.liked){await recordBehavior('LIKE','KNOWLEDGE',file.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function collectKnowledge(file:KnowledgeFile){ const result=await postData<KnowledgeCollectResult>('/knowledge/collect',{fileId:file.id}); file.collected=result.collected; knowledgeCache.invalidate(file.id); if(detailKnowledge.value?.id===file.id) detailKnowledge.value={...detailKnowledge.value,collected:result.collected}; if(knowledgeActivityType.value==='COLLECTED'&&!result.collected) myKnowledge.value=myKnowledge.value.filter(item=>item.id!==file.id); if(result.collected){await recordBehavior('COLLECT','KNOWLEDGE',file.id);ElMessage.success('已收藏知识');}else ElMessage.success('已取消收藏'); }
 async function forwardKnowledge(file:KnowledgeFile){await postData('/knowledge/forward',{fileId:file.id});await recordBehavior('FORWARD','KNOWLEDGE',file.id);ElMessage.success('已记录转发');await loadMyKnowledge();}
@@ -1073,7 +996,6 @@ async function loadMoreMyKnowledge(){
   finally{myKnowledgeLoading.value=false;}
 }
 async function loadCollectedPosts(){collectedPosts.value=await getData<Post[]>('/square/collections');await loadUserSummaries(collectedPosts.value.map(post=>post.userId));}
-async function openDrafts(){activeView.value='profile';profileToolTab.value='drafts';await loadProfile();}
 async function loadMyPosts(){feedMode.value='mine';await loadFeedFirstPage('mine');}
 function resetPostEditor(){editingPostId.value=0;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:'',content:''};selectedPostImages.value=[];postImageFiles.value=[];}
 function existingImageFiles(imageUrls?:string[]):UploadUserFile[]{return(imageUrls||[]).map((url,index)=>({name:`图片 ${index+1}`,url,status:'success'}));}
@@ -1082,12 +1004,10 @@ function editDraft(draft:Draft){editingDraftId.value=draft.id;editingPostId.valu
 async function publishDraft(draft:Draft){await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});await postData('/post/draft/publish',{id:draft.id});await loadDrafts();ElMessage.success('帖子已提交审核');}
 async function deleteDraft(draft:Draft){await ElMessageBox.confirm(`确认删除草稿“${draft.title}”？`,'删除草稿',{type:'warning'});await deleteData('/post/draft',{draftId:draft.id});await loadDrafts();ElMessage.success('草稿已删除');}
 function openPostDetail(post:Post){navigateToDetail('community',post.id);}
-async function likePost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});post.likes=result.likes;post.liked=result.liked;if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function likeDetailPost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:result.likes,liked:result.liked};if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function collectPost(post:Post){const result=await postData<PostCollectResult>('/square/collect',{postId:post.id});post.collected=result.collected;if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,collected:result.collected};if(result.collected){await recordBehavior('COLLECT','POST',post.id);ElMessage.success('已收藏帖子');}else{collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);ElMessage.success('已取消收藏');}}
 async function removeCollectedPost(post:Post){if(post.collected)await collectPost(post);}
 async function deletePost(post:Post){await ElMessageBox.confirm(`删除帖子“${post.title}”后评论和互动记录都无法恢复，确认继续？`,'删除帖子',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/post',{postId:post.id});feedPosts.value=feedPosts.value.filter(item=>item.id!==post.id);collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);if(detailPost.value?.id===post.id)leaveDetail();ElMessage.success('帖子已删除');}
-async function quickComment(post:Post){const {value}=await ElMessageBox.prompt('输入公开评论内容','快捷评论',{inputPattern:/\S+/,inputErrorMessage:'评论不能为空',confirmButtonText:'发布'});if(value.length>platformConfig.value.max_comment_length){ElMessage.warning(`评论不能超过 ${platformConfig.value.max_comment_length} 个字符`);return;}await postData('/square/quick-comment',{postId:post.id,content:value});await recordBehavior('COMMENT','POST',post.id);ElMessage.success('评论已发布');}
 async function createDetailComment(payload:{content:string;parentId:number}){
   if(!detailPost.value)return;
   const postId=detailPost.value.id;
@@ -1574,5 +1494,11 @@ const ticketsPage = { adminTicketHasMore, adminTicketKeyword, adminTicketLoading
 const aiChatViewPage = { aiBusy, aiMessages, aiQuestion, aiSessionId, aiSessions, currentUserId, displayName, loadAiHistory, messages, mobileAiHistoryOpen, navigateToDetail, notifyError, role };
 
 const messagesViewPage = { MESSAGE_PAGE_SIZE, communityUser, conversationDialog, conversationTargetId, conversationTargetUser, conversationUsername, currentMessageSession, currentUserId, fetchNewMessages, isMessageListNearBottom, loadMessageData, loadMessages, loadedMessageSessionId, mergeMessages, messageDrafts, messageForm, messageHasOlder, messageHistoryLoading, messageListRef, messagePageUrl, messageRefreshing, messageSending, messageUnseenCount, messages, notifyError, platformConfig, scrollMessagesToBottom, selectMessageSession, sessions, username };
+
+const communityFeedViewPage = { activeView, authorFilterUserId, avatarUrl, collectPost, communityUser, currentUserId, deletePost, drafts, editPost, feedHasMore, feedLoadError, feedLoadingMore, feedMode, feedPosts, feedSentinelRef, isFollowing, loadAuthorPosts, loadFeed, loadMoreFeed, loadMyPosts, loadProfile, openPostDetail, platformConfig, postDialog, profileToolTab, recordBehavior, toggleFollowAuthor, username };
+
+const knowledgeLibraryViewPage = { activeView, collectKnowledge, communityUser, currentUserId, deleteKnowledge, downloadKnowledge, forwardKnowledge, isFollowing, knowledgeActivityType, knowledgeCategories, knowledgeCategoryCounts, knowledgeCategoryId, knowledgeDialog, knowledgeFiles, knowledgeHasMore, knowledgeKeyword, knowledgeLoadError, knowledgeLoadingMore, knowledgeRanking, knowledgeSearchMode, knowledgeSentinelRef, knowledgeTotal, knowledgeType, loadMoreKnowledge, myKnowledge, openKnowledge, platformConfig, recordBehavior, reportKnowledge, searchKnowledge, toggleFollowAuthor, username };
+
+const workbenchViewPage = { activeView, communityPostCount, communityUser, displayName, feedPosts, knowledgeDialog, knowledgeFiles, knowledgeTotal, notificationUnread, openKnowledge, openPostDetail, platformConfig, selectView, tickets };
 
 </script>
