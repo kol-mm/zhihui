@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Ref } from 'vue';
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 
 /**
  * 内容审核: six queues of things waiting for an administrator, and the paging they share.
@@ -70,6 +70,25 @@ export function moderationStatusChoices(tab:string){
   return [{label:'待审核',value:'PENDING'},{label:'已通过',value:'APPROVED'},{label:'已驳回',value:'REJECTED'},{label:'已下架',value:'HIDDEN'}];
 }
 
+/** Everything 内容审核 shows and drives, as the view receives it. */
+export interface ModerationState<K extends Row,P extends Row,R extends Row,C extends Row> {
+  moderationTab:Ref<string>;
+  adminModerationKeyword:Ref<string>;
+  adminModerationStatus:Ref<string>;
+  moderationKnowledge:Ref<ModerationList<K>>;
+  moderationPendingPosts:Ref<ModerationList<P>>;
+  moderationManagedPosts:Ref<ModerationList<P>>;
+  moderationKnowledgeReports:Ref<ModerationList<R>>;
+  moderationUserReports:Ref<ModerationList<R>>;
+  moderationProfileChanges:Ref<ModerationList<C>>;
+  moderationStatusOptions:ComputedRef<{label:string;value:string}[]>;
+  moderationResultCount:ComputedRef<number>;
+  loadModerationTab:(tab?:string,reset?:boolean)=>Promise<void>;
+  loadMoreModeration:()=>Promise<void>;
+  loadModeration:()=>Promise<void>;
+  dispose:()=>void;
+}
+
 export function useModeration<K extends Row,P extends Row,R extends Row,C extends Row>(deps:{
   loadList:<T extends Row>(key:string,list:{value:ModerationList<T>},reset:boolean,url:(cursor:number|string|null)=>string)=>Promise<void>;
   fetchOverview:(url:string)=>Promise<Record<string,unknown>>;
@@ -78,7 +97,7 @@ export function useModeration<K extends Row,P extends Row,R extends Row,C extend
   /** Whether 内容审核 is the screen in front of the reader; the filters do not fetch when it is not. */
   isActive:()=>boolean;
   debounceMs?:number;
-}){
+}):ModerationState<K,P,R,C>{
   const debounceMs = deps.debounceMs ?? 250;
   const moderationTab = ref('knowledge');
   const adminModerationKeyword = ref('');
