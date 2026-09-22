@@ -225,16 +225,8 @@
             </div>
           </section>
 
-          <section v-else-if="activeView === 'messages'" class="message-page" :class="{ 'has-session': messageForm.sessionId }">
-            <section class="surface session-panel"><div class="surface-head"><div><h3>消息中心</h3><p>{{ sessions.length }} 个联系人</p></div><div><el-button :icon="Delete" circle text type="danger" title="清空全部聊天记录" @click="clearAllMessages" /><el-button :icon="Plus" circle title="发起私信" @click="newConversation" /></div></div><div class="session-list"><button v-for="session in sessions" :key="session.id" :class="{ active: messageForm.sessionId === session.id }" @click="openSession(session)"><div class="mini-avatar">{{ sessionPartner(session).nickname.slice(0,1).toUpperCase() }}</div><span><strong>{{ sessionPartner(session).nickname }}</strong><small>{{ session.lastMessage || `@${sessionPartner(session).username}` }}</small></span></button></div><el-empty v-if="!sessions.length" description="暂无私信会话" /></section>
-            <section class="surface conversation-panel"><div class="conversation-head"><el-button class="mobile-conversation-back" :icon="ArrowLeft" circle text title="返回联系人列表" @click="closeMobileConversation" /><div><strong>{{ currentMessagePartner?.nickname || '选择联系人开始私信' }}</strong><span v-if="currentMessagePartner">@{{ currentMessagePartner.username }} · 私密会话</span></div><el-button v-if="messageForm.sessionId" :icon="Refresh" :loading="messageRefreshing" circle text title="获取新消息" @click="refreshMessages" /><el-dropdown v-if="messageForm.sessionId"><el-button :icon="MoreFilled" circle text /><template #dropdown><el-dropdown-menu><el-dropdown-item @click="clearCurrentSession">清空当前会话</el-dropdown-item><el-dropdown-item divided @click="deleteCurrentSession">删除整个会话</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div><div ref="messageListRef" class="message-list" @scroll.passive="handleMessageScroll"><div v-if="messageForm.sessionId && messages.length" class="message-history-state"><el-button v-if="messageHasOlder || messageHistoryLoading" text size="small" :loading="messageHistoryLoading" @click="loadOlderMessages">{{ messageHistoryLoading ? '正在加载更早的消息' : '查看更早的消息' }}</el-button><small v-else>已显示全部消息</small></div><div v-for="message in messages" :key="message.id" :class="['message-bubble', message.senderId === currentUserId ? 'mine' : '']"><p>{{ message.content }}</p><div class="message-meta"><small>{{ formatDate(message.createdAt) }}</small><el-button v-if="message.senderId === currentUserId" :icon="Delete" circle text type="danger" title="删除消息" @click="deleteMessage(message)" /></div></div><el-empty v-if="!messages.length" :description="messageForm.sessionId ? '发送第一条消息，开始对话' : '从左侧选择联系人'" /></div><button v-if="messageUnseenCount" type="button" class="message-new-indicator" @click="jumpToLatestMessages">{{ messageUnseenCount }} 条新消息</button><p v-if="openSessionClosed" class="message-compose-notice" role="status">该会话{{ sessionStatusLabel(openSessionStatus) }}，暂时不能发送消息</p><div class="message-compose"><el-input v-model="messageForm.content" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" resize="none" :maxlength="platformConfig.max_message_length" :disabled="!messageForm.sessionId || messageSending || openSessionClosed" placeholder="输入消息，Ctrl+Enter 发送" @keydown.ctrl.enter.prevent="sendMessage" /><el-button type="primary" :icon="Promotion" :loading="messageSending" :disabled="!messageForm.sessionId || !messageForm.content.trim() || openSessionClosed" @click="sendMessage">发送</el-button></div></section>
-          </section>
-
-          <section v-else-if="activeView === 'ai'" class="ai-page" :class="{ 'history-open': mobileAiHistoryOpen }">
-            <section class="surface ai-chat"><div class="ai-heading"><span class="ai-symbol"><MagicStick /></span><div><h3>知识库 AI</h3><p>回答将优先引用平台已收录的知识片段</p></div><el-button class="mobile-ai-history-toggle" :icon="ChatLineRound" circle text title="查看对话历史" @click="mobileAiHistoryOpen = !mobileAiHistoryOpen" /></div><div class="ai-messages"><div v-if="!aiMessages.length" class="ai-empty"><MagicStick /><h3>今天想了解什么？</h3><p>试试询问平台知识、文档内容或社区使用方式。</p><div><button v-for="prompt in aiPrompts" :key="prompt" @click="aiQuestion = prompt">{{ prompt }}</button></div></div><div v-for="(message, index) in aiMessages" :key="index" :class="['ai-message', message.role]"><span>{{ message.role === 'assistant' ? 'AI' : displayName.slice(0, 1) }}</span><div class="ai-message-content"><p>{{ message.content }}</p><div v-if="message.references?.length" class="ai-references"><strong>知识来源</strong><button v-for="reference in message.references" :key="reference.id" @click="openAiReference(reference)"><Document /><span>{{ reference.title }}</span><small>知识 #{{ reference.file_id }}</small><ArrowRight /></button></div></div></div></div><div class="ai-compose"><el-input v-model="aiQuestion" type="textarea" :rows="2" resize="none" placeholder="向知识库提问..." @keydown.ctrl.enter="askAi" /><el-button type="primary" :icon="Promotion" :loading="aiBusy" @click="askAi">发送</el-button></div></section>
-            <aside class="surface ai-history"><div class="surface-head"><div><h3>对话历史</h3><p>最近的 AI 会话</p></div><div class="ai-history-head-actions"><el-button class="mobile-ai-history-toggle" :icon="Close" circle text title="返回问答" @click="mobileAiHistoryOpen = false" /><el-button :icon="Plus" circle title="新建会话" @click="newAiSession" /><el-button :icon="Refresh" circle text title="刷新会话" @click="loadAiHistory" /></div></div><el-input v-model="aiHistoryKeyword" class="ai-history-search" :prefix-icon="Search" clearable placeholder="搜索会话" /><div class="ai-history-list"><article v-for="session in filteredAiSessions" :key="session.id" :class="{ active: aiSessionId === session.id }"><button class="ai-session-main" @click="loadAiSession(session.id)"><ChatLineRound /><span><strong>{{ session.title }}</strong><small>{{ formatDate(session.created_at) }}</small></span></button><div class="ai-session-actions"><el-button :icon="Edit" circle text title="重命名会话" @click.stop="renameAiSession(session)" /><el-button :icon="Delete" circle text type="danger" title="删除会话" @click.stop="deleteAiSession(session)" /></div></article></div><el-empty v-if="!filteredAiSessions.length" :description="aiHistoryKeyword ? '没有匹配的历史会话' : '暂无历史对话'" /></aside>
-          </section>
-
+         <MessagesView v-else-if="activeView === 'messages'" :page="messagesViewPage" />
+         <AiChatView v-else-if="activeView === 'ai'" :page="aiChatViewPage" />
           <section v-else class="page-stack">
             <div class="page-toolbar"><div><h3>个人中心</h3><p>管理资料、关注关系和反馈工单</p></div><el-button type="primary" @click="saveProfile">保存资料</el-button></div>
             <div class="profile-layout"><section class="surface profile-card"><div class="profile-avatar"><img v-if="avatarUrl" :src="resolveApiUrl(avatarUrl)" alt="头像" /><span v-else>{{ displayName.slice(0, 1).toUpperCase() }}</span></div><h3>{{ displayName }}</h3><p>@{{ username }}</p><el-tag>{{ roleLabel(role) }}</el-tag><el-button v-if="avatarUrl" class="remove-avatar" text type="danger" @click="removeAvatar">删除头像</el-button><el-button class="onboarding-replay" text type="primary" @click="openOnboarding">查看新手引导</el-button><div class="profile-counts"><span><strong>{{ followData.followedUserIds?.length || 0 }}</strong>关注</span><span><strong>{{ followData.followerUserIds?.length || 0 }}</strong>粉丝</span><span><strong>{{ drafts.length }}</strong>草稿</span></div></section><section class="surface profile-form"><h3>基础资料</h3><el-alert v-if="profileAudit?.status==='PENDING'" class="profile-audit-notice" type="warning" :closable="false" show-icon title="资料修改待管理员审核"><ul class="profile-diff"><li v-for="change in profileAuditPending" :key="change.field">{{ change.description }}</li></ul><small>审核通过前，其他成员看到的仍是原来的资料。再次保存可以修改提交的内容。</small></el-alert><el-alert v-else-if="profileAudit?.status==='REJECTED'" class="profile-audit-notice" type="error" :closable="false" show-icon title="资料修改未通过审核"><p>{{ profileAudit.reason || '资料未通过审核' }}</p><small>可以修改后重新提交。</small></el-alert><el-form label-position="top"><el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item><el-form-item label="个性签名"><el-input v-model="profileForm.signature" type="textarea" :rows="3" /></el-form-item></el-form><el-divider>邮箱</el-divider><EmailBinding /><el-divider>修改密码</el-divider><el-form label-position="top"><el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" type="password" show-password autocomplete="current-password" /></el-form-item><el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" type="password" show-password autocomplete="new-password" maxlength="128" placeholder="8-128 位，需包含字母和数字" /></el-form-item><el-button type="primary" plain @click="changePassword">更新密码</el-button></el-form></section><section class="surface feedback-card"><div class="surface-head"><div><h3>我的反馈</h3><p>问题进度与官方回复</p></div><el-button v-if="platformConfig.feedback_enabled" :icon="Plus" circle @click="feedbackDialog = true" /></div><article v-for="ticket in tickets" :key="ticket.id" :data-ticket-id="ticket.id" :class="{ 'is-linked': linkedTicketId === ticket.id }"><div><strong>{{ ticketTypeLabel(ticket.type) }}</strong><p>{{ ticket.content }}</p><small v-if="ticket.reply">官方回复：{{ ticket.reply }}</small></div><el-tag :type="ticket.status === 'RESOLVED' ? 'success' : 'warning'">{{ ticketStatusLabel(ticket.status) }}</el-tag></article><el-empty v-if="!tickets.length" description="暂无反馈工单" /></section></div>
@@ -346,6 +338,8 @@ import { pendingChanges, profileAuditChanges, profileAuditStatusLabel, profileAu
 import AdminDashboardView from './components/AdminDashboardView.vue';
 import AdminAnalyticsView from './components/AdminAnalyticsView.vue';
 import AdminTicketsView from './components/AdminTicketsView.vue';
+import AiChatView from './components/AiChatView.vue';
+import MessagesView from './components/MessagesView.vue';
 import AdminModerationView from './components/AdminModerationView.vue';
 import AdminSettingsView from './components/AdminSettingsView.vue';
 import AdminUsersView from './components/AdminUsersView.vue';
@@ -485,7 +479,6 @@ const followData = ref<{ followedUserIds?:number[]; followerUserIds?:number[] }>
 const relationTargetUser = ref<UserRecord>(); const conversationUsername = ref(''); const conversationTargetUser = ref<UserRecord>(); const systemHealth = ref<Record<string,boolean>>({});
 const userSummaries = ref<Record<number, UserRecord>>({}); const resolvedUserIds = new Set<number>();
 const aiQuestion = ref(''); const aiMessages = ref<AiMessageView[]>([]); const aiSessions = ref<AiSession[]>([]); const aiSessionId = ref<number>();
-const aiHistoryKeyword = ref('');
 const editingPostId = ref(0); const editingDraftId = ref(0);
 const selectedKnowledge = ref<KnowledgeFile>();
 const pdfPreviewUrl = ref('');
@@ -499,7 +492,6 @@ const selectedReviewPost = ref<Post>(); const reviewingKnowledge = ref(false);
 const readerLoading = ref(false); const readerPreviewLoading = ref(false); const readerError = ref('');
 let readerToken = 0;
 const governancePreviewDialog = ref(false); const governancePreviewKind = ref('内容预览'); const governancePreviewTitle = ref(''); const governancePreviewContent = ref('');
-const aiPrompts = ['平台支持哪些知识格式？','如何使用全文搜索？','社区有哪些核心功能？'];
 
 const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'forum',label:'社区论坛',icon:markRaw(ChatDotRound)},{key:'square',label:'关注广场',icon:markRaw(CollectionTag)},{key:'messages',label:'消息中心',icon:markRaw(Message)},{key:'notifications',label:'通知中心',icon:markRaw(Bell),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
 const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'analytics',label:'平台数据统计',icon:markRaw(DataAnalysis)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与常见问题',icon:markRaw(Tickets)},{key:'audit',label:'操作记录',icon:markRaw(Notebook)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
@@ -540,14 +532,12 @@ const filteredKnowledge = computed(() => knowledgeSearchMode.value
 
 
 const currentMessageSession = computed(() => sessions.value.find(session => session.id === messageForm.value.sessionId));
-const currentMessagePartner = computed(() => currentMessageSession.value ? sessionPartner(currentMessageSession.value) : undefined);
 const postDialogTitle = computed(() => editingPostId.value ? '编辑社区帖子' : editingDraftId.value ? '编辑草稿' : '发布社区帖子');
 const businessModeMismatch = computed(()=>new Set(runtimeModes.value.filter(item=>item.businessData&&item.available).map(item=>item.mode)).size>1);
 const runtimeModeProblem = computed(()=>businessModeMismatch.value||runtimeModes.value.some(item=>!item.available||item.healthy===false));
 const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUserId.value), ...Object.values(userSummaries.value).filter(user => user.id !== currentUserId.value)]);
 const followedUsers = computed(() => (followData.value.followedUserIds || []).map(communityUser));
 const followerUsers = computed(() => (followData.value.followerUserIds || []).map(communityUser));
-const filteredAiSessions = computed(() => {const keyword=aiHistoryKeyword.value.trim().toLowerCase();return keyword?aiSessions.value.filter(session=>session.title.toLowerCase().includes(keyword)):aiSessions.value;});
 
 
 
@@ -1213,9 +1203,6 @@ const linkedTicketId = ref(0); let linkedTicketTimer:number|undefined;
 function inClientPortal(){return portal.value==='client';}
 async function markNotificationRead(notice:Notice){const result=await postData<{unread:number}>('/notification/read',{notificationId:notice.id});notice.read=true;notificationUnread.value=result.unread;ElMessage.success('已标记为已读');}
 async function markAllNotificationsRead(){const result=await postData<{unread:number}>('/notification/read-all',{});notifications.value=notifications.value.map(notice=>({...notice,read:true}));notificationUnread.value=result.unread;ElMessage.success('全部通知已读');}
-function sessionPartner(session:ChatSession){return communityUser(session.otherUserId);}
-async function openSession(session:ChatSession){selectMessageSession(session.id);try{await loadMessages();}catch(error){notifyError(error);}}
-function closeMobileConversation(){selectMessageSession(0);}
 function scrollMessagesToBottom(){const list=messageListRef.value;if(list)list.scrollTop=list.scrollHeight;messageUnseenCount.value=0;}
 function isMessageListNearBottom(){const list=messageListRef.value;return !list||list.scrollHeight-list.scrollTop-list.clientHeight<=MESSAGE_BOTTOM_THRESHOLD;}
 function mergeMessages(current:ChatMessage[],incoming:ChatMessage[]){const byId=new Map<number,ChatMessage>();[...current,...incoming].forEach(message=>byId.set(message.id,message));return [...byId.values()].sort((a,b)=>a.id-b.id);}
@@ -1231,30 +1218,6 @@ async function loadMessages(){
   await nextTick();
   scrollMessagesToBottom();
 }
-async function loadOlderMessages(){
-  const sessionId=messageForm.value.sessionId;
-  const oldest=messages.value[0];
-  if(!sessionId||!oldest||loadedMessageSessionId!==sessionId||!messageHasOlder.value||messageHistoryLoading.value)return;
-  messageHistoryLoading.value=true;
-  try{
-    const older=await getData<ChatMessage[]>(messagePageUrl(sessionId,{beforeId:oldest.id}));
-    if(messageForm.value.sessionId!==sessionId||loadedMessageSessionId!==sessionId)return;
-    const list=messageListRef.value;
-    const distanceFromBottom=list?list.scrollHeight-list.scrollTop:0;
-    messages.value=mergeMessages(older,messages.value);
-    messageHasOlder.value=older.length>=MESSAGE_PAGE_SIZE;
-    await nextTick();
-    if(list)list.scrollTop=list.scrollHeight-distanceFromBottom;
-  }catch(error){notifyError(error);}
-  finally{messageHistoryLoading.value=false;}
-}
-function handleMessageScroll(){
-  const list=messageListRef.value;
-  if(!list)return;
-  if(list.scrollTop<=60)void loadOlderMessages();
-  if(isMessageListNearBottom())messageUnseenCount.value=0;
-}
-function jumpToLatestMessages(){const list=messageListRef.value;if(list)list.scrollTo({top:list.scrollHeight,behavior:'smooth'});messageUnseenCount.value=0;}
 async function fetchNewMessages(manual=false){
   const sessionId=messageForm.value.sessionId;
   if(!sessionId||messageFetchInFlight)return 0;
@@ -1304,16 +1267,7 @@ async function fetchNewMessages(manual=false){
   }finally{messageFetchInFlight=false;}
 }
 function messageSyncUrl(sessionId:number,afterId:number,removalCursor:number){return `/message/sync?${new URLSearchParams({sessionId:String(sessionId),afterId:String(afterId),removalCursor:String(removalCursor),limit:'100'})}`;}
-async function refreshMessages(){
-  if(messageRefreshing.value)return;
-  messageRefreshing.value=true;
-  try{const count=await fetchNewMessages(true);if(!count)ElMessage.info('暂无新消息');}
-  catch(error){notifyError(error);}
-  finally{messageRefreshing.value=false;}
-}
 // Admins can restrict or archive a conversation; sync keeps this status current while it is open.
-const openSessionStatus=computed(()=>sessions.value.find(session=>session.id===messageForm.value.sessionId)?.status||'ACTIVE');
-const openSessionClosed=computed(()=>Boolean(messageForm.value.sessionId)&&openSessionStatus.value!=='ACTIVE');
 const shouldPollMessages=computed(()=>authenticated.value&&portal.value==='client'&&activeView.value==='messages'&&!detailRoute.value&&Boolean(messageForm.value.sessionId)&&pageVisible.value);
 function stopMessagePolling(){if(messagePollTimer!==undefined){window.clearInterval(messagePollTimer);messagePollTimer=undefined;}}
 watch(shouldPollMessages,(active,wasActive)=>{
@@ -1323,41 +1277,11 @@ watch(shouldPollMessages,(active,wasActive)=>{
   if(wasActive===false)void fetchNewMessages().catch(()=>undefined);
 });
 function handleVisibilityChange(){pageVisible.value=document.visibilityState!=='hidden';}
-async function newConversation(){conversationUsername.value='';conversationTargetUser.value=undefined;conversationTargetId.value=0;conversationDialog.value=true;}
 async function resolveConversationUser(){const query=conversationUsername.value.trim();if(!query){conversationTargetUser.value=undefined;conversationTargetId.value=0;return;}try{const user=await getData<UserRecord>(`/user/info?username=${encodeURIComponent(query)}`);if(user.id===currentUserId.value)throw new Error('不能给自己发起私信');conversationTargetUser.value=user;conversationTargetId.value=user.id;}catch(error){conversationTargetUser.value=undefined;conversationTargetId.value=0;notifyError(error);}}
 async function createConversation(){if(!conversationTargetId.value)return;busy.value=true;try{const session=await postData<ChatSession>('/message/session',{targetUserId:conversationTargetId.value});await loadMessageData();selectMessageSession(session.id);await loadMessages();conversationDialog.value=false;activeView.value='messages';ElMessage.success('私信会话已创建');}catch(error){notifyError(error);}finally{busy.value=false;}}
-async function sendMessage(){
-  const sessionId=messageForm.value.sessionId;
-  const content=messageForm.value.content.trim();
-  if(!sessionId||!content||messageSending.value)return;
-  messageSending.value=true;
-  try{
-    const saved=await postData<ChatMessage>('/message/send',{sessionId,content});
-    messageDrafts.set(sessionId,'');
-    if(messageForm.value.sessionId===sessionId){
-      messageForm.value.content='';
-      messages.value=mergeMessages(messages.value,[saved]);
-      await nextTick();
-      scrollMessagesToBottom();
-    }
-    const session=sessions.value.find(item=>item.id===sessionId);
-    if(session){session.lastMessage=content;session.updatedAt=saved.createdAt;}
-  }catch(error){notifyError(error);}
-  finally{messageSending.value=false;}
-}
-async function clearCurrentSession(){await ElMessageBox.confirm('确认清空当前会话记录？','清空会话',{type:'warning'});await postData('/message/clear',{sessionId:messageForm.value.sessionId,userId:currentUserId.value});await loadMessageData();}
-async function clearAllMessages(){await ElMessageBox.confirm('确认清空全部私信会话中的聊天记录？会话联系人仍会保留。','清空全部聊天记录',{type:'warning',confirmButtonText:'确认清空'});await postData('/message/clear-all',{});await loadMessageData();ElMessage.success('全部聊天记录已清空');}
-async function deleteCurrentSession(){if(!messageForm.value.sessionId)return;await ElMessageBox.confirm('删除会话后，该会话及其中消息都无法恢复。','删除会话',{type:'warning',confirmButtonText:'确认删除'});const sessionId=messageForm.value.sessionId;await deleteData('/message/session',{sessionId});selectMessageSession(0);messageDrafts.delete(sessionId);await loadMessageData();ElMessage.success('会话已删除');}
-async function deleteMessage(message:ChatMessage){await deleteData('/message',{messageId:message.id,userId:currentUserId.value});messages.value=messages.value.filter(item=>item.id!==message.id);await loadMessageData({reloadMessages:false});ElMessage.success('消息已删除');}
 
-async function askAi(){if(!aiQuestion.value.trim())return;const question=aiQuestion.value;aiMessages.value.push({role:'user',content:question});aiQuestion.value='';aiBusy.value=true;try{const result=await postData<{session_id:number;answer:string;references:AiReference[]}>('/ai/chat',{question,user_id:currentUserId.value,session_id:aiSessionId.value});aiSessionId.value=result.session_id;const references=[...new Map((result.references||[]).map(reference=>[reference.file_id,reference])).values()].slice(0,3);aiMessages.value.push({role:'assistant',content:result.answer,references});await loadAiHistory();}catch(error){notifyError(error);}finally{aiBusy.value=false;}}
 // The detail page loads the file by id and reports it when it is no longer available.
-function openAiReference(reference:AiReference){if(!reference.file_id){ElMessage.warning('该知识来源当前不可访问');return;}navigateToDetail('knowledge',reference.file_id);}
 async function loadAiHistory(){const history=await getData<{sessions:AiSession[]}> (`/ai/history?user_id=${currentUserId.value}&include_messages=false`);aiSessions.value=history.sessions;}
-async function loadAiSession(id:number){aiSessionId.value=id;const history=await getData<{messages:{role:'user'|'assistant';content:string}[]}>(`/ai/history?user_id=${currentUserId.value}&session_id=${id}`);aiMessages.value=history.messages;mobileAiHistoryOpen.value=false;}
-function newAiSession(){aiSessionId.value=undefined;aiMessages.value=[];aiQuestion.value='';mobileAiHistoryOpen.value=false;}
-async function renameAiSession(session:AiSession){const {value}=await ElMessageBox.prompt('请输入新的会话名称','重命名 AI 会话',{inputValue:session.title,inputPattern:/\S+/,inputErrorMessage:'会话名称不能为空',confirmButtonText:'保存'});const result=await putData<{id:number;title:string}>(`/ai/session/${session.id}`,{title:value});session.title=result.title;ElMessage.success('会话名称已更新');}
-async function deleteAiSession(session:AiSession){await ElMessageBox.confirm(`确认删除会话“${session.title}”及其全部消息？`,'删除 AI 会话',{type:'warning',confirmButtonText:'确认删除'});await deleteData(`/ai/session/${session.id}`);aiSessions.value=aiSessions.value.filter(item=>item.id!==session.id);if(aiSessionId.value===session.id)newAiSession();ElMessage.success('AI 会话已删除');}
 
 async function loadProfile(){const [user,follows,blocks,history,faqResult]=await Promise.all([getData<UserRecord>(`/user/info?username=${username.value}`),getData<{followedUserIds:number[];followerUserIds:number[]}>(`/user/follows?userId=${currentUserId.value}`),getData<{blockedUserIds:number[]}>(`/user/blocks?userId=${currentUserId.value}`),getData<BehaviorRecord[]>(`/user/behaviors?userId=${currentUserId.value}`),getData<Faq[]>('/feedback/faqs')]);profileAudit.value=user.profileAudit??null;
   // A waiting change is what the member last asked for, so the form shows that rather than the live values.
@@ -1646,5 +1570,9 @@ const dashboardPage = { loadAdminDashboard, metricValue, moderationOpenCount, op
 const analyticsPage = { analyticsDays, forumAnalytics, knowledgeAnalytics, metricValue, ticketAnalytics };
 
 const ticketsPage = { adminTicketHasMore, adminTicketKeyword, adminTicketLoading, adminTicketStatus, adminTicketTotal, adminTickets, assignTicket, assignableAdmins, deleteFaq, editFaq, faqDialog, faqs, loadMoreAdminTickets, openTicketReply, ticketStatusLabel, ticketTypeLabel };
+
+const aiChatViewPage = { aiBusy, aiMessages, aiQuestion, aiSessionId, aiSessions, currentUserId, displayName, loadAiHistory, messages, mobileAiHistoryOpen, navigateToDetail, notifyError, role };
+
+const messagesViewPage = { MESSAGE_PAGE_SIZE, communityUser, conversationDialog, conversationTargetId, conversationTargetUser, conversationUsername, currentMessageSession, currentUserId, fetchNewMessages, isMessageListNearBottom, loadMessageData, loadMessages, loadedMessageSessionId, mergeMessages, messageDrafts, messageForm, messageHasOlder, messageHistoryLoading, messageListRef, messagePageUrl, messageRefreshing, messageSending, messageUnseenCount, messages, notifyError, platformConfig, scrollMessagesToBottom, selectMessageSession, sessions, username };
 
 </script>
