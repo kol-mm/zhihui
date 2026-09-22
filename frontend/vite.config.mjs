@@ -31,6 +31,11 @@ function precompress() {
 
 export default defineConfig({
   plugins: [vue(), precompress()],
+  // Vitest and Playwright both claim *.spec.ts by default. The unit runner keeps src; the browser suite in
+  // e2e/ is run by Playwright with `npm run test:e2e`.
+  test: {
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
+  },
   build: {
     // pdf.js (about 540 kB) is the one larger chunk, and it is only fetched when a PDF is opened.
     chunkSizeWarningLimit: 600,

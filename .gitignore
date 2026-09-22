@@ -26,3 +26,9 @@ Thumbs.db
 
 # monitor.sh state and logs
 .monitor/
+
+# Playwright 运行产物（截图、trace、报告）
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
