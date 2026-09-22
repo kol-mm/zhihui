@@ -333,7 +333,10 @@ public class MessageController {
         if (authenticatedUserId == null) return ApiResponse.fail("valid user authorization is required");
         if (!notificationsEnabled() && !LocalAuth.isAdmin(authorization)) return ApiResponse.fail("notifications feature is disabled");
         if (requestedUserId != null && !LocalAuth.canAccessUser(authorization, requestedUserId)) return ApiResponse.fail("access to this user is denied");
-        Long userId = LocalAuth.isAdmin(authorization) ? requestedUserId : authenticatedUserId;
+        // Without a userId an administrator means their own notifications. Passing null through would reach
+        // the store as "no filter" and return every notification on the platform.
+        Long userId = LocalAuth.isAdmin(authorization) && requestedUserId != null
+                ? requestedUserId : authenticatedUserId;
         return ApiResponse.ok(messageStore.listNotifications(userId).stream().map(this::toNotificationView).toList());
     }
 
