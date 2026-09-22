@@ -1512,7 +1512,16 @@ async function openCategoryManager(){knowledgeCategories.value=await getData<Kno
 function editCategory(category:KnowledgeCategory){categoryForm.value={id:category.id,name:category.name,sortNo:category.sortNo||0};}
 async function saveCategory(){if(!categoryForm.value.name.trim())return;await postData('/knowledge/admin/category',{...categoryForm.value});categoryForm.value={id:0,name:'',sortNo:10};knowledgeCategories.value=await getData('/knowledge/categories');ElMessage.success('分类已保存');}
 async function removeCategory(category:KnowledgeCategory){await ElMessageBox.confirm(`确认删除分类“${category.name}”？`,'删除分类',{type:'warning'});await deleteData('/knowledge/admin/category',{categoryId:category.id});knowledgeCategories.value=await getData('/knowledge/categories');}
-async function auditKnowledge(file:KnowledgeFile,status:string){await postData('/knowledge/admin/audit',{fileId:file.id,auditStatus:status,reason:'管理员审核'});knowledgeCache.invalidate(file.id);if(status==='APPROVED'){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);if(detail.content?.trim())await postData('/ai/parse',{file_id:file.id,title:detail.title,text:detail.content});}else{await deleteData(`/ai/admin/index/file/${file.id}`);}if(reviewingKnowledge.value&&selectedKnowledge.value?.id===file.id){readerDialog.value=false;reviewingKnowledge.value=false;}await loadModeration();ElMessage.success('审核状态与 AI 索引已更新');}
+async function auditKnowledge(file:KnowledgeFile,status:string,reason?:string){let note=(reason??'').trim();
+  if(status==='REJECTED'&&!note){
+    // The reason is kept with the decision, so a later reviewer can see why it went that way.
+    const answer=await ElMessageBox.prompt('请说明驳回原因，审核记录会保留这条说明','驳回知识资源',
+      {inputPlaceholder:'例如：与知识库主题无关',confirmButtonText:'驳回',cancelButtonText:'取消',
+        inputValidator:(value:string)=>value.trim().length>0&&value.trim().length<=200||'请填写 1-200 字的原因'}).catch(()=>null);
+    if(!answer)return;
+    note=String(answer.value).trim();
+  }
+  await postData('/knowledge/admin/audit',{fileId:file.id,auditStatus:status,reason:note});knowledgeCache.invalidate(file.id);if(status==='APPROVED'){const detail=await getData<KnowledgeFile>(`/knowledge/admin/preview?fileId=${file.id}`);if(detail.content?.trim())await postData('/ai/parse',{file_id:file.id,title:detail.title,text:detail.content});}else{await deleteData(`/ai/admin/index/file/${file.id}`);}if(reviewingKnowledge.value&&selectedKnowledge.value?.id===file.id){readerDialog.value=false;reviewingKnowledge.value=false;}await loadModeration();ElMessage.success('审核状态与 AI 索引已更新');}
 async function auditPost(post:Post,status:string){if(auditingPostId.value)return;auditingPostId.value=post.id;try{const result=await postData<{post:Post}>('/post/admin/audit',{postId:post.id,status,reason:'管理员审核'});if(selectedReviewPost.value?.id===post.id){selectedReviewPost.value=result.post;postReviewDialog.value=false;}await loadModeration();ElMessage.success(status==='PUBLISHED'?(post.status==='HIDDEN'?'帖子已恢复':'帖子已发布'):(post.status==='PENDING'?'帖子已驳回并隐藏':'帖子已隐藏'));}catch(error){notifyError(error);await loadModeration();}finally{auditingPostId.value=0;}}
 async function auditProfileChange(change:ProfileChange,status:string,reason=''){
   if(auditingProfileChangeId.value)return;

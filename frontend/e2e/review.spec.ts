@@ -58,14 +58,16 @@ test.describe('the review queue', () => {
       await row.getByRole('button', { name: '查看内容' }).click();
       await page.locator('.el-dialog').getByRole('button', { name: '驳回' }).click();
 
+      // The reviewer is asked why, and what they write is what gets kept.
+      await page.getByRole('textbox').last().fill('与知识库主题无关');
+      await page.getByRole('button', { name: '驳回' }).last().click();
+
       await expect(row).toContainText('已驳回');
 
       await page.reload();
       await openAdminSection(page, '内容审核');
-      // The reason used to be accepted and thrown away. The interface does not ask for one, so what is stored
-      // is the fixed string it sends — the point here is that a reason survives at all.
       await expect(page.locator('.admin-desktop-table tr', { hasText: title }))
-        .toContainText('管理员审核');
+        .toContainText('与知识库主题无关');
     } finally {
       await removeKnowledge(SUPER_ADMIN, fileId);
     }

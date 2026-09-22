@@ -937,7 +937,10 @@ public class KnowledgeController {
         }
         Long fileId = number(request.get("fileId"), 0L);
         String auditStatus = String.valueOf(request.getOrDefault("auditStatus", "APPROVED"));
-        String reason = String.valueOf(request.getOrDefault("reason", ""));
+        // audit_reason holds 255 characters; a longer one would fail on the insert rather than be refused,
+        // so it is cut here. Assigned once: a lambda below captures it.
+        String submittedReason = String.valueOf(request.getOrDefault("reason", "")).trim();
+        String reason = submittedReason.length() > 200 ? submittedReason.substring(0, 200) : submittedReason;
         if (!List.of("APPROVED", "REJECTED").contains(auditStatus)) {
             return ApiResponse.fail("审核结果无效");
         }
