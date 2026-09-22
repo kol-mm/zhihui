@@ -791,3 +791,9 @@ button { transition: color var(--zh-fast) ease, background-color var(--zh-fast) 
 .stacked-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 .audit-reason { display: block; margin-top: 4px; line-height: 1.4; word-break: break-word; }
+
+.review-health { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.review-health-counters { display: flex; flex-wrap: wrap; gap: 10px 18px; font-size: 13px; }
+.review-health-counters span { display: inline-flex; gap: 6px; align-items: baseline;
+  color: var(--el-text-color-regular); }
+.review-health-counters strong { font-variant-numeric: tabular-nums; }

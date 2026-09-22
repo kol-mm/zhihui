@@ -7,7 +7,9 @@ import json
 import math
 import os
 import re
+import random
 import sqlite3
+import threading
 import ipaddress
 import logging
 import socket
@@ -86,8 +88,11 @@ class AiConfigRequest(BaseModel):
     profile_audit_required: bool = False
     # Off until an operator turns it on: nobody should find their content auto-reviewed by an upgrade.
     ai_audit_enabled: bool = False
-    ai_audit_approve_confidence: float = Field(default=0.75, ge=0.5, le=1)
+    # Publishing by mistake is worse than holding something back, so the bar to publish is the higher one.
+    ai_audit_approve_confidence: float = Field(default=0.9, ge=0.5, le=1)
     ai_audit_reject_confidence: float = Field(default=0.85, ge=0.5, le=1)
+    # A share of what the model passes goes to a person anyway, so its judgement keeps being checked.
+    ai_audit_sample_percent: int = Field(default=10, ge=0, le=100)
     default_publish_policy: str = Field(default="STANDARD", pattern="^(STANDARD|PRE_REVIEW|BLOCKED)$")
     max_post_images: int = Field(default=9, ge=0, le=9)
     max_comment_length: int = Field(default=2000, ge=100, le=5000)
@@ -325,6 +330,7 @@ AI_CONFIG_LABELS = {
     "ai_audit_enabled": "AI 内容审核",
     "ai_audit_approve_confidence": "AI 自动通过门槛",
     "ai_audit_reject_confidence": "AI 自动驳回门槛",
+    "ai_audit_sample_percent": "AI 通过抽样复核比例",
     "default_publish_policy": "默认发帖策略",
     "max_post_images": "帖子配图上限",
     "max_comment_length": "评论字数上限",
@@ -439,8 +445,9 @@ def read_ai_config() -> dict[str, Any]:
         "post_audit_required": True,
         "profile_audit_required": False,
         "ai_audit_enabled": False,
-        "ai_audit_approve_confidence": 0.75,
+        "ai_audit_approve_confidence": 0.9,
         "ai_audit_reject_confidence": 0.85,
+        "ai_audit_sample_percent": 10,
         "default_publish_policy": "STANDARD",
         "max_post_images": 9,
         "max_comment_length": 2000,
@@ -470,7 +477,7 @@ def read_ai_config() -> dict[str, Any]:
             defaults[row["config_key"]] = max(0.0, min(1.0, float(value)))
         elif row["config_key"] in {
             "max_upload_mb", "pdf_max_upload_mb", "max_post_images", "max_comment_length", "max_message_length",
-            "draft_retention_days"
+            "draft_retention_days", "ai_audit_sample_percent"
         }:
             defaults[row["config_key"]] = int(value)
         elif row["config_key"] in {
@@ -673,6 +680,55 @@ REVIEW_TIMEOUT_SECONDS = float(os.getenv("AI_REVIEW_TIMEOUT_SECONDS", "8"))
 
 REVIEW_DECISIONS = ("APPROVE", "REJECT", "ESCALATE")
 
+# The local rules only look for sensitive words and a plausible length. They must not clear a bar meant for a
+# model's judgement, so they claim a fixed, modest confidence: raise the threshold above this and everything
+# goes to a person, which is the point of being able to raise it.
+LOCAL_RULE_CONFIDENCE = 0.8
+
+_review_lock = threading.Lock()
+_review_health: dict[str, Any] = {
+    "requested": 0, "approved": 0, "rejected": 0, "escalated": 0, "sampled": 0, "model_failures": 0,
+    "last_decision": None, "last_decision_at": None, "last_failure": None, "last_failure_at": None,
+}
+
+
+def record_review_failure(reason: str) -> None:
+    """A model that could not be reached or understood, counted apart from having no model at all."""
+    with _review_lock:
+        _review_health["model_failures"] += 1
+        _review_health["last_failure"] = str(reason)[:200]
+        _review_health["last_failure_at"] = now_iso()
+
+
+def record_review_decision(decision: str, sampled: bool = False) -> None:
+    with _review_lock:
+        _review_health["requested"] += 1
+        _review_health[{"APPROVE": "approved", "REJECT": "rejected"}.get(decision, "escalated")] += 1
+        if sampled:
+            _review_health["sampled"] += 1
+        _review_health["last_decision"] = decision
+        _review_health["last_decision_at"] = now_iso()
+
+
+def review_health(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Enough to tell working review from review that is quietly doing nothing.
+
+    Both failure modes are invisible from outside: a model that always errors escalates everything, and a
+    switch that never reaches the services means nothing is ever asked. Counters make the difference legible.
+    """
+    settings = config if config is not None else read_ai_config()
+    with _review_lock:
+        snapshot = dict(_review_health)
+    snapshot["enabled"] = bool(settings.get("ai_audit_enabled", False))
+    snapshot["model_configured"] = bool(
+        os.getenv("AI_API_KEY", "").strip()
+        and str(settings.get("provider")) == "openai-compatible"
+        and (str(settings.get("request_url", "")).strip() or str(settings.get("base_url", "")).strip()))
+    snapshot["decided_automatically"] = snapshot["approved"] + snapshot["rejected"]
+    snapshot["idle"] = snapshot["enabled"] and snapshot["requested"] == 0
+    return snapshot
+
 REVIEW_PROMPT = (
     "你是知识社区的内容审核员。判断下面的内容是否可以公开发布。\n"
     "只输出 JSON：{\"decision\": \"APPROVE\" 或 \"REJECT\", \"confidence\": 0 到 1 的小数, \"reason\": \"简短中文理由\"}。\n"
@@ -683,6 +739,7 @@ REVIEW_PROMPT = (
 
 def escalate(reason: str) -> dict[str, Any]:
     """Hand the decision back to a person. Every failure path ends here."""
+    record_review_decision("ESCALATE")
     return {"decision": "ESCALATE", "confidence": 0.0, "reason": reason}
 
 
@@ -714,13 +771,16 @@ def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any
         content = answer["choices"][0]["message"]["content"]
         start, end = content.find("{"), content.rfind("}")
         verdict = json.loads(content[start:end + 1]) if start >= 0 < end else None
-    except Exception:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
+    except Exception as error:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
+        record_review_failure(f"{type(error).__name__}: {error}")
         return None
     if not isinstance(verdict, dict) or verdict.get("decision") not in ("APPROVE", "REJECT"):
+        record_review_failure("模型返回的内容无法解析为审核结论")
         return None
     try:
         confidence = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
     except (TypeError, ValueError):
+        record_review_failure("模型返回的置信度无法解析")
         return None
     return {"decision": verdict["decision"], "confidence": confidence,
             "reason": str(verdict.get("reason", ""))[:200]}
@@ -739,23 +799,53 @@ def review_content(title: str, body: str, config: dict[str, Any] | None = None) 
     if not combined:
         return escalate("没有可供审核的内容")
     if contains_sensitive_content(combined):
-        return {"decision": "REJECT", "confidence": 1.0, "reason": "命中平台敏感词规则"}
+        return decided({"decision": "REJECT", "confidence": 1.0, "reason": "命中平台敏感词规则"})
 
-    approve_at = float(settings.get("ai_audit_approve_confidence", 0.75))
+    approve_at = float(settings.get("ai_audit_approve_confidence", 0.9))
     reject_at = float(settings.get("ai_audit_reject_confidence", 0.85))
 
     verdict = model_review(title or "", body or "", settings)
     if verdict is None:
-        # No model configured, or it could not be reached: the local rules only clear obviously ordinary text.
+        # No model configured, or it could not be reached. The local rules cannot judge meaning, so they claim
+        # only LOCAL_RULE_CONFIDENCE; if the bar for publishing is above that, a person decides.
         if len(combined) < 20:
             return escalate("内容过短，无法自动判断")
-        return {"decision": "APPROVE", "confidence": approve_at,
-                "reason": "未命中敏感规则（本地规则判断）"}
+        if LOCAL_RULE_CONFIDENCE < approve_at:
+            return escalate(f"仅有本地规则判断（{LOCAL_RULE_CONFIDENCE:.2f}），低于自动通过门槛"
+                            f"（{approve_at:.2f}）")
+        verdict = {"decision": "APPROVE", "confidence": LOCAL_RULE_CONFIDENCE,
+                   "reason": "未命中敏感规则（本地规则判断）"}
+    else:
+        threshold = approve_at if verdict["decision"] == "APPROVE" else reject_at
+        if verdict["confidence"] < threshold:
+            return escalate(f"模型把握不足（{verdict['confidence']:.2f}）：{verdict['reason']}")
 
-    threshold = approve_at if verdict["decision"] == "APPROVE" else reject_at
-    if verdict["confidence"] < threshold:
-        return escalate(f"模型把握不足（{verdict['confidence']:.2f}）：{verdict['reason']}")
+    # A share of what would be published goes to a person anyway. Content can talk to the model — a document
+    # that tells it to approve itself is the obvious attack — so its approvals keep being spot-checked.
+    if verdict["decision"] == "APPROVE" and sampled_for_review(settings):
+        percent = int(settings.get("ai_audit_sample_percent", 10))
+        record_review_decision("ESCALATE", sampled=True)
+        return {"decision": "ESCALATE", "confidence": verdict["confidence"],
+                "reason": f"抽样复核（{percent}%）：AI 判定通过，仍由人工确认。{verdict['reason']}"}
+    return decided(verdict)
+
+
+def decided(verdict: dict[str, Any]) -> dict[str, Any]:
+    record_review_decision(verdict["decision"])
     return verdict
+
+
+def sampled_for_review(settings: dict[str, Any]) -> bool:
+    """True for the share of approvals that a person should look at anyway."""
+    try:
+        percent = int(settings.get("ai_audit_sample_percent", 10))
+    except (TypeError, ValueError):
+        percent = 10
+    if percent <= 0:
+        return False
+    if percent >= 100:
+        return True
+    return random.random() * 100 < percent
 
 
 def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
@@ -1014,7 +1104,9 @@ def delete_chat_session(
 def ai_admin_overview(authorization: str | None = Header(default=None)) -> ApiResponse:
     require_admin(authorization)
     health_data = health().data
-    return ApiResponse(data={**health_data, "configuration": read_ai_config()})
+    configuration = read_ai_config()
+    return ApiResponse(data={**health_data, "configuration": configuration,
+                             "reviewHealth": review_health(configuration)})
 
 
 @app.get("/ai/admin/chunks", response_model=ApiResponse)
