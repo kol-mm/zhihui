@@ -153,17 +153,7 @@
          <CommunityFeedView v-else-if="activeView === 'forum' || activeView === 'square'" :page="communityFeedViewPage" />
          <MessagesView v-else-if="activeView === 'messages'" :page="messagesViewPage" />
          <AiChatView v-else-if="activeView === 'ai'" :page="aiChatViewPage" />
-          <section v-else class="page-stack">
-            <div class="page-toolbar"><div><h3>个人中心</h3><p>管理资料、关注关系和反馈工单</p></div><el-button type="primary" @click="saveProfile">保存资料</el-button></div>
-            <div class="profile-layout"><section class="surface profile-card"><div class="profile-avatar"><img v-if="avatarUrl" :src="resolveApiUrl(avatarUrl)" alt="头像" /><span v-else>{{ displayName.slice(0, 1).toUpperCase() }}</span></div><h3>{{ displayName }}</h3><p>@{{ username }}</p><el-tag>{{ roleLabel(role) }}</el-tag><el-button v-if="avatarUrl" class="remove-avatar" text type="danger" @click="removeAvatar">删除头像</el-button><el-button class="onboarding-replay" text type="primary" @click="openOnboarding">查看新手引导</el-button><div class="profile-counts"><span><strong>{{ followData.followedUserIds?.length || 0 }}</strong>关注</span><span><strong>{{ followData.followerUserIds?.length || 0 }}</strong>粉丝</span><span><strong>{{ drafts.length }}</strong>草稿</span></div></section><section class="surface profile-form"><h3>基础资料</h3><el-alert v-if="profileAudit?.status==='PENDING'" class="profile-audit-notice" type="warning" :closable="false" show-icon title="资料修改待管理员审核"><ul class="profile-diff"><li v-for="change in profileAuditPending" :key="change.field">{{ change.description }}</li></ul><small>审核通过前，其他成员看到的仍是原来的资料。再次保存可以修改提交的内容。</small></el-alert><el-alert v-else-if="profileAudit?.status==='REJECTED'" class="profile-audit-notice" type="error" :closable="false" show-icon title="资料修改未通过审核"><p>{{ profileAudit.reason || '资料未通过审核' }}</p><small>可以修改后重新提交。</small></el-alert><el-form label-position="top"><el-form-item label="昵称"><el-input v-model="profileForm.nickname" /></el-form-item><el-form-item label="个性签名"><el-input v-model="profileForm.signature" type="textarea" :rows="3" /></el-form-item></el-form><el-divider>邮箱</el-divider><EmailBinding /><el-divider>修改密码</el-divider><el-form label-position="top"><el-form-item label="当前密码"><el-input v-model="passwordForm.currentPassword" type="password" show-password autocomplete="current-password" /></el-form-item><el-form-item label="新密码"><el-input v-model="passwordForm.newPassword" type="password" show-password autocomplete="new-password" maxlength="128" placeholder="8-128 位，需包含字母和数字" /></el-form-item><el-button type="primary" plain @click="changePassword">更新密码</el-button></el-form></section><section class="surface feedback-card"><div class="surface-head"><div><h3>我的反馈</h3><p>问题进度与官方回复</p></div><el-button v-if="platformConfig.feedback_enabled" :icon="Plus" circle @click="feedbackDialog = true" /></div><article v-for="ticket in tickets" :key="ticket.id" :data-ticket-id="ticket.id" :class="{ 'is-linked': linkedTicketId === ticket.id }"><div><strong>{{ ticketTypeLabel(ticket.type) }}</strong><p>{{ ticket.content }}</p><small v-if="ticket.reply">官方回复：{{ ticket.reply }}</small></div><el-tag :type="ticket.status === 'RESOLVED' ? 'success' : 'warning'">{{ ticketStatusLabel(ticket.status) }}</el-tag></article><el-empty v-if="!tickets.length" description="暂无反馈工单" /></section></div>
-            <section class="surface"><div class="surface-head"><div><h3>我的知识资源</h3><p>统一查看上传、收藏、点赞、下载和转发记录</p></div><el-tag type="info">{{ myKnowledgeTotal }} 条</el-tag><el-radio-group v-model="knowledgeActivityType" size="small" @change="loadMyKnowledge"><el-radio-button value="UPLOADED">上传</el-radio-button><el-radio-button value="COLLECTED">收藏</el-radio-button><el-radio-button value="LIKED">点赞</el-radio-button><el-radio-button value="DOWNLOADED">下载</el-radio-button><el-radio-button value="FORWARDED">转发</el-radio-button></el-radio-group></div><div class="activity-list"><article v-for="file in myKnowledge" :key="file.id"><span class="file-type">{{ file.fileType?.toUpperCase() }}</span><div><strong>{{ file.title }}</strong><p>资源 #{{ file.id }} · {{ auditLabel(file.auditStatus) }}</p></div><el-button text type="primary" @click="openKnowledge(file)">阅读</el-button></article><div v-if="myKnowledgeHasMore || myKnowledgeLoading || myKnowledgeError" class="knowledge-load-more"><el-button text type="primary" :loading="myKnowledgeLoading" @click="loadMoreMyKnowledge">{{ myKnowledgeLoading ? '正在加载记录' : myKnowledgeError ? `${myKnowledgeError}，点击重试` : '加载更多记录' }}</el-button></div><el-empty v-if="!myKnowledge.length" description="暂无对应资源记录" /></div></section>
-            <section class="surface"><div class="surface-head"><div><h3>收藏的社区帖子</h3><p>集中查看收藏内容，进入帖子后可继续参与讨论</p></div><el-tag type="info">{{ collectedPosts.length }} 篇</el-tag></div><div class="activity-list"><article v-for="post in collectedPosts" :key="post.id"><span class="file-type">帖子</span><div><strong>{{ post.title }}</strong><p>帖子 #{{ post.id }} · {{ post.likes || 0 }} 赞</p></div><div class="collection-actions"><el-button text type="primary" @click="openPostDetail(post)">查看</el-button><el-button text type="danger" @click="removeCollectedPost(post)">取消收藏</el-button></div></article><el-empty v-if="!collectedPosts.length" description="暂无收藏的社区帖子" /></div></section>
-            <div class="two-column account-tools">
-              <section class="surface"><div class="surface-head"><div><h3>关系与安全</h3><p>输入完整用户名后管理关注、拉黑和举报</p></div></div><el-form label-position="top"><el-form-item label="对方完整用户名"><div class="exact-user-search"><el-input v-model="relationForm.username" placeholder="输入完整用户名" clearable @clear="relationTargetUser = undefined; relationForm.targetUserId = 0" @keyup.enter="resolveRelationUser" /><el-button :icon="Search" @click="resolveRelationUser">查找</el-button></div></el-form-item></el-form><div v-if="relationTargetUser" class="exact-user-result"><strong>{{ relationTargetUser.nickname }}</strong><span>@{{ relationTargetUser.username }}</span></div><div class="relation-actions"><el-button type="primary" @click="followUser">关注</el-button><el-button @click="unfollowUser">取消关注</el-button><el-button type="warning" @click="blockUser">拉黑</el-button><el-button @click="unblockUser">解除拉黑</el-button><el-button type="danger" text @click="reportUser">举报用户</el-button></div><div class="relation-summary"><span>已关注 <strong>{{ followedUsers.length }} 人</strong></span><span>粉丝 <strong>{{ followerUsers.length }} 人</strong></span><span>黑名单 <strong>{{ blockedUserIds.length }} 人</strong></span></div><el-tabs class="relation-lists"><el-tab-pane :label="`关注 ${followedUsers.length}`"><div class="compact-user-list"><article v-for="user in followedUsers" :key="user.id"><div class="mini-avatar">{{ user.nickname.slice(0,1) }}</div><span><strong>{{ user.nickname }}</strong><small>@{{ user.username }}</small></span><el-button text type="primary" @click="loadAuthorPostsFromProfile(user.id)">查看动态</el-button></article><el-empty v-if="!followedUsers.length" description="还没有关注用户" /></div></el-tab-pane><el-tab-pane :label="`粉丝 ${followerUsers.length}`"><div class="compact-user-list"><article v-for="user in followerUsers" :key="user.id"><div class="mini-avatar">{{ user.nickname.slice(0,1) }}</div><span><strong>{{ user.nickname }}</strong><small>@{{ user.username }}</small></span><el-button text type="primary" @click="loadAuthorPostsFromProfile(user.id)">查看动态</el-button></article><el-empty v-if="!followerUsers.length" description="暂无粉丝" /></div></el-tab-pane></el-tabs></section>
-              <section class="surface"><el-tabs v-model="profileToolTab"><el-tab-pane label="行为足迹" name="activity"><div class="activity-list behavior-list"><article v-for="item in behaviors" :key="item.id" :class="{ 'activity-clickable': behaviorTargetCanOpen(item) }" :role="behaviorTargetCanOpen(item) ? 'link' : undefined" :tabindex="behaviorTargetCanOpen(item) ? 0 : undefined" @click="openBehaviorTarget(item)" @keydown.enter="openBehaviorTarget(item)"><span class="event-dot"></span><div><strong>{{ behaviorActionLabel(item.action) }} · {{ behaviorTargetLabel(item.targetType) }}</strong><p>{{ behaviorTargetLabel(item.targetType) }} #{{ item.targetId }}</p><small>{{ formatDate(item.createdAt) }}</small></div><ArrowRight v-if="behaviorTargetCanOpen(item)" class="activity-arrow" /></article><el-empty v-if="!behaviors.length" description="暂无行为记录" /></div></el-tab-pane><el-tab-pane :label="`我的草稿 ${drafts.length}`" name="drafts"><article v-for="draft in drafts" :key="draft.id" class="draft-row"><div><strong>{{ draft.title }}</strong><p>{{ draft.content }}</p><small>{{ draft.imageUrls?.length || 0 }} 张图片 · {{ formatDate(draft.updatedAt || '') }}</small></div><div class="draft-actions"><el-button text type="primary" @click="editDraft(draft)">编辑</el-button><el-button text type="success" @click="publishDraft(draft)">发布</el-button><el-button text type="danger" @click="deleteDraft(draft)">删除</el-button></div></article><el-empty v-if="!drafts.length" description="暂无草稿" /></el-tab-pane></el-tabs></section>
-            </div>
-            <section class="surface faq-help"><div class="surface-head"><div><h3>使用帮助</h3><p>常见问题与平台使用说明</p></div><el-tag type="info">{{ faqs.length }} 条</el-tag></div><el-collapse><el-collapse-item v-for="faq in faqs" :key="faq.id" :title="faq.question" :name="faq.id"><p>{{ faq.answer }}</p></el-collapse-item></el-collapse><el-empty v-if="!faqs.length" description="暂无使用帮助" /></section>
-          </section>
+         <MemberProfileView v-else :page="memberProfileViewPage" />
         </template>
 
         <template v-else>
@@ -269,6 +259,7 @@ import MessagesView from './components/MessagesView.vue';
 import CommunityFeedView from './components/CommunityFeedView.vue';
 import KnowledgeLibraryView from './components/KnowledgeLibraryView.vue';
 import WorkbenchView from './components/WorkbenchView.vue';
+import MemberProfileView from './components/MemberProfileView.vue';
 import AdminModerationView from './components/AdminModerationView.vue';
 import AdminSettingsView from './components/AdminSettingsView.vue';
 import AdminUsersView from './components/AdminUsersView.vue';
@@ -277,7 +268,6 @@ import { clearLegacyAuthToken, deleteData, downloadData, getData, getLegacyAuthT
 const CommunityDetailPage = defineAsyncComponent(() => import('./components/CommunityDetailPage.vue'));
 const KnowledgeDetailPage = defineAsyncComponent(() => import('./components/KnowledgeDetailPage.vue'));
 const PdfViewer = defineAsyncComponent(() => import('./components/PdfViewer.vue'));
-const EmailBinding = defineAsyncComponent(() => import('./components/EmailBinding.vue'));
 const AdminAuditLog = defineAsyncComponent(() => import('./components/AdminAuditLog.vue'));
 const OnboardingGuide = defineAsyncComponent(() => import('./components/OnboardingGuide.vue'));
 
@@ -339,7 +329,6 @@ const adminConfigSnapshot = ref('');
 const viewLoading = ref(false); const viewError = ref('');
 const feedMode = ref<'all'|'following'|'mine'|'author'>('all'); const authorFilterUserId = ref(0); const governanceTab = ref('comments');
 const governanceKeyword = ref('');
-const profileToolTab = ref('activity');
 const onboardingVisible = ref(false);
 const knowledgeDialog = ref(false); const readerDialog = ref(false); const postDialog = ref(false); const postReviewDialog = ref(false); const feedbackDialog = ref(false); const ticketDialog = ref(false); const faqDialog = ref(false); const categoryDialog = ref(false); const registerDialog = ref(false); const governanceDialog = ref(false); const notificationsDialog = ref(false); const conversationDialog = ref(false); const knowledgeMetadataDialog = ref(false); const userGovernanceDialog = ref(false);
 
@@ -350,7 +339,6 @@ const forgotForm = ref({ username:'', contact:'', code:'', newPassword:'', confi
 const captchaImage = ref(''); const captchaLoading = ref(false); const captchaCooldownRemaining = ref(0); const captchaExpiresAt = ref(0); let captchaCooldownTimer: ReturnType<typeof setInterval> | undefined; let captchaExpiryTimer: ReturnType<typeof setTimeout> | undefined; let captchaRefreshPending = false;
 const profileForm = ref({ userId:currentUserId.value, nickname:displayName.value, avatarUrl:'', signature:'' });
 const profileAudit = ref<ProfileAuditState|null>(null);
-const profileAuditPending = computed(()=>profileAudit.value?.status==='PENDING'?pendingChanges({nickname:displayName.value,signature:profileForm.value.signature},profileAudit.value):[]);
 const passwordForm = ref({ currentPassword:'', newPassword:'' });
 const knowledgeForm = ref({ userId:currentUserId.value, title:'', filename:'knowledge.txt', fileType:'txt', content:'', fileUrl:'', categoryId:null as number|null });
 type KnowledgeCategory = { id:number; name:string; parentId?:number; sortNo?:number };
@@ -461,8 +449,6 @@ const postDialogTitle = computed(() => editingPostId.value ? '编辑社区帖子
 const businessModeMismatch = computed(()=>new Set(runtimeModes.value.filter(item=>item.businessData&&item.available).map(item=>item.mode)).size>1);
 const runtimeModeProblem = computed(()=>businessModeMismatch.value||runtimeModes.value.some(item=>!item.available||item.healthy===false));
 const communityDirectory = computed<UserRecord[]>(() => [communityUser(currentUserId.value), ...Object.values(userSummaries.value).filter(user => user.id !== currentUserId.value)]);
-const followedUsers = computed(() => (followData.value.followedUserIds || []).map(communityUser));
-const followerUsers = computed(() => (followData.value.followerUserIds || []).map(communityUser));
 
 
 
@@ -532,8 +518,6 @@ function ticketTypeLabel(type:string){ return ({BUG:'系统问题',SUGGESTION:'�
 function notificationTypeLabel(type?:string){ return ({SYSTEM:'系统通知',MESSAGE:'私信通知',COMMENT:'评论通知',REPLY:'回复通知',FEEDBACK:'反馈通知'} as Record<string,string>)[type || 'SYSTEM'] || '系统通知'; }
 function behaviorActionLabel(action:string){return ({VIEW:'浏览',LIKE:'点赞',COLLECT:'收藏',COMMENT:'评论',UPLOAD:'上传',DOWNLOAD:'下载',FORWARD:'转发',PUBLISH:'发布'} as Record<string,string>)[action]||action;}
 function behaviorTargetLabel(target:string){return ({KNOWLEDGE:'知识',POST:'帖子',COMMENT:'评论',USER:'用户'} as Record<string,string>)[target]||target;}
-function behaviorTargetCanOpen(item:BehaviorRecord){return item.targetId>0&&['KNOWLEDGE','POST'].includes(item.targetType);}
-function openBehaviorTarget(item:BehaviorRecord){if(!behaviorTargetCanOpen(item))return;if(item.targetType==='KNOWLEDGE')openKnowledge({id:item.targetId} as KnowledgeFile);else openPostDetail({id:item.targetId} as Post);}
 
 // The API sends times with their offset, so the browser shows them in the reader's own time zone.
 function notifyError(error:unknown){ if(isSessionExpiredError(error))return; ElMessage.error(toUserMessage(error)); }
@@ -739,7 +723,6 @@ function maybeShowOnboarding(){
   if(!authenticated.value)return;
   onboardingVisible.value=shouldShowOnboarding(currentUserId.value,browserStorage());
 }
-function openOnboarding(){onboardingVisible.value=true;}
 function closeOnboarding(){
   onboardingVisible.value=false;
   markOnboardingSeen(currentUserId.value,browserStorage());
@@ -954,7 +937,6 @@ watch(feedSentinelRef,element=>{
 });
 async function loadCommunityPostCount(){communityPostCount.value=(await getData<{total:number}>('/square/feed/count')).total;}
 async function loadAuthorPosts(userId:number){authorFilterUserId.value=userId;feedMode.value='author';await loadFeed('author');}
-async function loadAuthorPostsFromProfile(userId:number){activeView.value='forum';await loadAuthorPosts(userId);}
 /** The member behind a notification, once their summary has arrived. */
 function noticeActor(notice:Notice):UserRecord|undefined{
   return notice.actorUserId?userSummaries.value[notice.actorUserId]:undefined;
@@ -983,30 +965,14 @@ async function loadMyKnowledge(){
   if(token!==myKnowledgeToken)return;
   applyMyKnowledgePage(page,true);
 }
-async function loadMoreMyKnowledge(){
-  if(!myKnowledgeHasMore.value||myKnowledgeLoading.value)return;
-  const token=myKnowledgeToken;
-  myKnowledgeLoading.value=true;
-  myKnowledgeError.value='';
-  try{
-    const page=await getData<KnowledgePage>(myKnowledgeUrl(myKnowledgeCursor.value));
-    if(token!==myKnowledgeToken)return;
-    applyMyKnowledgePage(page,false);
-  }catch(error){if(token===myKnowledgeToken)myKnowledgeError.value=toUserMessage(error,'记录加载失败');}
-  finally{myKnowledgeLoading.value=false;}
-}
 async function loadCollectedPosts(){collectedPosts.value=await getData<Post[]>('/square/collections');await loadUserSummaries(collectedPosts.value.map(post=>post.userId));}
 async function loadMyPosts(){feedMode.value='mine';await loadFeedFirstPage('mine');}
 function resetPostEditor(){editingPostId.value=0;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:'',content:''};selectedPostImages.value=[];postImageFiles.value=[];}
 function existingImageFiles(imageUrls?:string[]):UploadUserFile[]{return(imageUrls||[]).map((url,index)=>({name:`图片 ${index+1}`,url,status:'success'}));}
 function editPost(post:Post){editingPostId.value=post.id;editingDraftId.value=0;postForm.value={userId:currentUserId.value,title:post.title,content:post.content};selectedPostImages.value=[];postImageFiles.value=existingImageFiles(post.imageUrls);postDialog.value=true;}
-function editDraft(draft:Draft){editingDraftId.value=draft.id;editingPostId.value=0;postForm.value={userId:currentUserId.value,title:draft.title,content:draft.content};selectedPostImages.value=[];postImageFiles.value=existingImageFiles(draft.imageUrls);postDialog.value=true;}
-async function publishDraft(draft:Draft){await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});await postData('/post/draft/publish',{id:draft.id});await loadDrafts();ElMessage.success('帖子已提交审核');}
-async function deleteDraft(draft:Draft){await ElMessageBox.confirm(`确认删除草稿“${draft.title}”？`,'删除草稿',{type:'warning'});await deleteData('/post/draft',{draftId:draft.id});await loadDrafts();ElMessage.success('草稿已删除');}
 function openPostDetail(post:Post){navigateToDetail('community',post.id);}
 async function likeDetailPost(post:Post){const result=await postData<PostLikeResult>('/post/like',{postId:post.id});if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,likes:result.likes,liked:result.liked};if(result.liked){await recordBehavior('LIKE','POST',post.id);ElMessage.success('已点赞');}else ElMessage.success('已取消点赞');}
 async function collectPost(post:Post){const result=await postData<PostCollectResult>('/square/collect',{postId:post.id});post.collected=result.collected;if(detailPost.value?.id===post.id)detailPost.value={...detailPost.value,collected:result.collected};if(result.collected){await recordBehavior('COLLECT','POST',post.id);ElMessage.success('已收藏帖子');}else{collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);ElMessage.success('已取消收藏');}}
-async function removeCollectedPost(post:Post){if(post.collected)await collectPost(post);}
 async function deletePost(post:Post){await ElMessageBox.confirm(`删除帖子“${post.title}”后评论和互动记录都无法恢复，确认继续？`,'删除帖子',{type:'warning',confirmButtonText:'确认删除'});await deleteData('/post',{postId:post.id});feedPosts.value=feedPosts.value.filter(item=>item.id!==post.id);collectedPosts.value=collectedPosts.value.filter(item=>item.id!==post.id);if(detailPost.value?.id===post.id)leaveDetail();ElMessage.success('帖子已删除');}
 async function createDetailComment(payload:{content:string;parentId:number}){
   if(!detailPost.value)return;
@@ -1207,8 +1173,6 @@ async function loadProfile(){const [user,follows,blocks,history,faqResult]=await
   // A waiting change is what the member last asked for, so the form shows that rather than the live values.
   const pending=profileAudit.value?.status==='PENDING'?profileAudit.value:null;
   profileForm.value={userId:user.id,nickname:pending?pending.nickname||user.nickname:user.nickname,avatarUrl:user.avatarUrl||'',signature:pending?pending.signature||'':user.signature||''};displayName.value=user.nickname;followData.value=follows;blockedUserIds.value=blocks.blockedUserIds;behaviors.value=history.slice(-100).reverse();faqs.value=faqResult;await loadUserSummaries([...(follows.followedUserIds||[]),...(follows.followerUserIds||[])]);await Promise.all([loadDrafts(),loadFeedback(),loadMyKnowledge(),loadCollectedPosts()]);}
-async function saveProfile(){const nickname=profileForm.value.nickname.trim();if(role.value!=='ADMIN'&&nickname!==displayName.value&&nicknameImpersonatesStaff(nickname)){ElMessage.warning('昵称不能冒充平台管理员、官方或客服，请更换');return;}const user=await postData<UserRecord>('/user/profile',profileForm.value);applyOwnProfile(user);
-  ElMessage.success(user.profileAudit?.status==='PENDING'?'资料已提交，等待管理员审核':'资料已保存');}
 
 /**
  * Keeps the header and the stored name on the approved identity: a change waiting for review must not look as if
@@ -1221,17 +1185,9 @@ function applyOwnProfile(user:UserRecord){
   setStoredValue('ai-knowledge-name',user.nickname);
   setStoredValue('ai-knowledge-avatar',avatarUrl.value);
 }
-async function removeAvatar(){await ElMessageBox.confirm('确认删除当前头像？','删除头像',{type:'warning'});const user=await postData<UserRecord>('/user/profile',{...profileForm.value,avatarUrl:''});profileForm.value.avatarUrl='';applyOwnProfile(user);ElMessage.success('头像已删除');}
-async function changePassword(){if(!passwordForm.value.currentPassword){ElMessage.warning('请输入当前密码');return;}const passwordRule=passwordRuleMessage(passwordForm.value.newPassword,username.value);if(passwordRule){ElMessage.warning(passwordRule);return;}if(passwordForm.value.newPassword===passwordForm.value.currentPassword){ElMessage.warning('新密码不能与当前密码相同');return;}try{await postData('/user/password',passwordForm.value);passwordForm.value={currentPassword:'',newPassword:''};ElMessage.success('密码已更新，其他设备上的登录已退出');}catch(error){notifyError(error);}}
 async function handleAvatarFile(file: UploadFile){const raw=file.raw as UploadRawFile|undefined;if(!raw)return;const form=new FormData();form.append('file',raw);try{const user=await postFormData<UserRecord>('/user/avatar/upload',form);profileForm.value.avatarUrl=user.avatarUrl||'';avatarUrl.value=user.avatarUrl||'';setStoredValue('ai-knowledge-avatar',avatarUrl.value);ElMessage.success('头像已更新');}catch(error){notifyError(error);}}
 async function recordBehavior(action:string,targetType:string,targetId:number){await postData('/user/behavior',{userId:currentUserId.value,action,targetType,targetId});}
-async function resolveRelationUser(){const query=relationForm.value.username.trim();if(!query){relationTargetUser.value=undefined;relationForm.value.targetUserId=0;return;}try{const user=await getData<UserRecord>(`/user/info?username=${encodeURIComponent(query)}`);if(user.id===currentUserId.value)throw new Error('不能对自己执行社交操作');relationTargetUser.value=user;relationForm.value.targetUserId=user.id;}catch(error){relationTargetUser.value=undefined;relationForm.value.targetUserId=0;notifyError(error);}}
 function relationTarget(){if(!relationForm.value.targetUserId){ElMessage.warning('请先输入完整用户名并查找');return 0;}return relationForm.value.targetUserId;}
-async function followUser(){if(!relationTarget())return;await postData('/user/follow',{targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已关注用户');}
-async function unfollowUser(){if(!relationTarget())return;await deleteData('/user/follow',{targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已取消关注');}
-async function blockUser(){if(!relationTarget())return;await postData('/user/block',{targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已加入黑名单');}
-async function unblockUser(){if(!relationTarget())return;await deleteData('/user/block',{targetUserId:relationForm.value.targetUserId});await loadProfile();ElMessage.success('已解除拉黑');}
-async function reportUser(){if(!relationTarget())return;const {value}=await ElMessageBox.prompt('请填写举报原因','举报用户',{inputValue:'发布不当内容'});await postData('/user/report',{targetUserId:relationForm.value.targetUserId,reason:value});ElMessage.success('用户举报已提交');}
 async function loadFeedback(){tickets.value=await getData(`/feedback/tickets?userId=${currentUserId.value}`);}
 async function createTicket(){if(!feedbackForm.value.content.trim())return;await postData('/feedback/ticket',feedbackForm.value);feedbackDialog.value=false;feedbackForm.value.content='';await loadFeedback();ElMessage.success('反馈已提交');}
 
@@ -1485,6 +1441,7 @@ const moderationActions = { auditKnowledge, auditPost, auditProfileChange, delet
 const platformSettings = { aiConfig, aiConfigDirty, aiSourceOptions, businessModeMismatch, reviewHealth, runtimeModes, runtimeModeProblem, superAdmin, aiSourceSearching, aiIndexProgress, adminEvents, aiOverview };
 const settingsActions = { saveAiConfig, discardAiConfig, searchAiSourceFiles };
 
+const profileToolTab = ref('activity');
 const dashboardPage = { loadAdminDashboard, metricValue, moderationOpenCount, openAdminQueue, selectView, systemHealth, ticketOpenCount };
 
 const analyticsPage = { analyticsDays, forumAnalytics, knowledgeAnalytics, metricValue, ticketAnalytics };
@@ -1500,5 +1457,7 @@ const communityFeedViewPage = { activeView, authorFilterUserId, avatarUrl, colle
 const knowledgeLibraryViewPage = { activeView, collectKnowledge, communityUser, currentUserId, deleteKnowledge, downloadKnowledge, forwardKnowledge, isFollowing, knowledgeActivityType, knowledgeCategories, knowledgeCategoryCounts, knowledgeCategoryId, knowledgeDialog, knowledgeFiles, knowledgeHasMore, knowledgeKeyword, knowledgeLoadError, knowledgeLoadingMore, knowledgeRanking, knowledgeSearchMode, knowledgeSentinelRef, knowledgeTotal, knowledgeType, loadMoreKnowledge, myKnowledge, openKnowledge, platformConfig, recordBehavior, reportKnowledge, searchKnowledge, toggleFollowAuthor, username };
 
 const workbenchViewPage = { activeView, communityPostCount, communityUser, displayName, feedPosts, knowledgeDialog, knowledgeFiles, knowledgeTotal, notificationUnread, openKnowledge, openPostDetail, platformConfig, selectView, tickets };
+
+const memberProfileViewPage = { activeView, applyMyKnowledgePage, applyOwnProfile, avatarUrl, behaviorActionLabel, behaviorTargetLabel, behaviors, blockedUserIds, collectPost, collectedPosts, communityUser, currentUserId, displayName, drafts, editingDraftId, editingPostId, existingImageFiles, faqs, feedbackDialog, followData, knowledgeActivityType, linkedTicketId, loadAuthorPosts, loadDrafts, loadMyKnowledge, loadProfile, myKnowledge, myKnowledgeCursor, myKnowledgeError, myKnowledgeHasMore, myKnowledgeLoading, myKnowledgeToken, myKnowledgeTotal, myKnowledgeUrl, nicknameImpersonatesStaff, notifyError, onboardingVisible, openKnowledge, openPostDetail, passwordForm, passwordRuleMessage, platformConfig, postDialog, postForm, postImageFiles, profileAudit, profileForm, profileToolTab, relationForm, relationTarget, relationTargetUser, role, selectedPostImages, ticketStatusLabel, ticketTypeLabel, tickets, username };
 
 </script>

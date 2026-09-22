@@ -39,4 +39,16 @@ test.describe('the member workspace', () => {
 
     expect(problems).toEqual([]);
   });
+
+  test('the drafts button on the feed opens the profile on its drafts tab', async ({ page }) => {
+    await signIn(page, DEMO);
+    await page.goto('/');
+    await openAdminSection(page, '社区论坛');
+
+    await page.getByRole('button', { name: /草稿箱/ }).click();
+
+    // One view writes the tab, another reads it, so the page owns it; this is what proves that still works.
+    await expect(page.getByRole('heading', { name: '个人中心', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('tab', { name: /我的草稿/ })).toHaveAttribute('aria-selected', 'true');
+  });
 });
