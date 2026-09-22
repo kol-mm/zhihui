@@ -374,6 +374,7 @@ import { uploadSizeProblem } from './utils/uploadLimits';
 import { parseStatusLabel, parseStatusTone } from './utils/parseStatus';
 import { auditDecisionNote, auditSourceLabel, auditSourceTone } from './utils/auditSource';
 import { reviewCounters, reviewVerdict, type ReviewHealth } from './utils/reviewHealth';
+import { auditLabel, formatDate, postStatusLabel, publishPolicyLabel, reportStatusLabel, roleLabel, sessionStatusLabel } from './utils/statusLabels';
 import { pendingChanges, profileAuditChanges, profileAuditStatusLabel, profileAuditStatusType, type ProfileAuditState, type ProfileChange } from './utils/profileAudit';
 import { clearLegacyAuthToken, deleteData, downloadData, getData, getLegacyAuthToken, getStoredValue, isSessionExpiredError, onSessionExpired, postData, postFormData, putData, removeStoredValue, resolveApiUrl, setStoredValue, toUserMessage } from './api/client';
 // Loaded when first shown: most visits never open a detail page or a PDF.
@@ -660,14 +661,8 @@ function knowledgeTableRows(text?:string){return(text||'').split('\n').filter(Bo
 
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
 function categoryCount(categoryId:number){ return knowledgeSearchMode.value ? knowledgeFiles.value.filter(file=>file.categoryId===categoryId).length : (knowledgeCategoryCounts.value[categoryId] || 0); }
-function auditLabel(status:string){ return ({APPROVED:'已通过',PENDING:'待审核',REJECTED:'已驳回',HIDDEN:'已下架'} as Record<string,string>)[status] || status; }
-function postStatusLabel(status:string){ return ({PUBLISHED:'已发布',PENDING:'待审核',HIDDEN:'已隐藏'} as Record<string,string>)[status] || status; }
-function reportStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已结案',REJECTED:'已驳回'} as Record<string,string>)[status] || status; }
 function ticketStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已解决'} as Record<string,string>)[status] || status; }
 function ticketTypeLabel(type:string){ return ({BUG:'系统问题',SUGGESTION:'产品建议',SUPPORT:'客服咨询'} as Record<string,string>)[type] || type; }
-function roleLabel(value:string){ return ({ADMIN:'平台管理员',USER:'社区用户'} as Record<string,string>)[value] || value; }
-function publishPolicyLabel(value?:string){ return ({STANDARD:'标准审核',PRE_REVIEW:'强制预审',BLOCKED:'禁止发布'} as Record<string,string>)[value || 'STANDARD'] || value || '标准审核'; }
-function sessionStatusLabel(value:string){ return ({ACTIVE:'正常',RESTRICTED:'已限制',ARCHIVED:'已封存'} as Record<string,string>)[value] || value; }
 function notificationTypeLabel(type?:string){ return ({SYSTEM:'系统通知',MESSAGE:'私信通知',COMMENT:'评论通知',REPLY:'回复通知',FEEDBACK:'反馈通知'} as Record<string,string>)[type || 'SYSTEM'] || '系统通知'; }
 function eventTypeLabel(type:string){ return ({MESSAGE_SENT:'私信已发送',MESSAGE_CLEARED:'私信已清空',MESSAGE_DELETED:'私信已删除',FEEDBACK_TICKET_CREATED:'反馈工单已创建',FEEDBACK_TICKET_REPLIED:'反馈工单已回复'} as Record<string,string>)[type] || type; }
 function eventStatusLabel(status:string){ return ({LOCAL_STORED:'已保存到本地',RABBITMQ_READY:'已发送到消息队列'} as Record<string,string>)[status] || status; }
@@ -680,7 +675,6 @@ function openBehaviorTarget(item:BehaviorRecord){if(!behaviorTargetCanOpen(item)
 
 function localDateStamp(){const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;}
 // The API sends times with their offset, so the browser shows them in the reader's own time zone.
-function formatDate(value:string){ if(!value)return ''; const time=new Date(value); return Number.isNaN(time.getTime())?value:time.toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function notifyError(error:unknown){ if(isSessionExpiredError(error))return; ElMessage.error(toUserMessage(error)); }
 function clearCaptchaCooldown(){captchaCooldownRemaining.value=0;if(captchaCooldownTimer){clearInterval(captchaCooldownTimer);captchaCooldownTimer=undefined;}}
 function startCaptchaCooldown(seconds:number){ captchaCooldownRemaining.value=Math.max(0,Math.ceil(seconds)); if(captchaCooldownTimer)clearInterval(captchaCooldownTimer); if(captchaCooldownRemaining.value>0){ captchaCooldownTimer=setInterval(()=>{ captchaCooldownRemaining.value=Math.max(0,captchaCooldownRemaining.value-1); if(captchaCooldownRemaining.value===0 && captchaCooldownTimer){clearInterval(captchaCooldownTimer); captchaCooldownTimer=undefined; if(captchaRefreshPending){captchaRefreshPending=false;void loadCaptcha();} } },1000); } }
