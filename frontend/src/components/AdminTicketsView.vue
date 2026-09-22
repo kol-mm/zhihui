@@ -10,11 +10,34 @@
 </template>
 
 <script setup lang="ts">
+import { type Ref } from 'vue';
 import { Delete, Edit, Plus, Search } from '@element-plus/icons-vue';
 import { formatDate } from '../utils/statusLabels';
 
 /** Everything this view shows belongs to the page that loads it; it arrives together. */
-const props = defineProps<{ page: Record<string, any> }>();
+type Ticket = { id:number; userId:number; type:string; content:string; status:string; reply?:string; assigneeUserId?:number; assignedAt?:string; closedAt?:string; createdAt?:string; updatedAt?:string };
+type Faq = { id:number; question:string; answer:string; sortNo:number };
+
+type PageState = {
+  adminTickets:Ref<Ticket[]>;
+  adminTicketKeyword:Ref<string>;
+  adminTicketStatus:Ref<string>;
+  adminTicketTotal:Ref<number>;
+  adminTicketHasMore:Ref<boolean>;
+  adminTicketLoading:Ref<boolean>;
+  assignableAdmins:Ref<{id:number;nickname:string;username:string}[]>;
+  faqs:Ref<Faq[]>;
+  faqDialog:Ref<boolean>;
+  ticketStatusLabel:(status:string)=>string;
+  ticketTypeLabel:(type:string)=>string;
+  openTicketReply:(ticket:Ticket)=>void;
+  assignTicket:(ticket:Ticket,assigneeUserId:number|string)=>Promise<void>;
+  loadMoreAdminTickets:()=>Promise<void>;
+  editFaq:(faq:Faq)=>void;
+  deleteFaq:(faq:Faq)=>Promise<void>;
+};
+
+const props = defineProps<{ page: PageState }>();
 
 const { adminTicketHasMore, adminTicketKeyword, adminTicketLoading, adminTicketStatus, adminTicketTotal, adminTickets, assignTicket, assignableAdmins, deleteFaq, editFaq, faqDialog, faqs, loadMoreAdminTickets, openTicketReply, ticketStatusLabel, ticketTypeLabel } = props.page;
 </script>

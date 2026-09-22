@@ -9,11 +9,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, markRaw } from 'vue';
+import { computed, markRaw, type Ref, type ComputedRef } from 'vue';
 import { ChatDotRound, Files, Refresh, Tickets, UserFilled } from '@element-plus/icons-vue';
 
 /** Everything this view shows belongs to the page that loads it; it arrives together. */
-const props = defineProps<{ page: Record<string, any> }>();
+
+type PageState = {
+  metricValue:(section:string,key:string)=>number;
+  moderationOpenCount:ComputedRef<number>;
+  ticketOpenCount:ComputedRef<number>;
+  systemHealth:Ref<Record<string,boolean>>;
+  loadAdminDashboard:()=>Promise<void>;
+  openAdminQueue:(tab:string)=>void;
+  selectView:(key:string)=>Promise<void>;
+};
+
+const props = defineProps<{ page: PageState }>();
 
 const { loadAdminDashboard, metricValue, moderationOpenCount, openAdminQueue, selectView, systemHealth, ticketOpenCount } = props.page;
 
