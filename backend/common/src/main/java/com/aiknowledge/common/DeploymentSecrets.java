@@ -1,7 +1,8 @@
 package com.aiknowledge.common;
 
-import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.core.env.Environment;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.env.EnvironmentPostProcessor;
+import org.springframework.core.env.ConfigurableEnvironment;
 
 import java.util.Arrays;
 import java.util.List;
@@ -16,14 +17,18 @@ import java.util.List;
  * script.
  *
  * <p>Development profiles keep the defaults, so tests and local runs are unaffected.
+ *
+ * <p>This runs while the environment is being prepared, before any bean is created. As an auto-configuration
+ * it ran after the datasource, so a service that could not reach its database failed on that instead and the
+ * refusal never happened.
  */
-@AutoConfiguration
-public class DeploymentSecrets {
+public class DeploymentSecrets implements EnvironmentPostProcessor {
     static final String DEVELOPMENT_JWT_SECRET = "local-dev-secret-change-before-production";
     static final String DEVELOPMENT_INTERNAL_TOKEN = "ai-knowledge-local-internal";
     private static final List<String> DEVELOPMENT_PROFILES = List.of("local", "test", "dev", "development");
 
-    public DeploymentSecrets(Environment environment) {
+    @Override
+    public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         String problem = problem(environment.getActiveProfiles(),
                 System.getenv("AI_KNOWLEDGE_JWT_SECRET"),
                 environment.getProperty("platform.internal-user-token"));

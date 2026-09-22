@@ -1,7 +1,8 @@
 package com.aiknowledge.gateway;
 
-import org.springframework.core.env.Environment;
-import org.springframework.stereotype.Component;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.env.EnvironmentPostProcessor;
+import org.springframework.core.env.ConfigurableEnvironment;
 
 import java.util.Arrays;
 import java.util.List;
@@ -12,14 +13,15 @@ import java.util.List;
  * default in place, anyone who has read the source could sign an administrator session and the gateway would
  * wave it through.
  *
- * <p>Development profiles keep the default, so a checkout still runs without configuration.
+ * <p>Development profiles keep the default, so a checkout still runs without configuration. It runs while the
+ * environment is being prepared, before any bean exists, so nothing else can fail first and hide the reason.
  */
-@Component
-class GatewayDeploymentSecrets {
+public class GatewayDeploymentSecrets implements EnvironmentPostProcessor {
     static final String DEVELOPMENT_JWT_SECRET = "local-dev-secret-change-before-production";
     private static final List<String> DEVELOPMENT_PROFILES = List.of("local", "test", "dev", "development");
 
-    GatewayDeploymentSecrets(Environment environment) {
+    @Override
+    public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         String problem = problem(environment.getActiveProfiles(), System.getenv("AI_KNOWLEDGE_JWT_SECRET"));
         if (problem != null) {
             throw new IllegalStateException(problem);
