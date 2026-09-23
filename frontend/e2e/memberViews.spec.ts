@@ -35,6 +35,13 @@ test.describe('the member workspace', () => {
     for (const [entry, heading] of SCREENS) {
       await openAdminSection(page, entry);
       await expect(page.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible();
+
+    // A fragment of markup left as text renders happily and logs nothing, so look for it directly.
+    const stray = await page.evaluate(() => {
+      const text = document.body.innerText || '';
+      return (text.match(/[^\s<>]*"\s*>/g) || []).slice(0, 3);
+    });
+    expect(stray, `stray markup on ${entry}`).toEqual([]);
     }
 
     expect(problems).toEqual([]);

@@ -1,6 +1,5 @@
 <template>
   <section class="page-stack">
-ge-stack">
             <el-alert v-if="platformConfig.platform_notice" :title="platformConfig.platform_notice" type="info" :closable="false" show-icon />
             <div class="welcome-row">
               <div><p class="section-kicker">今日概览</p><h3>{{ greeting }}，{{ displayName }}</h3><p>继续探索知识、社区动态和你的 AI 对话。</p></div>

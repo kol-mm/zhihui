@@ -1,6 +1,5 @@
 <template>
   <section class="page-stack community-page">
-ity-page">
             <div class="page-toolbar"><div><h3>{{ activeView === 'forum' ? '社区论坛' : '关注广场' }}</h3><p>{{ activeView === 'forum' ? '浏览全站已审核帖子并参与讨论' : '查看已关注用户的最新动态' }}</p></div><el-button type="primary" :icon="EditPen" @click="postDialog = true">发布帖子</el-button></div>
             <div class="feed-layout">
               <section class="feed-column">

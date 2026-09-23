@@ -1,6 +1,5 @@
 <template>
   <section class="page-stack">
-ge-stack">
             <div class="page-toolbar"><div><h3>知识库</h3><p>检索、阅读并管理社区知识资源</p></div><el-button v-if="platformConfig.knowledge_upload_enabled" type="primary" :icon="Upload" @click="knowledgeDialog = true">上传资料</el-button></div>
             <section class="surface filter-bar"><el-input v-model="knowledgeKeyword" placeholder="输入标题或正文关键词" :prefix-icon="Search" clearable @keyup.enter="searchKnowledge" /><el-select v-model="knowledgeType" placeholder="全部格式" clearable><el-option label="Word" value="docx" /><el-option label="PDF" value="pdf" /><el-option label="TXT" value="txt" /><el-option label="Markdown" value="md" /></el-select><el-button :icon="Search" @click="searchKnowledge">搜索</el-button></section>
             <section class="surface">
