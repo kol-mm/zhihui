@@ -43,3 +43,23 @@ describe('audit labels', () => {
     expect(detailFacts({ detail: { unknownKey: 'x' } })).toEqual([{ label: 'unknownKey', text: 'x' }]);
   });
 });
+
+describe('API key entries', () => {
+  it('are named, and the ones that cut off a secret are marked', () => {
+    expect(actionLabel('API_KEY_CREATE')).toBe('创建接口密钥');
+    expect(actionLabel('API_KEY_UPDATE')).toBe('修改接口密钥');
+    expect(actionLabel('API_KEY_ROTATE')).toBe('轮换接口密钥');
+    expect(actionLabel('API_KEY_REVOKE')).toBe('撤销接口密钥');
+    expect(isSevere('API_KEY_REVOKE')).toBe(true);
+    expect(isSevere('API_KEY_ROTATE')).toBe(true);
+    expect(isSevere('API_KEY_CREATE')).toBe(false);
+  });
+
+  it('read a key\'s scopes in words, and only within its scopes', () => {
+    expect(detailFacts({ detail: { scopes: ['knowledge:read', 'community:write'] } }))
+      .toEqual([{ label: '权限', text: '读取知识库、发帖与评论' }]);
+    expect(detailFacts({ detail: { previousPrefix: 'zk_abcdefgh' } }))
+      .toEqual([{ label: '原密钥前缀', text: 'zk_abcdefgh' }]);
+    expect(valueLabel('title', 'knowledge:read')).toBe('knowledge:read');
+  });
+});

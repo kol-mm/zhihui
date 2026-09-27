@@ -170,6 +170,7 @@
           <AdminAnalyticsView v-else-if="activeView === 'analytics'" :page="analyticsPage" />
           <AdminAuditLog v-else-if="activeView === 'audit'" :key="auditRefreshKey" v-model:subject-user-id="auditSubjectUserId" :subject-label="auditSubjectLabel" />
           <AdminTicketsView v-else-if="activeView === 'tickets'" :page="ticketsPage" />
+          <AdminApiKeysView v-else-if="activeView === 'api-keys'" :refresh-key="apiKeysRefreshKey" />
           <AdminSettingsView v-else :settings="platformSettings" :actions="settingsActions" />
         </template>
       </main>
@@ -240,7 +241,7 @@ import { computed, defineAsyncComponent, markRaw, onBeforeUnmount, onMounted, ne
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus';
 import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs';
-import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, CollectionTag, DataAnalysis, Delete, Document, Download, Edit, EditPen, Files, House, Loading, MagicStick, Menu, Message, MoreFilled, Notebook, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
+import { ArrowLeft, ArrowRight, Bell, ChatDotRound, ChatLineRound, Close, CollectionTag, DataAnalysis, Delete, Document, Download, Edit, EditPen, Files, House, Key, Loading, MagicStick, Menu, Message, MoreFilled, Notebook, Plus, Promotion, Reading, Refresh, Search, Setting, Star, SwitchButton, Tickets, Upload, UploadFilled, User, UserFilled, View, Warning } from '@element-plus/icons-vue';
 import { createListLoader, emptyModerationList, useModeration, type ModerationList, type ModerationPage, type OverviewSections } from './composables/moderation';
 import { detailPath, linkedCommentFrom, noticeDestination, type NoticeTarget } from './utils/noticeTargets';
 import { knowledgeCache } from './utils/knowledgeCache';
@@ -260,6 +261,7 @@ import CommunityFeedView from './components/CommunityFeedView.vue';
 import KnowledgeLibraryView from './components/KnowledgeLibraryView.vue';
 import WorkbenchView from './components/WorkbenchView.vue';
 import MemberProfileView from './components/MemberProfileView.vue';
+import AdminApiKeysView from './components/AdminApiKeysView.vue';
 import AdminModerationView from './components/AdminModerationView.vue';
 import AdminSettingsView from './components/AdminSettingsView.vue';
 import AdminUsersView from './components/AdminUsersView.vue';
@@ -411,7 +413,7 @@ let readerToken = 0;
 const governancePreviewDialog = ref(false); const governancePreviewKind = ref('内容预览'); const governancePreviewTitle = ref(''); const governancePreviewContent = ref('');
 
 const clientNavigation: NavigationItem[] = [{key:'home',label:'工作台',icon:markRaw(House)},{key:'knowledge',label:'知识库',icon:markRaw(Files)},{key:'forum',label:'社区论坛',icon:markRaw(ChatDotRound)},{key:'square',label:'关注广场',icon:markRaw(CollectionTag)},{key:'messages',label:'消息中心',icon:markRaw(Message)},{key:'notifications',label:'通知中心',icon:markRaw(Bell),badge:0},{key:'ai',label:'AI 问答',icon:markRaw(MagicStick)},{key:'profile',label:'个人中心',icon:markRaw(User)}];
-const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'analytics',label:'平台数据统计',icon:markRaw(DataAnalysis)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与常见问题',icon:markRaw(Tickets)},{key:'audit',label:'操作记录',icon:markRaw(Notebook)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
+const adminNavigation: NavigationItem[] = [{key:'dashboard',label:'运营概览',icon:markRaw(House)},{key:'moderation',label:'内容审核',icon:markRaw(CollectionTag)},{key:'governance',label:'深度审查',icon:markRaw(View)},{key:'analytics',label:'平台数据统计',icon:markRaw(DataAnalysis)},{key:'users',label:'用户管理',icon:markRaw(UserFilled)},{key:'tickets',label:'工单与常见问题',icon:markRaw(Tickets)},{key:'audit',label:'操作记录',icon:markRaw(Notebook)},{key:'api-keys',label:'接口密钥',icon:markRaw(Key)},{key:'system',label:'AI 与系统',icon:markRaw(Setting)}];
 const registrationUsernameValid = computed(()=>/^[A-Za-z0-9_-]{3,32}$/.test(registerForm.value.username.trim()));
 const registrationUsernameHint = computed(()=>!registerForm.value.username?'用户名用于登录，注册后不可修改':registrationUsernameValid.value?'用户名格式正确':'仅支持 3-32 位字母、数字、下划线或连字符');
 const registrationPasswordChecks = computed(()=>{
@@ -481,7 +483,7 @@ const governanceChunks = ref<ModerationList<AiChunk>>(emptyModerationList());
 
 const moderationOpenCount = computed(()=>metricValue('knowledgeAdmin','pendingAudit')+metricValue('forumAdmin','pendingAudit')+metricValue('userAdmin','pendingAudits')+metricValue('knowledgeAdmin','openReports')+metricValue('userAdmin','openReports'));
 const ticketOpenCount = computed(()=>metricValue('feedbackAdmin','pendingTickets')+metricValue('feedbackAdmin','processingTickets'));
-const adminWorkspaceNavigation = computed<NavigationItem[]>(()=>adminNavigation.map(item=>({...item,badge:item.key==='moderation'?moderationOpenCount.value||undefined:item.key==='tickets'?ticketOpenCount.value||undefined:item.key==='system'&&runtimeModeProblem.value?1:undefined})));
+const adminWorkspaceNavigation = computed<NavigationItem[]>(()=>adminNavigation.filter(item=>item.key!=='api-keys'||superAdmin.value).map(item=>({...item,badge:item.key==='moderation'?moderationOpenCount.value||undefined:item.key==='tickets'?ticketOpenCount.value||undefined:item.key==='system'&&runtimeModeProblem.value?1:undefined})));
 const aiConfigDirty = computed(()=>Boolean(adminConfigSnapshot.value)&&JSON.stringify(aiConfig.value)!==adminConfigSnapshot.value);
 // The three services each zero-fill the same day window, so the knowledge series carries the
 // axis and the other two are looked up by date.
@@ -510,7 +512,7 @@ function parseKnowledgeContent(file?:KnowledgeFile):KnowledgeContentBlock[] {
 const knowledgeContentBlocks = computed<KnowledgeContentBlock[]>(() => parseKnowledgeContent(selectedKnowledge.value));
 function knowledgeTableRows(text?:string){return(text||'').split('\n').filter(Boolean).map(row=>row.split('\t'));}
 
-const usersRefreshKey = ref(0);
+const usersRefreshKey = ref(0); const apiKeysRefreshKey = ref(0);
 function applyUserOverview(overview:Record<string,unknown>){adminOverview.value={...adminOverview.value,userAdmin:overview};}
 function metricValue(section:string,key:string){ const value=adminOverview.value[section]?.[key]; return typeof value==='number'?value:0; }
 function ticketStatusLabel(status:string){ return ({PENDING:'待处理',PROCESSING:'处理中',RESOLVED:'已解决'} as Record<string,string>)[status] || status; }
@@ -654,7 +656,7 @@ async function confirmDiscardAdminConfig(){if(!aiConfigDirty.value)return true;t
 async function switchPortal(value:'client'|'admin'){ if(value!==portal.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return;returnToRoot();portal.value=value; activeView.value=value==='admin'?'dashboard':'home'; mobileMenuOpen.value=false; await refreshCurrentView(); }
 async function selectView(key:string){ if(key==='governance'){governanceDialog.value=true;mobileMenuOpen.value=false;await loadGovernance();return;} if(key==='notifications'){mobileMenuOpen.value=false;await openNotifications();return;} if(key!==activeView.value&&portal.value==='admin'&&activeView.value==='system'&&!await confirmDiscardAdminConfig())return; if(key==='audit'&&!keepAuditSubject){auditSubjectUserId.value=null;auditSubjectLabel.value='';} keepAuditSubject=false; returnToRoot();if(key==='forum')feedMode.value='all';if(key==='square')feedMode.value='following';activeView.value=key; mobileMenuOpen.value=false; mobileAiHistoryOpen.value=false; window.scrollTo({top:0,behavior:'smooth'}); await refreshCurrentView(); }
 function openAdminQueue(tab:string){moderationTab.value=tab;void selectView('moderation');}
-async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; if(portal.value==='client')void refreshUnreadCount(); try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='analytics') await loadAnalytics(); else if(activeView.value==='users') usersRefreshKey.value++; else if(activeView.value==='tickets') await loadTicketsAdmin(); else if(activeView.value==='audit') auditRefreshKey.value++; else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(activeView.value==='home')await Promise.all([loadFeed('following'),loadCommunityPostCount()]);if(activeView.value==='forum')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'all');if(activeView.value==='square')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'following'); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=toUserMessage(error,'页面加载失败，请重试'); notifyError(error); } finally { viewLoading.value=false; } }
+async function refreshCurrentView(){ viewLoading.value=true; viewError.value=''; if(portal.value==='client')void refreshUnreadCount(); try { if(portal.value==='admin'){ if(activeView.value==='dashboard') await loadAdminDashboard(); else if(activeView.value==='moderation') await loadModeration(); else if(activeView.value==='analytics') await loadAnalytics(); else if(activeView.value==='users') usersRefreshKey.value++; else if(activeView.value==='api-keys') apiKeysRefreshKey.value++; else if(activeView.value==='tickets') await loadTicketsAdmin(); else if(activeView.value==='audit') auditRefreshKey.value++; else await loadSystemAdmin(); } else { if(['home','knowledge'].includes(activeView.value)) await loadKnowledge(); if(activeView.value==='home')await Promise.all([loadFeed('following'),loadCommunityPostCount()]);if(activeView.value==='forum')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'all');if(activeView.value==='square')await loadFeed(feedMode.value==='author'?'author':feedMode.value==='mine'?'mine':'following'); if(['home','messages'].includes(activeView.value)) await loadMessageData(); if(activeView.value==='ai') await loadAiHistory(); if(activeView.value==='profile') await loadProfile(); if(activeView.value==='home') await loadFeedback(); } } catch(error){ viewError.value=toUserMessage(error,'页面加载失败，请重试'); notifyError(error); } finally { viewLoading.value=false; } }
 async function refreshVisiblePage(){if(portal.value==='admin'&&activeView.value==='system'&&aiConfigDirty.value&&!await confirmDiscardAdminConfig())return;if(detailRoute.value)await loadDetailRoute();else await refreshCurrentView();}
 async function runGlobalSearch(){ returnToRoot();portal.value='client';activeView.value='knowledge'; knowledgeKeyword.value=globalSearch.value; await searchKnowledge(); }
 
