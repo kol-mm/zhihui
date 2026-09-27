@@ -17,7 +17,7 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndTheStarterAccounts() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_fresh")) {
             db.flyway().migrate();
-            assertEquals("1,2,3,4,5", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3,4,5,6", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(2, db.number("SELECT COUNT(*) FROM user"));
             assertEquals("ADMIN", db.text("SELECT role FROM user WHERE username = 'admin'"));
             // Exactly one super administrator, and it is the seeded admin account.
@@ -53,7 +53,7 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1,2,3,4,5", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3,4,5,6", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             // The operator's own admin account becomes the super administrator; the member does not.
             assertEquals(1, db.number("SELECT COUNT(*) FROM user WHERE super_admin = 1"));
             assertEquals("admin", db.text("SELECT username FROM user WHERE super_admin = 1"));
@@ -107,6 +107,34 @@ class FlywayMigrationTest {
             // Another member is unaffected.
             db.execute("INSERT INTO user_profile_change (user_id, nickname, before_nickname) VALUES (6, '别人', '原')");
             assertEquals(2, db.number("SELECT COUNT(*) FROM user_profile_change WHERE status = 'PENDING'"));
+        }
+    }
+
+    @Test
+    void anApiKeyDigestCanOnlyBelongToOneKey() throws Exception {
+        try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_api_key")) {
+            db.flyway().migrate();
+            String digest = "a".repeat(64);
+            db.execute("INSERT INTO api_key (name, prefix, key_hash, scopes, created_by) VALUES ('first', 'zk_aaaaaaaa', '"
+                    + digest + "', 'knowledge:read', 1)");
+            // Verification finds a key by its digest, so two keys sharing one would make the answer ambiguous.
+            SQLException taken = assertThrows(SQLException.class, () -> db.execute(
+                    "INSERT INTO api_key (name, prefix, key_hash, scopes, created_by) VALUES ('second', 'zk_aaaaaaaa', '"
+                            + digest + "', 'community:read', 1)"));
+            assertEquals(1062, taken.getErrorCode());
+        }
+    }
+
+    @Test
+    void recordingAKeysUseIsNotAnEdit() throws Exception {
+        try (MigrationDatabase db = new MigrationDatabase("zc_mig_user_api_key_used")) {
+            db.flyway().migrate();
+            db.execute("INSERT INTO api_key (name, prefix, key_hash, scopes, created_by, updated_at) VALUES "
+                    + "('used', 'zk_bbbbbbbb', '" + "b".repeat(64) + "', 'knowledge:read', 1, '2026-01-01 00:00:00')");
+            db.execute("UPDATE api_key SET last_used_at = NOW() WHERE prefix = 'zk_bbbbbbbb'");
+            // updated_at has no ON UPDATE clause: the list's "last modified" must not move every time a key is used.
+            assertEquals("2026-01-01 00:00:00", db.text("SELECT DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') FROM api_key"));
+            assertEquals(1, db.number("SELECT COUNT(*) FROM api_key WHERE last_used_at IS NOT NULL"));
         }
     }
 }

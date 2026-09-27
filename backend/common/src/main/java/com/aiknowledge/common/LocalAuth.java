@@ -41,6 +41,29 @@ public final class LocalAuth {
      * upstream settings look for the extra claim.
      */
     public static String issueToken(String username, Long userId, String role, boolean superAdmin) {
+        return issue(username, userId, role, superAdmin, expirySeconds(), UUID.randomUUID().toString());
+    }
+
+    /**
+     * A token for one request an API key makes on an account's behalf. It is always an ordinary member's — a key
+     * never carries administrator rights, whatever the account it acts for — it lives for seconds rather than
+     * hours, and its id names the key, so a service or a log line can tell a key's request from a person's.
+     */
+    public static String issueDelegatedToken(String username, Long userId, long apiKeyId, long lifetimeSeconds) {
+        if (lifetimeSeconds <= 0 || lifetimeSeconds > 300) {
+            throw new IllegalArgumentException("a delegated token lives between 1 and 300 seconds");
+        }
+        return issue(username, userId, "USER", false, lifetimeSeconds, "ak-" + apiKeyId + "-" + UUID.randomUUID());
+    }
+
+    /** Whether this token was issued for an API key rather than a person's sign-in. */
+    public static boolean isDelegated(String authorization) {
+        Claims claims = claims(authorization);
+        return claims != null && claims.tokenId() != null && claims.tokenId().startsWith("ak-");
+    }
+
+    private static String issue(String username, Long userId, String role, boolean superAdmin, long lifetimeSeconds,
+                                String tokenId) {
         long issuedAt = Instant.now().getEpochSecond();
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("sub", username);
@@ -48,8 +71,8 @@ public final class LocalAuth {
         payload.put("role", role);
         if (superAdmin) payload.put("sa", true);
         payload.put("iat", issuedAt);
-        payload.put("exp", issuedAt + expirySeconds());
-        payload.put("jti", UUID.randomUUID().toString());
+        payload.put("exp", issuedAt + lifetimeSeconds);
+        payload.put("jti", tokenId);
         String encodedPayload = encodeJson(payload);
         String signingInput = HEADER + "." + encodedPayload;
         return signingInput + "." + sign(signingInput);
