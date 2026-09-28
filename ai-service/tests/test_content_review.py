@@ -125,7 +125,9 @@ class ContentReviewTest(unittest.TestCase):
     def test_thresholds_are_configurable(self) -> None:
         with self.answering('{"decision": "APPROVE", "confidence": 0.6, "reason": "正常内容"}'):
             strict = self.main.review_content("标题", self.clean, self.model_settings(ai_audit_approve_confidence=0.9))
-            lenient = self.main.review_content("标题", self.clean, self.model_settings(ai_audit_approve_confidence=0.55))
+            # Spot-checking would send one run in ten to a person at random; this test is about the threshold.
+            lenient = self.main.review_content("标题", self.clean, self.model_settings(ai_audit_approve_confidence=0.55,
+                                                                                         ai_audit_sample_percent=0))
 
         self.assertEqual("ESCALATE", strict["decision"])
         self.assertEqual("APPROVE", lenient["decision"])
