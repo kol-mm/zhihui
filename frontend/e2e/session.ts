@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 
 /**
  * Signing in without going through the login form.
@@ -54,9 +54,36 @@ export function mintToken(member: Member, lifetimeSeconds = 1800): string {
 }
 
 /**
+ * The gateway allows each client 600 reads a minute, and every test's browser is the same client. Past about 30
+ * tests the suite outran that and the last tests saw 429s instead of pages. The limit is the product protecting
+ * itself, so the tests keep within it rather than it being raised for them: requests are counted over a rolling
+ * minute, and a test that would take the count past the budget waits for the window to move first. The budget
+ * sits well under 600 because api() calls and the gateway's own window boundaries are not counted exactly here.
+ */
+const REQUEST_BUDGET_PER_MINUTE = 420;
+const recentRequests: number[] = [];
+
+async function keepWithinRateLimit(page: Page): Promise<void> {
+  const windowStart = () => Date.now() - 60_000;
+  while (recentRequests.length && recentRequests[0] < windowStart()) recentRequests.shift();
+  if (recentRequests.length >= REQUEST_BUDGET_PER_MINUTE) {
+    // Wait until enough of the window has passed that a test's worth of requests (about 40) fits again.
+    const release = recentRequests[recentRequests.length - REQUEST_BUDGET_PER_MINUTE + 40] ?? recentRequests[0];
+    const wait = Math.max(0, release + 60_000 - Date.now()) + 250;
+    // The pause is not the test's own time, so it does not count against the test's timeout.
+    test.info().setTimeout(test.info().timeout + wait);
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/')) recentRequests.push(Date.now());
+  });
+}
+
+/**
  * Seeds the session before any page script runs, so the app comes up signed in rather than on the login form.
  */
 export async function signIn(page: Page, member: Member): Promise<string> {
+  await keepWithinRateLimit(page);
   const token = mintToken(member);
   const entries: Record<string, string> = {
     'ai-knowledge-local-token': token,
