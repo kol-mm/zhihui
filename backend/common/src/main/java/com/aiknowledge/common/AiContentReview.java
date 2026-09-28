@@ -36,7 +36,32 @@ public class AiContentReview {
     public AiContentReview() {
         this(System.getenv().getOrDefault("AI_REVIEW_URL", "http://ai:8200/ai/internal/review"),
                 System.getenv().getOrDefault("PLATFORM_INTERNAL_USER_TOKEN", "ai-knowledge-local-internal"),
-                Duration.ofSeconds(Long.parseLong(System.getenv().getOrDefault("AI_REVIEW_TIMEOUT_SECONDS", "10"))));
+                waitFor(System.getenv("AI_REVIEW_TIMEOUT_SECONDS")));
+    }
+
+    /** ai-service's own default for AI_REVIEW_TIMEOUT_SECONDS. */
+    static final double MODEL_SECONDS_DEFAULT = 8;
+    /** Time for ai-service to notice its model has timed out and answer, on top of the model's allowance. */
+    static final Duration ANSWER_MARGIN = Duration.ofSeconds(2);
+
+    /**
+     * How long to wait for ai-service, given AI_REVIEW_TIMEOUT_SECONDS — the time ai-service allows its model.
+     *
+     * <p>Both services read the same variable, and this side must always wait the longer, or it gives up just as
+     * ai-service answers: the content still goes to a person, but with "AI 审核暂不可用" instead of the reason
+     * ai-service had. The two used to be separate numbers, 8 and 10, that happened to be in the right order;
+     * setting the variable made them equal. A value that is not a positive number falls back to the default
+     * rather than stopping the service at start-up, which is what Long.parseLong("8.5") used to do.
+     */
+    static Duration waitFor(String modelSeconds) {
+        double seconds = MODEL_SECONDS_DEFAULT;
+        try {
+            if (modelSeconds != null && !modelSeconds.isBlank()) seconds = Double.parseDouble(modelSeconds.trim());
+        } catch (NumberFormatException ignored) {
+            seconds = MODEL_SECONDS_DEFAULT;
+        }
+        if (!(seconds > 0) || Double.isInfinite(seconds)) seconds = MODEL_SECONDS_DEFAULT;
+        return Duration.ofMillis(Math.round(seconds * 1000)).plus(ANSWER_MARGIN);
     }
 
     public AiContentReview(String endpoint, String internalToken, Duration timeout) {
