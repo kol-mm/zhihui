@@ -1404,7 +1404,7 @@ class ProviderKeyRef(BaseModel):
 
 
 def rule_failed(message: str) -> ApiResponse:
-    """A refusal the page shows as written: ai-service's HTTP errors carry `detail`, which the page does not read."""
+    """A refusal in the platform's usual shape, shown as written. (The page also reads FastAPI's `detail` now.)"""
     return ApiResponse(code=400, message=message, data={})
 
 

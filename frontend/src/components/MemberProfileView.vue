@@ -15,7 +15,7 @@
 <script setup lang="ts">
 import { computed, ref, type Ref } from 'vue';
 import EmailBinding from './EmailBinding.vue';
-import { deleteData, getData, postData, resolveApiUrl, toUserMessage } from '../api/client';
+import { deleteData, getData, postData, resolveApiUrl, REVIEWED_WRITE_TIMEOUT_MS, toUserMessage } from '../api/client';
 import { ProfileAuditState, pendingChanges } from '../utils/profileAudit';
 import { auditLabel, formatDate, roleLabel } from '../utils/statusLabels';
 import { ArrowRight, Plus, Search } from '@element-plus/icons-vue';
@@ -122,7 +122,7 @@ async function loadMoreMyKnowledge(){
 function openBehaviorTarget(item:BehaviorRecord){if(!behaviorTargetCanOpen(item))return;if(item.targetType==='KNOWLEDGE')openKnowledge({id:item.targetId} as KnowledgeFile);else openPostDetail({id:item.targetId} as Post);}
 function openOnboarding(){onboardingVisible.value=true;}
 const profileAuditPending = computed(()=>profileAudit.value?.status==='PENDING'?pendingChanges({nickname:displayName.value,signature:profileForm.value.signature},profileAudit.value):[]);
-async function publishDraft(draft:Draft){await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});await postData('/post/draft/publish',{id:draft.id});await loadDrafts();ElMessage.success('帖子已提交审核');}
+async function publishDraft(draft:Draft){if(!draft.title?.trim()||!draft.content?.trim()){ElMessage.warning('草稿还缺少标题或正文，请先编辑补全再发布');return;}await ElMessageBox.confirm(`确认发布草稿“${draft.title}”？`,'发布草稿',{type:'info'});const post=await postData<Post>('/post/draft/publish',{id:draft.id},{timeout:REVIEWED_WRITE_TIMEOUT_MS});await loadDrafts();ElMessage.success(post.status==='PUBLISHED'?'帖子已发布':post.status==='HIDDEN'?'帖子未通过审核':'帖子已提交审核');}
 async function removeAvatar(){await ElMessageBox.confirm('确认删除当前头像？','删除头像',{type:'warning'});const user=await postData<UserRecord>('/user/profile',{...profileForm.value,avatarUrl:''});profileForm.value.avatarUrl='';applyOwnProfile(user);ElMessage.success('头像已删除');}
 async function removeCollectedPost(post:Post){if(post.collected)await collectPost(post);}
 async function reportUser(){if(!relationTarget())return;const {value}=await ElMessageBox.prompt('请填写举报原因','举报用户',{inputValue:'发布不当内容'});await postData('/user/report',{targetUserId:relationForm.value.targetUserId,reason:value});ElMessage.success('用户举报已提交');}

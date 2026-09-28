@@ -12,6 +12,7 @@ import { ElForm, ElFormItem } from 'element-plus/es/components/form/index.mjs';
 import { ElIcon } from 'element-plus/es/components/icon/index.mjs';
 import { ElInput } from 'element-plus/es/components/input/index.mjs';
 import { ElInputNumber } from 'element-plus/es/components/input-number/index.mjs';
+import { ElMessage } from 'element-plus/es/components/message/index.mjs';
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index.mjs';
 import { ElRadio, ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index.mjs';
 import { ElSegmented } from 'element-plus/es/components/segmented/index.mjs';
@@ -56,8 +57,16 @@ import 'element-plus/es/components/message-box/style/css';
 import './styles/main.css';
 import './styles/theme.css';
 import App from './App.vue';
+import { isDismissal, messageForUnhandled } from './utils/unhandledErrors';
 
 const app = createApp(App);
+// A handler that lets a failed request escape would otherwise fail in silence; see utils/unhandledErrors.ts.
+app.config.errorHandler = error => {
+  if (isDismissal(error)) return;
+  console.error(error);
+  const message = messageForUnhandled(error);
+  if (message) ElMessage.error(message);
+};
 [
   ElAlert, ElBadge, ElButton, ElCheckbox, ElCollapse, ElCollapseItem, ElDialog, ElDivider, ElDropdown,
   ElDropdownItem, ElDropdownMenu, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElOption,

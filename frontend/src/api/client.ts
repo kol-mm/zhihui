@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { backendMessage, GENERIC_ERROR_MESSAGE, isSafeChineseMessage, localizeBackendMessage } from '../utils/backendErrors';
 
 // The session lives in an httpOnly cookie that scripts cannot read. The gateway only honours it for writes that
 // carry X-Requested-With, which other sites' forms cannot send.
@@ -18,7 +19,20 @@ export function resolveApiUrl(path: string): string {
 /** Where earlier versions kept the session token; only read to move a signed-in visitor onto the cookie. */
 const LEGACY_AUTH_TOKEN_KEY = 'ai-knowledge-local-token';
 const CAPTCHA_CLIENT_KEY = 'ai-knowledge-captcha-client';
-const GENERIC_ERROR_MESSAGE = '操作失败，请稍后重试';
+export const TIMEOUT_MESSAGE = '服务响应超时，操作可能已经完成，请刷新后确认';
+
+/**
+ * How long to wait for a write that may be held for AI review before it answers — publishing a post, editing
+ * one, publishing a draft. Every other request keeps the 8-second default.
+ *
+ * The waits nest: ai-service gives the model AI_REVIEW_TIMEOUT_SECONDS (8 by default), the Java service waits
+ * two seconds longer for ai-service, and the page must wait longer than both. With the page's default 8 seconds
+ * it gave up first: a slow review looked like a failed post while the post was in fact saved, and publishing
+ * again made a second one.
+ */
+export const REVIEWED_WRITE_TIMEOUT_MS = 30_000;
+
+type RequestOptions = { timeout?: number };
 const volatileStorage = new Map<string, string>();
 const removedStorageKeys = new Set<string>();
 
@@ -122,62 +136,19 @@ function toReadableError(error: unknown): Error {
 
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
-    const body = error.response?.data as unknown;
-    const backendMessage =
-      body && typeof body === 'object' && 'message' in body
-        ? String((body as { message?: unknown }).message)
-        : typeof body === 'string'
-          ? body
-          : '';
+    const message = backendMessage(error.response?.data);
 
-    if (status === 401) return new SessionExpiredError(backendMessage.trim() ? localizeBackendMessage(backendMessage) : '登录状态已失效，请重新登录');
-    if (backendMessage.trim()) return new UserFacingError(localizeBackendMessage(backendMessage));
+    if (status === 401) return new SessionExpiredError(message.trim() ? localizeBackendMessage(message) : '登录状态已失效，请重新登录');
+    if (message.trim()) return new UserFacingError(localizeBackendMessage(message));
     if (status === 403) return new UserFacingError('当前账号没有执行此操作的权限');
     if (status === 404) return new UserFacingError('请求的内容不存在或已被删除');
+    // A timeout is not a failed connection: the service had the request and may well have carried it out.
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') return new UserFacingError(TIMEOUT_MESSAGE);
     if (!error.response) return new UserFacingError('暂时无法连接到服务，请稍后重试');
     return new UserFacingError(GENERIC_ERROR_MESSAGE);
   }
 
   return new UserFacingError(GENERIC_ERROR_MESSAGE);
-}
-
-function localizeBackendMessage(message: string): string {
-  const text = message.trim();
-  const exact: Record<string, string> = {
-    'captcha is required or invalid; please obtain a new captcha': '验证码错误或已失效，已为你更换验证码',
-    'too many requests': '操作过于频繁，请稍后再试',
-    'valid user authorization is required': '请先登录后再操作',
-    'admin authorization is required': '需要管理员权限',
-    'internal authorization is required': GENERIC_ERROR_MESSAGE,
-    'user not found': '用户不存在',
-    'post not found': '帖子不存在或暂不可查看',
-    'knowledge file not found': '知识文件不存在',
-    'chat session not found': '私信会话不存在',
-    'notification not found': '通知不存在',
-    'ticket not found': '反馈工单不存在',
-    'report not found': '举报记录不存在',
-    'draft not found': '草稿不存在',
-    'file is required': '请选择文件',
-    'comment content is required': '请输入评论内容',
-    'message content is required': '请输入消息内容',
-    'category name is required': '请输入分类名称',
-    'community feature is disabled': '社区功能已关闭',
-    'notifications feature is disabled': '通知功能已关闭',
-    'access to this user is denied': '无权访问该用户数据',
-    'access to this post is denied': '无权访问该帖子',
-    'access to this draft is denied': '无权访问该草稿',
-    'invalid post status': '帖子状态不正确',
-    'unknown error': GENERIC_ERROR_MESSAGE
-  };
-  if (exact[text]) return exact[text];
-  if (/^select between 1 and \d+ images$/i.test(text)) return '请选择规定数量的图片';
-  if (text.startsWith('image upload failed:')) return '图片上传失败，请检查文件后重试';
-  return isSafeChineseMessage(text) ? text : GENERIC_ERROR_MESSAGE;
-}
-
-function isSafeChineseMessage(message: string): boolean {
-  if (!message || message.length > 160 || !/[\u3400-\u9fff]/.test(message)) return false;
-  return !/(?:https?:\/\/|localhost|\b\d{1,3}(?:\.\d{1,3}){3}\b|[a-z]:[\\/]|[\\/](?:api|user|knowledge|post|message|ai)\b|exception|stack|trace|sql|database|table|com\.aiknowledge|org\.springframework|\r|\n)/i.test(message);
 }
 
 export function toUserMessage(error: unknown, fallback = GENERIC_ERROR_MESSAGE): string {
@@ -196,9 +167,9 @@ export async function getData<T>(url: string): Promise<T> {
   }
 }
 
-export async function postData<T>(url: string, payload: unknown): Promise<T> {
+export async function postData<T>(url: string, payload: unknown, options: RequestOptions = {}): Promise<T> {
   try {
-    const response = await api.post(url, payload);
+    const response = await api.post(url, payload, options);
     return normalizeApiResponse<T>(response.data);
   } catch (error) {
     throw toReadableError(error);
@@ -223,9 +194,9 @@ export async function downloadData(url: string): Promise<Blob> {
   }
 }
 
-export async function putData<T>(url: string, payload: unknown): Promise<T> {
+export async function putData<T>(url: string, payload: unknown, options: RequestOptions = {}): Promise<T> {
   try {
-    const response = await api.put(url, payload);
+    const response = await api.put(url, payload, options);
     return normalizeApiResponse<T>(response.data);
   } catch (error) {
     throw toReadableError(error);
