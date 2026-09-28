@@ -63,3 +63,18 @@ describe('API key entries', () => {
     expect(valueLabel('title', 'knowledge:read')).toBe('knowledge:read');
   });
 });
+
+describe('model provider key entries', () => {
+  it('are named, and the ones that take the model away are marked', () => {
+    expect(actionLabel('AI_PROVIDER_KEY_ADD')).toBe('添加模型密钥');
+    expect(actionLabel('AI_PROVIDER_KEY_ACTIVATE')).toBe('启用模型密钥');
+    expect(isSevere('AI_PROVIDER_KEY_DELETE')).toBe(true);
+    expect(isSevere('AI_PROVIDER_KEY_DEACTIVATE')).toBe(true);
+    expect(isSevere('AI_PROVIDER_KEY_ADD')).toBe(false);
+  });
+
+  it('read the provider and a replaced secret in words', () => {
+    expect(detailFacts({ detail: { provider: 'anthropic' } })).toEqual([{ label: '模型服务', text: 'Anthropic Claude' }]);
+    expect(describeChange({ field: 'secret', label: '密钥', hidden: true })).toBe('密钥：已修改（内容不记录）');
+  });
+});

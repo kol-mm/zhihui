@@ -63,12 +63,17 @@ const ACTIONS: Record<string, string> = {
   API_KEY_UPDATE: '修改接口密钥',
   API_KEY_ROTATE: '轮换接口密钥',
   API_KEY_REVOKE: '撤销接口密钥',
+  AI_PROVIDER_KEY_ADD: '添加模型密钥',
+  AI_PROVIDER_KEY_UPDATE: '修改模型密钥',
+  AI_PROVIDER_KEY_ACTIVATE: '启用模型密钥',
+  AI_PROVIDER_KEY_DEACTIVATE: '停用模型密钥',
+  AI_PROVIDER_KEY_DELETE: '删除模型密钥',
 };
 
 /** Actions that remove something or take a member's access away. */
 const SEVERE = new Set(['USER_STATUS', 'KNOWLEDGE_DELETE', 'POST_DELETE', 'COMMENT_DELETE', 'MESSAGES_CLEAR', 'MESSAGES_CLEAR_ALL',
   'MESSAGE_DELETE', 'SESSION_DELETE', 'DRAFTS_PURGE', 'KNOWLEDGE_CATEGORY_DELETE', 'FAQ_DELETE',
-  'API_KEY_REVOKE', 'API_KEY_ROTATE']);
+  'API_KEY_REVOKE', 'API_KEY_ROTATE', 'AI_PROVIDER_KEY_DEACTIVATE', 'AI_PROVIDER_KEY_DELETE']);
 
 const VALUES: Record<string, string> = {
   ACTIVE: '正常', DISABLED: '已停用', DELETED: '已删除',
@@ -76,7 +81,7 @@ const VALUES: Record<string, string> = {
   STANDARD: '标准审核', PRE_REVIEW: '强制预审', BLOCKED: '禁止发布',
   PENDING: '待处理', APPROVED: '已通过', REJECTED: '已驳回', HIDDEN: '已隐藏', PUBLISHED: '已发布', VISIBLE: '显示',
   PROCESSING: '处理中', RESOLVED: '已解决', RESTRICTED: '已限制', ARCHIVED: '已归档',
-  local: '本地模型', 'openai-compatible': 'OpenAI 兼容接口',
+  local: '本地模型', 'openai-compatible': 'OpenAI 兼容接口', anthropic: 'Anthropic Claude',
   'all-approved': '全部已审核知识', 'admin-selected': '管理员指定知识',
 };
 
@@ -101,6 +106,8 @@ const DETAIL_LABELS: Record<string, string> = {
   sessionId: '所属会话',
   firstBatchDocuments: '首批文档数',
   scopes: '权限',
+  provider: '模型服务',
+  wasActive: '删除前正在使用',
   previousPrefix: '原密钥前缀',
 };
 
