@@ -47,6 +47,10 @@ public class CommunityController {
     private static final int COMMENT_THREAD_PAGE_MAX = 50;
     private static final int COMMENT_THREAD_FILL_ROUNDS = 5;
     private static final int FEED_PAGE_MAX = 50;
+    /** post.title is VARCHAR(255). */
+    private static final int POST_TITLE_MAX = 255;
+    /** post.content is TEXT, 65,535 bytes: 20,000 UTF-16 units is at most 60,000 bytes in utf8mb4. */
+    private static final int POST_CONTENT_MAX = 20_000;
     private final CommunityStore communityStore;
     private final CommunityMediaStorageService mediaStorage;
     private final CommunityNotificationClient notificationClient;
@@ -143,10 +147,14 @@ public class CommunityController {
         if (!publishingAllowed(userId)) return ApiResponse.fail("posting is disabled for this account");
         List<String> imageUrls = stringList(request.get("imageUrls"));
         if (imageUrls.size() > maxPostImages()) return ApiResponse.fail("帖子配图数量不能超过 " + maxPostImages() + " 张");
+        String title = text(request, "title", "");
+        String content = text(request, "content", "");
+        String problem = postProblem(title, content);
+        if (problem != null) return ApiResponse.fail(problem);
         PostEntity post = new PostEntity();
         post.setUserId(userId);
-        post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
-        post.setContent(String.valueOf(request.getOrDefault("content", "")));
+        post.setTitle(title.trim());
+        post.setContent(content);
         decidePostStatus(post);
         PostEntity saved = communityStore.savePost(post);
         communityStore.savePostImages(saved.getId(), imageUrls);
@@ -165,10 +173,15 @@ public class CommunityController {
         if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this post is denied");
         List<String> imageUrls = request.containsKey("imageUrls") ? stringList(request.get("imageUrls")) : List.of();
         if (imageUrls.size() > maxPostImages()) return ApiResponse.fail("帖子配图数量不能超过 " + maxPostImages() + " 张");
+        // A field left out keeps what the post has; it used to become "未命名帖子" and an empty body.
+        String title = text(request, "title", existing.getTitle());
+        String content = text(request, "content", existing.getContent());
+        String problem = postProblem(title, content);
+        if (problem != null) return ApiResponse.fail(problem);
         PostEntity post = new PostEntity();
         post.setId(postId);
-        post.setTitle(String.valueOf(request.getOrDefault("title", "未命名帖子")));
-        post.setContent(String.valueOf(request.getOrDefault("content", "")));
+        post.setTitle(title.trim());
+        post.setContent(content);
         decidePostStatus(post);
         String previousTitle = existing.getTitle();
         String previousStatus = existing.getStatus();
@@ -348,8 +361,8 @@ public class CommunityController {
         if (!communityEnabled()) return ApiResponse.fail("community feature is disabled");
         PostDraftEntity draft = new PostDraftEntity();
         draft.setUserId(userId);
-        draft.setTitle(String.valueOf(request.getOrDefault("title", "未命名草稿")));
-        draft.setContent(String.valueOf(request.getOrDefault("content", "")));
+        draft.setTitle(text(request, "title", "未命名草稿"));
+        draft.setContent(text(request, "content", ""));
         draft.setImageUrlsJson(encodeImageUrls(request.get("imageUrls")));
         return ApiResponse.ok(toDraftView(communityStore.saveDraft(draft)));
     }
@@ -363,8 +376,8 @@ public class CommunityController {
         PostDraftEntity existing = communityStore.findDraft(draftId).orElse(null);
         if (existing == null) return ApiResponse.fail("draft not found");
         if (!LocalAuth.canAccessUser(authorization, existing.getUserId())) return ApiResponse.fail("access to this draft is denied");
-        existing.setTitle(String.valueOf(request.getOrDefault("title", existing.getTitle())));
-        existing.setContent(String.valueOf(request.getOrDefault("content", existing.getContent())));
+        existing.setTitle(text(request, "title", existing.getTitle()));
+        existing.setContent(text(request, "content", existing.getContent()));
         if (request.containsKey("imageUrls")) existing.setImageUrlsJson(encodeImageUrls(request.get("imageUrls")));
         return ApiResponse.ok(toDraftView(communityStore.updateDraft(existing)));
     }
@@ -379,10 +392,15 @@ public class CommunityController {
         if (draft == null) return ApiResponse.fail("draft not found");
         if (!LocalAuth.canAccessUser(authorization, draft.getUserId())) return ApiResponse.fail("access to this draft is denied");
         if (!publishingAllowed(draft.getUserId())) return ApiResponse.fail("posting is disabled for this account");
+        // Drafts may be saved half-written, so this is where an empty one is stopped; the draft stays as it was.
+        String title = text(request, "title", draft.getTitle());
+        String content = text(request, "content", draft.getContent());
+        String problem = postProblem(title, content);
+        if (problem != null) return ApiResponse.fail(problem);
         PostEntity post = new PostEntity();
         post.setUserId(draft.getUserId());
-        post.setTitle(String.valueOf(request.getOrDefault("title", draft.getTitle())));
-        post.setContent(String.valueOf(request.getOrDefault("content", draft.getContent())));
+        post.setTitle(title.trim());
+        post.setContent(content);
         decidePostStatus(post);
         PostEntity saved = communityStore.savePost(post);
         List<String> imageUrls = request.containsKey("imageUrls")
@@ -864,6 +882,32 @@ public class CommunityController {
             return number.longValue();
         }
         return Long.valueOf(value.toString());
+    }
+
+    /** A text field from the request: the fallback when it is left out, and empty — never "null" — when it is null. */
+    private static String text(Map<String, Object> request, String key, String fallback) {
+        if (!request.containsKey(key)) return fallback;
+        Object value = request.get(key);
+        return value == null ? "" : value.toString();
+    }
+
+    /**
+     * Why a post cannot be published as it stands, or null. Checked on every way a post comes into being or
+     * changes — the composer, an edit, a draft published from the profile page, an API key — because the
+     * composer's own check only ever covered the first.
+     */
+    private static String postProblem(String title, String content) {
+        if (visiblyEmpty(title)) return "帖子标题不能为空";
+        if (visiblyEmpty(content)) return "帖子正文不能为空";
+        if (title.trim().length() > POST_TITLE_MAX) return "帖子标题不能超过 " + POST_TITLE_MAX + " 个字符";
+        if (content.length() > POST_CONTENT_MAX) return "帖子正文不能超过 " + POST_CONTENT_MAX + " 个字符";
+        return null;
+    }
+
+    /** Nothing a reader would see: whitespace of any kind, including no-break spaces and zero-width characters. */
+    private static boolean visiblyEmpty(String value) {
+        return value == null || value.codePoints().allMatch(point -> Character.isWhitespace(point)
+                || Character.isSpaceChar(point) || Character.getType(point) == Character.FORMAT);
     }
 
     private List<String> stringList(Object value) {
