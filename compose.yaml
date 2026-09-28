@@ -93,6 +93,10 @@ services:
       AI_KNOWLEDGE_JWT_SECRET: ${AI_KNOWLEDGE_JWT_SECRET:?AI_KNOWLEDGE_JWT_SECRET is required}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_TIMEOUT: ${AI_API_TIMEOUT:-30}
+      # 加密平台中保存的模型密钥。未设置时不能在平台中保存密钥，仍使用下面的环境变量密钥。设置后不要更换，否则已保存的密钥无法解密。
+      AI_KEY_ENCRYPTION_KEY: ${AI_KEY_ENCRYPTION_KEY:-}
+      # 未在平台中启用 Claude 密钥时使用的环境变量密钥。
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       PLATFORM_AUDIT_URL: http://user-service:8101/user/internal/audit
       PLATFORM_INTERNAL_USER_TOKEN: ${INTERNAL_NOTIFICATION_TOKEN:?INTERNAL_NOTIFICATION_TOKEN is required}
     volumes:

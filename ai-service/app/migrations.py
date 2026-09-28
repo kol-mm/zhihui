@@ -73,9 +73,34 @@ def _history_indexes(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_chat_message_session ON ai_chat_message(session_id, id)")
 
 
+def _provider_keys(conn: sqlite3.Connection) -> None:
+    # Model provider keys, entered by super administrators. The secret is stored encrypted (ciphertext); hint is
+    # what the page shows. The partial unique index allows any number of keys per provider but one active one.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_provider_key (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            name TEXT NOT NULL,
+            ciphertext TEXT NOT NULL,
+            hint TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_tested_at TEXT,
+            last_test_ok INTEGER,
+            last_test_message TEXT
+        )
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_provider_key_active ON ai_provider_key(provider) WHERE active = 1")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "baseline", _baseline),
     (2, "chat history indexes", _history_indexes),
+    (3, "model provider keys", _provider_keys),
 ]
 
 

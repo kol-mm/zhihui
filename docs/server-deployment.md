@@ -55,6 +55,23 @@ and ensures the default `demo` and `admin` accounts and basic lookup data exist.
 Set `AI_KNOWLEDGE_JWT_SECRET`, `MYSQL_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and
 `AI_API_KEY` through the server environment. Do not store these values in the repository.
 
+## Model provider keys
+
+Super administrators can store the keys ai-service uses to call its model provider (Claude, or an
+OpenAI-compatible service) from the admin panel, under 模型密钥. They are encrypted at rest with a key derived from
+`AI_KEY_ENCRYPTION_KEY`, which must be set in the ai service's environment to a long random value — generate one
+the same way as the other secrets. Without it, storing keys from the panel is refused (outside development) and
+the environment variables below remain the only way to supply a key.
+
+Treat `AI_KEY_ENCRYPTION_KEY` like the database password: back it up with the other secrets and do not change it.
+Keys stored under one value cannot be read under another; ai-service then reports the active key as unreadable and
+stops calling the model — chat falls back to local retrieval and content review to a person — until the keys are
+entered again.
+
+A provider with no active stored key uses its environment variable: `ANTHROPIC_API_KEY` for Claude, `AI_API_KEY`
+for an OpenAI-compatible service. Claude is always called at Anthropic's own API; if the server needs a proxy to
+reach it, set `ANTHROPIC_BASE_URL`, which the Anthropic SDK reads.
+
 ## Narrowing the application database account
 
 The application account is granted only the four databases a service actually connects to: `user_db`,

@@ -27,6 +27,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app import migrations
+from app import provider_keys
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -101,7 +102,7 @@ class AiConfigRequest(BaseModel):
     data_source_scope: str = "all-approved"
     match_limit: int = Field(default=5, ge=1, le=20)
     compliance_rule: str = "answer-with-references"
-    provider: str = Field(default="local", pattern="^(local|openai-compatible)$")
+    provider: str = Field(default="local", pattern="^(local|openai-compatible|anthropic)$")
     model: str = Field(default="local-rag", max_length=200)
     base_url: str = Field(default="", max_length=2000)
     request_url: str = Field(default="", max_length=2000)
@@ -303,6 +304,19 @@ def require_admin(authorization: str | None) -> dict[str, Any]:
 def is_super_admin(claims: dict[str, Any] | None) -> bool:
     """The claim only counts on an administrator's token; on its own it grants nothing."""
     return bool(claims) and claims.get("role") == "ADMIN" and claims.get("sa") is True
+
+
+def require_super_admin(authorization: str | None) -> dict[str, Any]:
+    claims = require_admin(authorization)
+    if not is_super_admin(claims):
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+    return claims
+
+
+def resolve_provider_key(provider: str) -> dict[str, Any]:
+    init_db()
+    with connect() as conn:
+        return provider_keys.resolve(conn, provider)
 
 
 # Where the API key gets sent. An ordinary administrator keeps every other setting but may not repoint these.
@@ -721,10 +735,13 @@ def review_health(config: dict[str, Any] | None = None) -> dict[str, Any]:
     with _review_lock:
         snapshot = dict(_review_health)
     snapshot["enabled"] = bool(settings.get("ai_audit_enabled", False))
+    provider = str(settings.get("provider"))
+    key = resolve_provider_key(provider) if provider in provider_keys.PROVIDERS else {"source": "none"}
+    snapshot["key_source"] = key["source"]
     snapshot["model_configured"] = bool(
-        os.getenv("AI_API_KEY", "").strip()
-        and str(settings.get("provider")) == "openai-compatible"
-        and (str(settings.get("request_url", "")).strip() or str(settings.get("base_url", "")).strip()))
+        key["source"] in ("stored", "environment")
+        and (provider == "anthropic"
+             or (str(settings.get("request_url", "")).strip() or str(settings.get("base_url", "")).strip())))
     snapshot["decided_automatically"] = snapshot["approved"] + snapshot["rejected"]
     snapshot["idle"] = snapshot["enabled"] and snapshot["requested"] == 0
     return snapshot
@@ -743,13 +760,43 @@ def escalate(reason: str) -> dict[str, Any]:
     return {"decision": "ESCALATE", "confidence": 0.0, "reason": reason}
 
 
+def parse_verdict(content: str) -> dict[str, Any] | None:
+    """The model's JSON verdict, or None — with the reason recorded — when there is none to act on."""
+    try:
+        start, end = content.find("{"), content.rfind("}")
+        verdict = json.loads(content[start:end + 1]) if start >= 0 < end else None
+    except (ValueError, TypeError):
+        verdict = None
+    if not isinstance(verdict, dict) or verdict.get("decision") not in ("APPROVE", "REJECT"):
+        record_review_failure("模型返回的内容无法解析为审核结论")
+        return None
+    try:
+        confidence = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
+    except (TypeError, ValueError):
+        record_review_failure("模型返回的置信度无法解析")
+        return None
+    return {"decision": verdict["decision"], "confidence": confidence,
+            "reason": str(verdict.get("reason", ""))[:200]}
+
+
 def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any] | None:
     """Ask the configured model. Returns None when there is no usable answer, so the caller can escalate."""
-    api_key = os.getenv("AI_API_KEY", "").strip()
+    provider = str(config.get("provider"))
+    if provider not in provider_keys.PROVIDERS:
+        return None
+    key = resolve_provider_key(provider)
+    if key["source"] == "undecryptable":
+        record_review_failure("启用的模型密钥无法解密，可能是 AI_KEY_ENCRYPTION_KEY 已更换")
+        return None
+    if not key["secret"]:
+        return None
+    if provider == "anthropic":
+        return claude_review(title, body, config, key["secret"])
+    api_key = key["secret"]
     base_url = str(config.get("base_url", "")).strip().rstrip("/")
     request_url = str(config.get("request_url", "")).strip()
     endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
-    if not api_key or not endpoint or str(config.get("provider")) != "openai-compatible":
+    if not endpoint:
         return None
     try:
         validate_upstream_url(endpoint, resolve_dns=True)
@@ -769,21 +816,33 @@ def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any
         with urllib.request.urlopen(request, timeout=REVIEW_TIMEOUT_SECONDS) as response:
             answer = json.loads(response.read().decode("utf-8"))
         content = answer["choices"][0]["message"]["content"]
-        start, end = content.find("{"), content.rfind("}")
-        verdict = json.loads(content[start:end + 1]) if start >= 0 < end else None
     except Exception as error:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
         record_review_failure(f"{type(error).__name__}: {error}")
         return None
-    if not isinstance(verdict, dict) or verdict.get("decision") not in ("APPROVE", "REJECT"):
-        record_review_failure("模型返回的内容无法解析为审核结论")
-        return None
+    return parse_verdict(str(content))
+
+
+def claude_review(title: str, body: str, config: dict[str, Any], secret: str,
+                  client_factory: Any = None) -> dict[str, Any] | None:
+    """
+    The same question put to Claude. The instructions go in the system prompt and the content in the user turn,
+    so a document that tries to instruct the reviewer is at least speaking from the wrong side. Effort is low:
+    this is a short classification on the publishing path, where waiting is what hurts.
+    """
+    factory = client_factory or provider_keys.make_claude_client
     try:
-        confidence = max(0.0, min(1.0, float(verdict.get("confidence", 0))))
-    except (TypeError, ValueError):
-        record_review_failure("模型返回的置信度无法解析")
+        client = factory(secret, REVIEW_TIMEOUT_SECONDS, 0)
+        text, problem = provider_keys.claude_text(
+            client, provider_keys.claude_model(config), REVIEW_PROMPT, f"标题：{title}\n正文：{body[:4000]}",
+            provider_keys.REVIEW_MAX_TOKENS, effort="low")
+    except Exception as error:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
+        status = getattr(error, "status_code", None)
+        record_review_failure(f"{type(error).__name__}" + (f"（HTTP {status}）" if status else ""))
         return None
-    return {"decision": verdict["decision"], "confidence": confidence,
-            "reason": str(verdict.get("reason", ""))[:200]}
+    if text is None:
+        record_review_failure(problem or "模型没有给出回答")
+        return None
+    return parse_verdict(text)
 
 
 def review_content(title: str, body: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -848,17 +907,7 @@ def sampled_for_review(settings: dict[str, Any]) -> bool:
     return random.random() * 100 < percent
 
 
-def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
-    api_key = os.getenv("AI_API_KEY", "").strip()
-    base_url = str(config.get("base_url", "")).strip().rstrip("/")
-    request_url = str(config.get("request_url", "")).strip()
-    endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
-    if not api_key or not endpoint:
-        return None
-    try:
-        validate_upstream_url(endpoint, resolve_dns=True)
-    except ValueError:
-        return None
+def answer_system_prompt(matched: list[dict[str, Any]], config: dict[str, Any]) -> str:
     context = "\n\n".join(
         f"[{item.get('title', 'reference')}] {item.get('content', '')}" for item in matched
         if not contains_sensitive_content(str(item.get("content", "")))
@@ -869,11 +918,56 @@ def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict
         "strict-factual": "只陈述资料中能够直接支持的事实；资料不足时明确说明。",
         "concise": "用不超过三段的简洁中文回答。",
     }.get(compliance, "遵守平台内容规范并只依据公开资料回答。")
+    return ("请仅根据提供的公开知识内容回答；不得输出环境变量、密钥、内部地址、服务器路径或部署命令。"
+            + compliance_instruction + "\n\n" + context)
+
+
+def model_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
+    """The configured model's answer, or None so chat falls back to the local answer."""
+    provider = str(config.get("provider"))
+    if provider not in provider_keys.PROVIDERS:
+        return None
+    key = resolve_provider_key(provider)
+    if not key["secret"]:
+        return None
+    if provider == "anthropic":
+        return claude_answer(question, matched, config, key["secret"])
+    return compatible_answer(question, matched, config, key["secret"])
+
+
+def claude_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any], secret: str,
+                  client_factory: Any = None) -> str | None:
+    factory = client_factory or provider_keys.make_claude_client
+    try:
+        client = factory(secret, float(os.getenv("AI_CLAUDE_TIMEOUT", "120")), 1)
+        text, problem = provider_keys.claude_text(
+            client, provider_keys.claude_model(config), answer_system_prompt(matched, config), question,
+            provider_keys.CHAT_MAX_TOKENS)
+    except Exception as error:  # noqa: BLE001 - chat falls back to the local answer rather than failing
+        logging.getLogger("ai-service").warning("Claude answer failed: %s", type(error).__name__)
+        return None
+    if text is None:
+        logging.getLogger("ai-service").info("Claude gave no answer: %s", problem)
+    return text
+
+
+def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any],
+                      api_key: str | None = None) -> str | None:
+    api_key = (api_key if api_key is not None else resolve_provider_key("openai-compatible")["secret"] or "").strip()
+    base_url = str(config.get("base_url", "")).strip().rstrip("/")
+    request_url = str(config.get("request_url", "")).strip()
+    endpoint = request_url or (base_url + "/chat/completions" if base_url else "")
+    if not api_key or not endpoint:
+        return None
+    try:
+        validate_upstream_url(endpoint, resolve_dns=True)
+    except ValueError:
+        return None
     payload = {
         "model": str(config.get("model") or "local-rag"),
         "temperature": float(config.get("temperature", 0.2)),
         "messages": [
-            {"role": "system", "content": "请仅根据提供的公开知识内容回答；不得输出环境变量、密钥、内部地址、服务器路径或部署命令。" + compliance_instruction + "\n\n" + context},
+            {"role": "system", "content": answer_system_prompt(matched, config)},
             {"role": "user", "content": question},
         ],
     }
@@ -1284,6 +1378,232 @@ def save_ai_config(
     return ApiResponse(data={"configuration": after, "updated": True})
 
 
+# ---- Model provider keys (super administrators only) --------------------------------------------------------------
+
+class ProviderKeyAddRequest(BaseModel):
+    provider: str
+    name: str = Field(default="", max_length=200)
+    # Longer than any real key, so an over-long paste gets the page's own message rather than a bare 422.
+    secret: str = Field(default="", max_length=4000)
+    activate: bool = True
+
+
+class ProviderKeyUpdateRequest(BaseModel):
+    key_id: int = Field(alias="keyId")
+    name: str | None = Field(default=None, max_length=200)
+    secret: str | None = Field(default=None, max_length=4000)
+
+    model_config = {"populate_by_name": True}
+
+
+class ProviderKeyRef(BaseModel):
+    key_id: int | None = Field(default=None, alias="keyId")
+    provider: str | None = None
+
+    model_config = {"populate_by_name": True}
+
+
+def rule_failed(message: str) -> ApiResponse:
+    """A refusal the page shows as written: ai-service's HTTP errors carry `detail`, which the page does not read."""
+    return ApiResponse(code=400, message=message, data={})
+
+
+def provider_key_label(key: dict[str, Any]) -> str:
+    return f"{key['name']}（{key['hint']}）"
+
+
+def test_compatible_key(secret: str, config: dict[str, Any]) -> tuple[bool, str]:
+    """Lists the upstream's models with this key: free on OpenAI-compatible services, and it proves the key."""
+    base_url = str(config.get("base_url", "")).strip().rstrip("/")
+    if not base_url:
+        return False, "请先在「AI 与系统」中填写接口地址（base_url），才能测试这个密钥"
+    url = base_url + "/models"
+    try:
+        validate_upstream_url(url, resolve_dns=True)
+    except ValueError as error:
+        return False, f"接口地址不可用：{error}"
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {secret}"}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=15):
+            return True, "密钥有效"
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403):
+            return False, "密钥无效或没有权限"
+        if error.code == 404:
+            return False, "该服务没有 /models 接口，无法单独测试密钥"
+        if error.code == 429:
+            return True, "密钥有效，但当前请求过于频繁，已被限流"
+        return False, f"服务返回错误（HTTP {error.code}）"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False, "无法连接到接口地址"
+
+
+def test_provider_secret(provider: str, secret: str, config: dict[str, Any]) -> tuple[bool, str]:
+    if provider == "anthropic":
+        return provider_keys.test_claude_key(secret, config)
+    return test_compatible_key(secret, config)
+
+
+@app.get("/ai/admin/provider-keys", response_model=ApiResponse)
+def list_provider_keys(authorization: str | None = Header(default=None)) -> ApiResponse:
+    require_super_admin(authorization)
+    init_db()
+    config = read_ai_config()
+    with connect() as conn:
+        keys = provider_keys.list_keys(conn)
+        providers = [{
+            "provider": provider,
+            "label": provider_keys.PROVIDER_LABELS[provider],
+            "environmentVariable": provider_keys.ENVIRONMENT_FALLBACK[provider],
+            "inUse": provider_keys.public_resolution(provider_keys.resolve(conn, provider)),
+        } for provider in provider_keys.PROVIDERS]
+    problem = provider_keys.storage_problem()
+    return ApiResponse(data={
+        "keys": keys, "providers": providers,
+        "storage": {"available": problem is None, "problem": problem},
+        "configured": {"provider": config.get("provider"), "model": config.get("model")},
+        "claudeDefaultModel": provider_keys.CLAUDE_DEFAULT_MODEL,
+    })
+
+
+@app.post("/ai/admin/provider-keys/add", response_model=ApiResponse)
+def add_provider_key(request: ProviderKeyAddRequest, authorization: str | None = Header(default=None),
+                     x_client_ip: str | None = Header(default=None)) -> ApiResponse:
+    claims = require_super_admin(authorization)
+    init_db()
+    problem = (provider_keys.name_problem(request.name)
+               or provider_keys.secret_problem(request.provider, request.secret)
+               or provider_keys.storage_problem())
+    if problem:
+        return rule_failed(problem)
+    with connect() as conn:
+        key = provider_keys.add_key(conn, request.provider, request.name, request.secret, int(claims["uid"]),
+                                    request.activate)
+    label = provider_keys.PROVIDER_LABELS[key["provider"]]
+    # The secret is recorded nowhere: not here, not in the log line, not in the detail.
+    record_admin_action(claims, x_client_ip, "AI_PROVIDER_KEY_ADD", "AI_PROVIDER_KEY", str(key["id"]),
+                        provider_key_label(key), f"添加{label}模型密钥「{key['name']}」" + ("并启用" if key["active"] else ""),
+                        {"provider": key["provider"], "active": key["active"]})
+    return ApiResponse(data={"key": key})
+
+
+@app.post("/ai/admin/provider-keys/update", response_model=ApiResponse)
+def update_provider_key(request: ProviderKeyUpdateRequest, authorization: str | None = Header(default=None),
+                        x_client_ip: str | None = Header(default=None)) -> ApiResponse:
+    claims = require_super_admin(authorization)
+    init_db()
+    with connect() as conn:
+        current = provider_keys.find_key(conn, request.key_id)
+    if current is None:
+        return rule_failed("模型密钥不存在")
+    changes: list[dict[str, Any]] = []
+    name = request.name.strip() if request.name is not None else None
+    secret = request.secret.strip() if request.secret else ""
+    if name is not None and name != current["name"]:
+        problem = provider_keys.name_problem(name)
+        if problem:
+            return rule_failed(problem)
+    if secret:
+        problem = provider_keys.secret_problem(current["provider"], secret) or provider_keys.storage_problem()
+        if problem:
+            return rule_failed(problem)
+    with connect() as conn:
+        if name is not None and name != current["name"]:
+            provider_keys.rename_key(conn, current["id"], name)
+            changes.append({"field": "name", "label": "名称", "before": current["name"], "after": name})
+        if secret:
+            provider_keys.replace_secret(conn, current["id"], secret)
+            changes.append({"field": "secret", "label": "密钥", "hidden": True})
+        updated = provider_keys.find_key(conn, current["id"])
+    if changes:
+        labels = "、".join(change["label"] for change in changes)
+        record_admin_action(claims, x_client_ip, "AI_PROVIDER_KEY_UPDATE", "AI_PROVIDER_KEY", str(updated["id"]),
+                            provider_key_label(updated), f"修改模型密钥「{updated['name']}」的{labels}", {"changes": changes})
+    return ApiResponse(data={"key": updated})
+
+
+def _switch(request: ProviderKeyRef, authorization: str | None, x_client_ip: str | None, activate: bool) -> ApiResponse:
+    claims = require_super_admin(authorization)
+    init_db()
+    if request.key_id is None:
+        return rule_failed("模型密钥不存在")
+    with connect() as conn:
+        current = provider_keys.find_key(conn, request.key_id)
+        if current is None:
+            return rule_failed("模型密钥不存在")
+        previous = provider_keys.resolve(conn, current["provider"]) if activate else None
+        key = (provider_keys.activate_key if activate else provider_keys.deactivate_key)(conn, current["id"])
+    label = provider_keys.PROVIDER_LABELS[key["provider"]]
+    if activate:
+        replaced = previous.get("name") if previous and previous.get("keyId") not in (None, key["id"]) else None
+        record_admin_action(claims, x_client_ip, "AI_PROVIDER_KEY_ACTIVATE", "AI_PROVIDER_KEY", str(key["id"]),
+                            provider_key_label(key), f"启用{label}模型密钥「{key['name']}」"
+                            + (f"，替换「{replaced}」" if replaced else ""), {"provider": key["provider"]})
+    else:
+        record_admin_action(claims, x_client_ip, "AI_PROVIDER_KEY_DEACTIVATE", "AI_PROVIDER_KEY", str(key["id"]),
+                            provider_key_label(key), f"停用{label}模型密钥「{key['name']}」", {"provider": key["provider"]})
+    return ApiResponse(data={"key": key})
+
+
+@app.post("/ai/admin/provider-keys/activate", response_model=ApiResponse)
+def activate_provider_key(request: ProviderKeyRef, authorization: str | None = Header(default=None),
+                          x_client_ip: str | None = Header(default=None)) -> ApiResponse:
+    return _switch(request, authorization, x_client_ip, True)
+
+
+@app.post("/ai/admin/provider-keys/deactivate", response_model=ApiResponse)
+def deactivate_provider_key(request: ProviderKeyRef, authorization: str | None = Header(default=None),
+                            x_client_ip: str | None = Header(default=None)) -> ApiResponse:
+    return _switch(request, authorization, x_client_ip, False)
+
+
+@app.post("/ai/admin/provider-keys/delete", response_model=ApiResponse)
+def delete_provider_key(request: ProviderKeyRef, authorization: str | None = Header(default=None),
+                        x_client_ip: str | None = Header(default=None)) -> ApiResponse:
+    claims = require_super_admin(authorization)
+    init_db()
+    if request.key_id is None:
+        return rule_failed("模型密钥不存在")
+    with connect() as conn:
+        removed = provider_keys.delete_key(conn, request.key_id)
+    if removed is None:
+        return rule_failed("模型密钥不存在")
+    record_admin_action(claims, x_client_ip, "AI_PROVIDER_KEY_DELETE", "AI_PROVIDER_KEY", str(removed["id"]),
+                        provider_key_label(removed), f"删除模型密钥「{removed['name']}」"
+                        + ("（删除前正在使用）" if removed["active"] else ""),
+                        {"provider": removed["provider"], "wasActive": removed["active"]})
+    return ApiResponse(data={"key": removed, "removed": True})
+
+
+@app.post("/ai/admin/provider-keys/test", response_model=ApiResponse)
+def test_provider_key(request: ProviderKeyRef, authorization: str | None = Header(default=None)) -> ApiResponse:
+    """Tests a stored key, or with just a provider, the key that provider would use now (including one from the
+    environment). Nothing is changed but the stored key's last-test record, so this is not audited."""
+    require_super_admin(authorization)
+    init_db()
+    config = read_ai_config()
+    with connect() as conn:
+        if request.key_id is not None:
+            current = provider_keys.find_key(conn, request.key_id)
+            if current is None:
+                return rule_failed("模型密钥不存在")
+            provider, secret = current["provider"], provider_keys.stored_secret(conn, current["id"])
+        elif request.provider in provider_keys.PROVIDERS:
+            provider = request.provider
+            secret = provider_keys.resolve(conn, provider)["secret"]
+        else:
+            return rule_failed("请指定要测试的密钥")
+    if not secret:
+        ok, message = False, "密钥无法读取：没有可用的密钥，或 AI_KEY_ENCRYPTION_KEY 已更换"
+    else:
+        ok, message = test_provider_secret(provider, secret, config)
+    with connect() as conn:
+        if request.key_id is not None:
+            provider_keys.record_test(conn, request.key_id, ok, message)
+        key = provider_keys.find_key(conn, request.key_id) if request.key_id is not None else None
+    return ApiResponse(data={"ok": ok, "message": message, "key": key})
+
+
 @app.post("/ai/chat", response_model=ApiResponse)
 def chat(request: ChatRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
     claims = require_user(authorization)
@@ -1304,8 +1624,8 @@ def chat(request: ChatRequest, authorization: str | None = Header(default=None))
         allowed_file_ids=allowed_file_ids,
     )
     answer = public_answer
-    if not answer and config.get("provider") == "openai-compatible":
-        answer = compatible_answer(request.question, matched, config)
+    if not answer:
+        answer = model_answer(request.question, matched, config)
     if not answer:
         answer = local_answer(request.question, matched)
     answer = sanitize_answer(answer)
