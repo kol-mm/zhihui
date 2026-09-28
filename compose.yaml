@@ -93,6 +93,8 @@ services:
       AI_KNOWLEDGE_JWT_SECRET: ${AI_KNOWLEDGE_JWT_SECRET:?AI_KNOWLEDGE_JWT_SECRET is required}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_API_TIMEOUT: ${AI_API_TIMEOUT:-30}
+      # 启动时读取 OpenAI 兼容接口的模型列表并校验所配置的模型；false 表示完全按手动配置。
+      AI_MODEL_DISCOVERY_ENABLED: ${AI_MODEL_DISCOVERY_ENABLED:-true}
       # 加密平台中保存的模型密钥。未设置时不能在平台中保存密钥，仍使用下面的环境变量密钥。设置后不要更换，否则已保存的密钥无法解密。
       AI_KEY_ENCRYPTION_KEY: ${AI_KEY_ENCRYPTION_KEY:-}
       # 未在平台中启用 Claude 密钥时使用的环境变量密钥。

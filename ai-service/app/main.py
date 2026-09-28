@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from app import migrations
 from app import provider_keys
+from app import model_discovery
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -239,7 +240,22 @@ async def lifespan(_: FastAPI):
     if problem:
         raise RuntimeError(problem)
     init_db()
+    start_model_discovery()
     yield
+
+
+def start_model_discovery() -> None:
+    """Asks the OpenAI-compatible endpoint for its models once, in the background; see model_discovery."""
+    try:
+        config = read_ai_config()
+        provider = str(config.get("provider"))
+        api_key = resolve_provider_key(provider)["secret"] if provider == "openai-compatible" else None
+    except Exception as error:  # noqa: BLE001 - discovery is advisory; the service starts regardless
+        logging.getLogger("ai-service").warning("model discovery not started: %s", type(error).__name__)
+        return
+    model_discovery.run_in_background(
+        provider=provider, base_url=config.get("base_url"), api_key=api_key, configured_model=config.get("model"),
+        validate=lambda url: validate_upstream_url(url, resolve_dns=True))
 
 
 app = FastAPI(title="AI Knowledge Platform AI Service", version="1.0.0", lifespan=lifespan)
@@ -694,6 +710,11 @@ REVIEW_TIMEOUT_SECONDS = float(os.getenv("AI_REVIEW_TIMEOUT_SECONDS", "8"))
 
 REVIEW_DECISIONS = ("APPROVE", "REJECT", "ESCALATE")
 
+# How much of a body the model is shown. Longer content is judged on its beginning only, so an approval of it is
+# never final (see review_content); the sensitive-word rules still read all of it.
+MODEL_PREVIEW_CHARS = 4000
+LONG_CONTENT_NOTE = "内容较长，AI 只审阅了开头部分"
+
 # The local rules only look for sensitive words and a plausible length. They must not clear a bar meant for a
 # model's judgement, so they claim a fixed, modest confidence: raise the threshold above this and everything
 # goes to a person, which is the point of being able to raise it.
@@ -742,6 +763,11 @@ def review_health(config: dict[str, Any] | None = None) -> dict[str, Any]:
         key["source"] in ("stored", "environment")
         and (provider == "anthropic"
              or (str(settings.get("request_url", "")).strip() or str(settings.get("base_url", "")).strip())))
+    discovered = model_discovery.current()
+    snapshot["model_discovery"] = {"outcome": discovered.outcome, "reason": discovered.reason,
+                                   "models": len(discovered.models)}
+    if provider == "openai-compatible":
+        snapshot["active_model"] = model_discovery.select_model(settings.get("model"), settings.get("base_url"))[0]
     snapshot["decided_automatically"] = snapshot["approved"] + snapshot["rejected"]
     snapshot["idle"] = snapshot["enabled"] and snapshot["requested"] == 0
     return snapshot
@@ -803,11 +829,9 @@ def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any
     except ValueError:
         return None
 
-    payload = {
-        "model": str(config.get("model", "")),
-        "messages": [{"role": "user", "content": f"{REVIEW_PROMPT}标题：{title}\n正文：{body[:4000]}"}],
-        "temperature": 0,
-    }
+    payload = compatible_payload(
+        config, str(config.get("model", "")),
+        [{"role": "user", "content": f"{REVIEW_PROMPT}标题：{title}\n正文：{body[:MODEL_PREVIEW_CHARS]}"}], 0)
     request = urllib.request.Request(
         endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -833,7 +857,8 @@ def claude_review(title: str, body: str, config: dict[str, Any], secret: str,
     try:
         client = factory(secret, REVIEW_TIMEOUT_SECONDS, 0)
         text, problem = provider_keys.claude_text(
-            client, provider_keys.claude_model(config), REVIEW_PROMPT, f"标题：{title}\n正文：{body[:4000]}",
+            client, provider_keys.claude_model(config), REVIEW_PROMPT,
+            f"标题：{title}\n正文：{body[:MODEL_PREVIEW_CHARS]}",
             provider_keys.REVIEW_MAX_TOKENS, effort="low")
     except Exception as error:  # noqa: BLE001 - an unreachable or surprising model must never block publishing
         status = getattr(error, "status_code", None)
@@ -878,6 +903,10 @@ def review_content(title: str, body: str, config: dict[str, Any] | None = None) 
         threshold = approve_at if verdict["decision"] == "APPROVE" else reject_at
         if verdict["confidence"] < threshold:
             return escalate(f"模型把握不足（{verdict['confidence']:.2f}）：{verdict['reason']}")
+        # The model saw only the beginning. What it found there is enough to reject on, but not to publish the rest.
+        if verdict["decision"] == "APPROVE" and len(body or "") > MODEL_PREVIEW_CHARS:
+            return escalate(f"{LONG_CONTENT_NOTE}（前 {MODEL_PREVIEW_CHARS} 字，共 {len(body or '')} 字）。"
+                            f"{verdict['reason']}")
 
     # A share of what would be published goes to a person anyway. Content can talk to the model — a document
     # that tells it to approve itself is the obvious attack — so its approvals keep being spot-checked.
@@ -951,6 +980,19 @@ def claude_answer(question: str, matched: list[dict[str, Any]], config: dict[str
     return text
 
 
+def compatible_payload(config: dict[str, Any], configured_model: str, messages: list[dict[str, str]],
+                       temperature: float) -> dict[str, Any]:
+    """
+    A chat request for the OpenAI-compatible provider, for the model start-up discovery settled on. Qwen3 is told
+    not to think; no other model is sent the parameter, which the OpenAI API itself would reject.
+    """
+    model = model_discovery.active_model(configured_model, config.get("base_url"))
+    payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
+    if model_discovery.wants_thinking_off(model):
+        payload["enable_thinking"] = False
+    return payload
+
+
 def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict[str, Any],
                       api_key: str | None = None) -> str | None:
     api_key = (api_key if api_key is not None else resolve_provider_key("openai-compatible")["secret"] or "").strip()
@@ -963,14 +1005,10 @@ def compatible_answer(question: str, matched: list[dict[str, Any]], config: dict
         validate_upstream_url(endpoint, resolve_dns=True)
     except ValueError:
         return None
-    payload = {
-        "model": str(config.get("model") or "local-rag"),
-        "temperature": float(config.get("temperature", 0.2)),
-        "messages": [
-            {"role": "system", "content": answer_system_prompt(matched, config)},
-            {"role": "user", "content": question},
-        ],
-    }
+    payload = compatible_payload(config, str(config.get("model") or "local-rag"), [
+        {"role": "system", "content": answer_system_prompt(matched, config)},
+        {"role": "user", "content": question},
+    ], float(config.get("temperature", 0.2)))
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -1324,7 +1362,8 @@ def remove_indexed_file(file_id: int, authorization: str | None = Header(default
 class ReviewRequest(BaseModel):
     kind: str = Field(default="KNOWLEDGE", max_length=32)
     title: str = Field(default="", max_length=500)
-    text: str = Field(default="", max_length=200_000)
+    # As much as /ai/parse accepts: a longer document used to fail here and reach a person as "AI 审核暂不可用".
+    text: str = Field(default="", max_length=2_000_000)
 
 
 @app.post("/ai/internal/review", response_model=ApiResponse)

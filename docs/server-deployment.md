@@ -72,6 +72,23 @@ A provider with no active stored key uses its environment variable: `ANTHROPIC_A
 for an OpenAI-compatible service. Claude is always called at Anthropic's own API; if the server needs a proxy to
 reach it, set `ANTHROPIC_BASE_URL`, which the Anthropic SDK reads.
 
+For an OpenAI-compatible service, ai-service asks `{base_url}/models` once at start-up (three-second timeout, in the
+background) which models the service offers, and checks the model set in AI 与系统 against the list. The configured
+model is always the one called: if the service does not list it, a warning is logged and nothing is switched. If the
+list cannot be had — timeout, HTTP error, no such endpoint, an empty list — a warning says that instead. The outcome,
+the models found and the model in use are written to the ai service's log
+(`docker compose logs ai | grep model_discovery`). The list is not fetched again: after the upstream adds or
+withdraws models, or after `base_url` is changed in the settings, restart the ai service
+(`docker compose restart ai`) to check again. Set `AI_MODEL_DISCOVERY_ENABLED=false` to skip the check entirely.
+
+Models whose name begins with `qwen3` (also after an organisation prefix, as in `Qwen/Qwen3-32B`) are sent
+`"enable_thinking": false`, which keeps review within its time limit. No other model receives the parameter; the
+OpenAI API rejects it.
+
+AI review shows the model at most the first 4,000 characters of a body. Longer content is never published on the
+model's approval alone: it goes to a person with the note 内容较长，AI 只审阅了开头部分. A rejection is acted on as
+usual, and the sensitive-word rules always read the whole text.
+
 ## Narrowing the application database account
 
 The application account is granted only the four databases a service actually connects to: `user_db`,
