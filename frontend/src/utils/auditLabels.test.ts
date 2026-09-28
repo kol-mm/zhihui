@@ -44,6 +44,14 @@ describe('audit labels', () => {
   });
 });
 
+describe('an administrator password reset on the server', () => {
+  it('is named, marked as severe, and shows where it came from', () => {
+    expect(actionLabel('ADMIN_PASSWORD_RESET')).toBe('在服务器上重置管理员密码');
+    expect(isSevere('ADMIN_PASSWORD_RESET')).toBe(true);
+    expect(sourceLabel('server-command')).toBe('服务器命令');
+  });
+});
+
 describe('API key entries', () => {
   it('are named, and the ones that cut off a secret are marked', () => {
     expect(actionLabel('API_KEY_CREATE')).toBe('创建接口密钥');

@@ -35,6 +35,7 @@ const ACTIONS: Record<string, string> = {
   USER_PROFILE_AUDIT: '审核会员资料',
   PASSWORD_RESET_ISSUE: '签发密码重置码',
   PASSWORD_RESET_CLOSE: '关闭密码重置申请',
+  ADMIN_PASSWORD_RESET: '在服务器上重置管理员密码',
   KNOWLEDGE_AUDIT: '审核知识资源',
   KNOWLEDGE_EDIT: '编辑知识资源',
   KNOWLEDGE_DELETE: '删除知识资源',
@@ -71,7 +72,7 @@ const ACTIONS: Record<string, string> = {
 };
 
 /** Actions that remove something or take a member's access away. */
-const SEVERE = new Set(['USER_STATUS', 'KNOWLEDGE_DELETE', 'POST_DELETE', 'COMMENT_DELETE', 'MESSAGES_CLEAR', 'MESSAGES_CLEAR_ALL',
+const SEVERE = new Set(['ADMIN_PASSWORD_RESET', 'USER_STATUS', 'KNOWLEDGE_DELETE', 'POST_DELETE', 'COMMENT_DELETE', 'MESSAGES_CLEAR', 'MESSAGES_CLEAR_ALL',
   'MESSAGE_DELETE', 'SESSION_DELETE', 'DRAFTS_PURGE', 'KNOWLEDGE_CATEGORY_DELETE', 'FAQ_DELETE',
   'API_KEY_REVOKE', 'API_KEY_ROTATE', 'AI_PROVIDER_KEY_DEACTIVATE', 'AI_PROVIDER_KEY_DELETE']);
 
@@ -157,7 +158,7 @@ export function detailFacts(entry: Pick<AuditEntry, 'detail'>): { label: string;
 
 const SOURCES: Record<string, string> = {
   'user-service': '用户服务', 'knowledge-service': '知识服务', 'community-service': '社区服务',
-  'message-service': '消息服务', 'ai-service': 'AI 服务',
+  'message-service': '消息服务', 'ai-service': 'AI 服务', 'server-command': '服务器命令',
 };
 
 export function sourceLabel(source: string | null): string {

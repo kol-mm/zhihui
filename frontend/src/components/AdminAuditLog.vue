@@ -41,7 +41,7 @@
           <el-table-column label="管理员" width="150">
             <template #default="{ row }">
               <span class="audit-actor">{{ row.actorName || '未知' }}</span>
-              <small class="audit-muted">#{{ row.actorId }}<template v-if="row.clientIp"> · {{ row.clientIp }}</template></small>
+              <small class="audit-muted"><template v-if="row.actorId > 0">#{{ row.actorId }}</template><template v-if="row.actorId > 0 && row.clientIp"> · </template><template v-if="row.clientIp">{{ row.clientIp }}</template></small>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="170">

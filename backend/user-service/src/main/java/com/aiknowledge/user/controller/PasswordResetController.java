@@ -129,7 +129,10 @@ public class PasswordResetController {
         String passwordProblem = PasswordRules.problem(newPassword, username);
         if (passwordProblem != null) return ApiResponse.fail(passwordProblem);
 
-        UserEntity user = userStore.findByUsername(username).filter(found -> "ACTIVE".equals(found.getStatus())).orElse(null);
+        // A code for the super administrator can no longer be issued; one issued before that is not honoured, and
+        // answers exactly as if there were none.
+        UserEntity user = userStore.findByUsername(username)
+                .filter(found -> "ACTIVE".equals(found.getStatus()) && !isSuperAdmin(found)).orElse(null);
         ResetRequest open = user == null ? null : resetStore.findOpen(user.getId())
                 .filter(found -> PasswordResetStore.ISSUED.equals(found.status()) && found.codeHash() != null)
                 .orElse(null);
@@ -195,6 +198,8 @@ public class PasswordResetController {
         UserEntity user = userStore.findById(existing.userId()).orElse(null);
         if (user == null) return ApiResponse.fail("user not found");
         if (!"ACTIVE".equals(user.getStatus())) return ApiResponse.fail("cannot reset the password of a disabled account");
+        String refusal = issueRefusal(authorization, user);
+        if (refusal != null) return ApiResponse.fail(refusal);
         String code = newCode();
         LocalDateTime expiresAt = LocalDateTime.now(clock).plus(CODE_LIFETIME);
         ResetRequest issued = resetStore.issue(existing.id(), passwordEncoder.encode(normalizeCode(code)), expiresAt,
@@ -211,6 +216,33 @@ public class PasswordResetController {
         result.put("expiresInSeconds", CODE_LIFETIME.toSeconds());
         result.put("request", view(issued, user));
         return ApiResponse.ok(result);
+    }
+
+    /** Said when a code is asked for the super administrator's account, which is only ever reset on the server. */
+    static final String SUPER_ADMIN_RESET_REFUSED = "超级管理员的密码只能在服务器上重置（reset-admin-password 命令）";
+    static final String ADMIN_RESET_NEEDS_SUPER_ADMIN = "只有超级管理员可以为管理员账号签发密码重置码";
+    static final String OWN_RESET_REFUSED = "不能为自己的账号签发密码重置码";
+
+    /**
+     * Why this administrator may not issue a code for this account, or null. The code is shown to whoever issues it
+     * and sets a new password for the account, so issuing one hands the account over: anyone could ask for a reset of
+     * "admin", and any administrator could then answer it and take the super administrator's place. An
+     * administrator's account is therefore reset only by the super administrator, and the super administrator's
+     * only on the server, where no one else is involved.
+     */
+    private static String issueRefusal(String authorization, UserEntity user) {
+        if (user.getId().equals(LocalAuth.userId(authorization))) return OWN_RESET_REFUSED;
+        if (isSuperAdmin(user)) return SUPER_ADMIN_RESET_REFUSED;
+        if ("ADMIN".equals(role(user)) && !LocalAuth.isSuperAdmin(authorization)) return ADMIN_RESET_NEEDS_SUPER_ADMIN;
+        return null;
+    }
+
+    private static boolean isSuperAdmin(UserEntity user) {
+        return Boolean.TRUE.equals(user.getSuperAdmin());
+    }
+
+    private static String role(UserEntity user) {
+        return user.getRole() == null || user.getRole().isBlank() ? LocalAuth.roleForUsername(user.getUsername()) : user.getRole();
     }
 
     @PostMapping("/admin/password-reset/close")

@@ -200,6 +200,105 @@ class PasswordResetControllerTest {
         assertEquals("该重置申请已处理完毕", controller.issueCode(ADMIN, Map.of("requestId", requestId), null).message());
     }
 
+    // ---- who may issue a code for whom -----------------------------------------------------------------------
+    // A code is shown to whoever issues it and sets a new password, so issuing one hands the account over.
+
+    private UserEntity account(String role, boolean superAdmin) {
+        UserEntity user = new UserEntity();
+        user.setUsername("staff-" + System.nanoTime());
+        user.setPasswordHash(encoder.encode("old-pass1"));
+        user.setNickname("管理员");
+        user.setStatus("ACTIVE");
+        user.setRole(role);
+        user.setSuperAdmin(superAdmin);
+        return users.save(user);
+    }
+
+    private static String adminToken(UserEntity admin, boolean superAdmin) {
+        return "Bearer " + LocalAuth.issueToken(admin.getUsername(), admin.getId(), "ADMIN", superAdmin);
+    }
+
+    private Object requestFor(UserEntity user) {
+        controller.requestReset(form("username", user.getUsername()), CaptchaTestSupport.CLIENT);
+        List<?> items = (List<?>) controller.adminResetPage(ADMIN, null, null, 100).data().get("items");
+        return items.stream().map(item -> (Map<?, ?>) item)
+                .filter(item -> user.getUsername().equals(item.get("username"))).findFirst().orElseThrow().get("id");
+    }
+
+    @Test
+    void anOrdinaryAdministratorCannotResetAnotherAdministrator() {
+        UserEntity target = account("ADMIN", false);
+        UserEntity ordinary = account("ADMIN", false);
+        Object requestId = requestFor(target);
+
+        ApiResponse<Map<String, Object>> refused = controller.issueCode(adminToken(ordinary, false), Map.of("requestId", requestId), null);
+
+        assertEquals(PasswordResetController.ADMIN_RESET_NEEDS_SUPER_ADMIN, refused.message());
+        assertEquals(PasswordResetStore.PENDING, resets.find(((Number) requestId).longValue()).orElseThrow().status());
+        // The super administrator may.
+        UserEntity superAdmin = account("ADMIN", true);
+        assertEquals(0, controller.issueCode(adminToken(superAdmin, true), Map.of("requestId", requestId), null).code());
+    }
+
+    /** The takeover this closes: anyone asks to reset "admin", and any administrator answers with a code. */
+    @Test
+    void nobodyCanResetTheSuperAdministratorInTheApp() {
+        UserEntity superAdmin = account("ADMIN", true);
+        Object requestId = requestFor(superAdmin);
+
+        assertEquals(PasswordResetController.SUPER_ADMIN_RESET_REFUSED,
+                controller.issueCode(ADMIN, Map.of("requestId", requestId), null).message());
+        assertEquals(PasswordResetController.SUPER_ADMIN_RESET_REFUSED,
+                controller.issueCode(adminToken(account("ADMIN", true), true), Map.of("requestId", requestId), null).message());
+        assertEquals(PasswordResetStore.PENDING, resets.find(((Number) requestId).longValue()).orElseThrow().status());
+    }
+
+    @Test
+    void noAdministratorIssuesACodeForTheirOwnAccount() {
+        UserEntity self = account("ADMIN", false);
+        Object requestId = requestFor(self);
+
+        assertEquals(PasswordResetController.OWN_RESET_REFUSED,
+                controller.issueCode(adminToken(self, true), Map.of("requestId", requestId), null).message());
+    }
+
+    /** Older rows may have no role stored; the account named "admin" is an administrator all the same. */
+    @Test
+    void anAdminAccountWithNoStoredRoleIsStillAnAdministrator() {
+        UserEntity legacy = new UserEntity();
+        legacy.setUsername("admin");
+        legacy.setPasswordHash(encoder.encode("old-pass1"));
+        legacy.setNickname("管理员");
+        legacy.setStatus("ACTIVE");
+        legacy.setRole(null);
+        users.save(legacy);
+        Object requestId = requestFor(legacy);
+
+        assertEquals(PasswordResetController.ADMIN_RESET_NEEDS_SUPER_ADMIN,
+                controller.issueCode(adminToken(account("ADMIN", false), false), Map.of("requestId", requestId), null).message());
+    }
+
+    @Test
+    void anOrdinaryAdministratorStillResetsMembers() {
+        Object requestId = requestFor(member());
+
+        assertEquals(0, controller.issueCode(ADMIN, Map.of("requestId", requestId), null).code());
+    }
+
+    /** A code issued before the rule existed is not honoured either, and says no more than a wrong code would. */
+    @Test
+    void anOldCodeForTheSuperAdministratorIsNotHonoured() {
+        UserEntity superAdmin = account("ADMIN", true);
+        long requestId = ((Number) requestFor(superAdmin)).longValue();
+        resets.issue(requestId, encoder.encode("AAAABBBBCCCC"), java.time.LocalDateTime.now(clock).plusMinutes(30), 99L);
+
+        ApiResponse<Map<String, Object>> refused = controller.completeReset(form("username", superAdmin.getUsername(),
+                "code", "AAAA-BBBB-CCCC", "newPassword", "taken-over9"), CaptchaTestSupport.CLIENT);
+
+        assertEquals(INVALID, refused.message());
+        assertTrue(encoder.matches("old-pass1", users.findById(superAdmin.getId()).orElseThrow().getPasswordHash()));
+    }
+
     private UserEntity member() {
         UserEntity user = new UserEntity();
         user.setUsername("reset-" + System.nanoTime());
