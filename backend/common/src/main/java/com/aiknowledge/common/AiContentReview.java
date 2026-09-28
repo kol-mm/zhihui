@@ -70,13 +70,48 @@ public class AiContentReview {
         this.timeout = timeout;
     }
 
-    /** The verdict on one submission. Never throws: a review that cannot be made is a review for a person. */
+    /** ai-service's limit on the text of one review (ReviewRequest.text); longer text is refused there outright. */
+    static final int MAX_TEXT_CHARS = 2_000_000;
+    /** ai-service's limit on the title (ReviewRequest.title). */
+    static final int MAX_TITLE_CHARS = 500;
+
+    /**
+     * The verdict on one submission. Never throws: a review that cannot be made is a review for a person.
+     *
+     * <p>Text and title longer than ai-service accepts are cut to its limits rather than sent whole to be refused,
+     * which used to reach a person as "AI 审核暂不可用". What was cut off was never reviewed, so a cut submission
+     * is never approved here: an approval becomes a referral to a person, a rejection stands, and either way the
+     * reason says how much was reviewed.
+     */
     public Verdict review(String kind, String title, String text) {
+        String fullTitle = title == null ? "" : title;
+        String fullText = text == null ? "" : text;
+        boolean cut = fullTitle.length() > MAX_TITLE_CHARS || fullText.length() > MAX_TEXT_CHARS;
+        Verdict verdict = ask(kind, capped(fullTitle, MAX_TITLE_CHARS), capped(fullText, MAX_TEXT_CHARS));
+        if (!cut) return verdict;
+        String note = fullText.length() > MAX_TEXT_CHARS
+                ? "原文共 " + fullText.length() + " 字，只有前 " + MAX_TEXT_CHARS + " 字经过审核"
+                : "标题超过 " + MAX_TITLE_CHARS + " 字，只有前 " + MAX_TITLE_CHARS + " 字经过审核";
+        String reason = verdict.reason() == null || verdict.reason().isBlank() ? note : verdict.reason() + "；" + note;
+        return verdict.rejected() ? new Verdict(REJECT, verdict.confidence(), reason) : Verdict.escalate(reason);
+    }
+
+    /**
+     * At most {@code limit} UTF-16 units, never ending on half a surrogate pair. ai-service counts code points,
+     * which are never more than UTF-16 units, so the result is always within its limit.
+     */
+    static String capped(String value, int limit) {
+        if (value.length() <= limit) return value;
+        int end = Character.isHighSurrogate(value.charAt(limit - 1)) ? limit - 1 : limit;
+        return value.substring(0, end);
+    }
+
+    private Verdict ask(String kind, String title, String text) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("kind", kind);
-            payload.put("title", title == null ? "" : title);
-            payload.put("text", text == null ? "" : text);
+            payload.put("title", title);
+            payload.put("text", text);
             HttpRequest request = HttpRequest.newBuilder(endpoint)
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
