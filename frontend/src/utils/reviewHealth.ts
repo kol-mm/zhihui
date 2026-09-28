@@ -14,6 +14,9 @@ export type ReviewHealth = {
   last_decision_at?: string | null;
   last_failure?: string | null;
   last_failure_at?: string | null;
+  /** What review calls, after its own settings are laid over chat's (ai-service review_settings). */
+  provider?: string;
+  model?: string;
 };
 
 export type ReviewVerdict = {
@@ -73,6 +76,18 @@ export function reviewVerdict(health: ReviewHealth | null | undefined): ReviewVe
     headline: '运行正常',
     detail: `已自动判定 ${automatic} 条，转人工 ${count(data.escalated)} 条（含抽样 ${count(data.sampled)} 条）。`,
   };
+}
+
+/**
+ * Which model review is calling, in words. Review may use a different model from AI 检索, so the panel says which
+ * one this is rather than leaving it to be worked out from two sections of settings.
+ */
+export function reviewModelLine(health: ReviewHealth | null | undefined): string {
+  const data = health ?? {};
+  const model = (data.model ?? '').trim();
+  if (data.provider === 'anthropic') return `Anthropic Claude · ${model}`;
+  if (data.provider === 'openai-compatible') return `OpenAI 兼容接口 · ${model || '未填写模型'}`;
+  return '仅本地规则（不调用模型）';
 }
 
 /** The counters worth showing, in a fixed order, skipping the ones that are zero and uninteresting. */

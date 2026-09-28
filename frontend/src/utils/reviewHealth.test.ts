@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reviewCounters, reviewVerdict } from './reviewHealth';
+import { reviewCounters, reviewModelLine, reviewVerdict } from './reviewHealth';
 
 describe('AI review health', () => {
   it('says so plainly when review is off', () => {
@@ -64,5 +64,21 @@ describe('AI review health', () => {
     expect(counters[0].value).toBe(4);
     expect(counters[4].value).toBe(0);
     expect(counters[5].value).toBe(0);
+  });
+});
+
+describe('which model review calls', () => {
+  it('names the provider and the model review itself uses', () => {
+    expect(reviewModelLine({ provider: 'anthropic', model: 'claude-haiku-4-5' })).toBe('Anthropic Claude · claude-haiku-4-5');
+    expect(reviewModelLine({ provider: 'openai-compatible', model: 'qwen3-8b' })).toBe('OpenAI 兼容接口 · qwen3-8b');
+  });
+
+  it('says so when a compatible service has no model named', () => {
+    expect(reviewModelLine({ provider: 'openai-compatible', model: '  ' })).toBe('OpenAI 兼容接口 · 未填写模型');
+  });
+
+  it('reads anything else, including no data yet, as the local rules', () => {
+    expect(reviewModelLine({ provider: 'local', model: 'local-rag' })).toBe('仅本地规则（不调用模型）');
+    expect(reviewModelLine(undefined)).toBe('仅本地规则（不调用模型）');
   });
 });

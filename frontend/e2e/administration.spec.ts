@@ -49,7 +49,10 @@ test.describe('administration', () => {
     await openAdminSection(page, 'AI 与系统');
 
     await expect(page.getByText('只有超级管理员可以修改')).toBeVisible();
-    await expect(page.getByLabel('模型名称')).toBeDisabled();
+    await expect(page.getByLabel('模型名称', { exact: true })).toBeDisabled();
+    // The review model decides where a key is sent just as much, so it is locked the same way.
+    await expect(page.getByLabel('审核模型名称', { exact: true })).toBeDisabled();
+    await expect(page.getByRole('combobox', { name: '审核模型服务' })).toBeDisabled();
   });
 
   test('the settings screen reports what AI review is doing', async ({ page }) => {
@@ -62,6 +65,8 @@ test.describe('administration', () => {
     // Whichever state it is in, it must say something rather than leave silence to be interpreted.
     await expect(health).toContainText(/未开启|没有收到请求|模型始终失败|部分调用失败|仅本地规则|运行正常/);
     await expect(page.locator('.review-health-counters')).toContainText('收到请求');
+    // Review may call a different model from AI 检索, so the panel names the one it calls.
+    await expect(health).toContainText(/审核调用：(Anthropic Claude|OpenAI 兼容接口|仅本地规则)/);
   });
 
   /**

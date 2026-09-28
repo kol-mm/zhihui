@@ -107,6 +107,10 @@ class AiConfigRequest(BaseModel):
     model: str = Field(default="local-rag", max_length=200)
     base_url: str = Field(default="", max_length=2000)
     request_url: str = Field(default="", max_length=2000)
+    # What AI review calls, when it should differ from AI 检索 (chat). Empty means "the same as chat"; the endpoint
+    # and key stay those of the provider, shared by both — see review_settings.
+    review_provider: str = Field(default="", pattern="^(|local|openai-compatible|anthropic)$")
+    review_model: str = Field(default="", max_length=200)
     temperature: float = Field(default=0.2, ge=0, le=1)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     pdf_max_upload_mb: int = Field(default=200, ge=1, le=200)
@@ -248,13 +252,18 @@ def start_model_discovery() -> None:
     """Asks the OpenAI-compatible endpoint for its models once, in the background; see model_discovery."""
     try:
         config = read_ai_config()
-        provider = str(config.get("provider"))
+        review = review_settings(config)
+        chat_uses = config.get("provider") == "openai-compatible"
+        review_uses = review.get("provider") == "openai-compatible"
+        provider = "openai-compatible" if chat_uses or review_uses else str(config.get("provider"))
         api_key = resolve_provider_key(provider)["secret"] if provider == "openai-compatible" else None
     except Exception as error:  # noqa: BLE001 - discovery is advisory; the service starts regardless
         logging.getLogger("ai-service").warning("model discovery not started: %s", type(error).__name__)
         return
     model_discovery.run_in_background(
-        provider=provider, base_url=config.get("base_url"), api_key=api_key, configured_model=config.get("model"),
+        provider=provider, base_url=config.get("base_url"), api_key=api_key,
+        configured_model=config.get("model") if chat_uses else None,
+        review_model=review.get("model") if review_uses and review.get("model") != config.get("model") else None,
         validate=lambda url: validate_upstream_url(url, resolve_dns=True))
 
 
@@ -336,7 +345,7 @@ def resolve_provider_key(provider: str) -> dict[str, Any]:
 
 
 # Where the API key gets sent. An ordinary administrator keeps every other setting but may not repoint these.
-SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url")
+SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url", "review_provider", "review_model")
 
 
 # ---- Admin action log -------------------------------------------------------------------------------------------
@@ -373,6 +382,8 @@ AI_CONFIG_LABELS = {
     "model": "模型",
     "base_url": "接口地址",
     "request_url": "请求地址",
+    "review_provider": "审核模型服务",
+    "review_model": "审核模型",
     "temperature": "温度",
     "max_upload_mb": "上传大小上限",
     "pdf_max_upload_mb": "PDF 上传大小上限",
@@ -490,6 +501,8 @@ def read_ai_config() -> dict[str, Any]:
         "model": "local-rag",
         "base_url": "",
         "request_url": "",
+        "review_provider": "",
+        "review_model": "",
         "temperature": 0.2,
         "max_upload_mb": 25,
         "pdf_max_upload_mb": 200,
@@ -752,10 +765,14 @@ def review_health(config: dict[str, Any] | None = None) -> dict[str, Any]:
     Both failure modes are invisible from outside: a model that always errors escalates everything, and a
     switch that never reaches the services means nothing is ever asked. Counters make the difference legible.
     """
-    settings = config if config is not None else read_ai_config()
+    settings = review_settings(config if config is not None else read_ai_config())
     with _review_lock:
         snapshot = dict(_review_health)
     snapshot["enabled"] = bool(settings.get("ai_audit_enabled", False))
+    snapshot["provider"] = str(settings.get("provider"))
+    # The model actually called: Claude falls back to its default when none is named.
+    snapshot["model"] = (provider_keys.claude_model(settings) if snapshot["provider"] == "anthropic"
+                         else str(settings.get("model") or ""))
     provider = str(settings.get("provider"))
     key = resolve_provider_key(provider) if provider in provider_keys.PROVIDERS else {"source": "none"}
     snapshot["key_source"] = key["source"]
@@ -803,6 +820,37 @@ def parse_verdict(content: str) -> dict[str, Any] | None:
         return None
     return {"decision": verdict["decision"], "confidence": confidence,
             "reason": str(verdict.get("reason", ""))[:200]}
+
+
+def review_settings(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    The settings AI review calls its model with: chat's, with review_provider and review_model laid over them.
+    Both empty means review uses exactly what chat uses. A review model left empty under a provider other than
+    chat's is left empty too — chat's model name means nothing to another provider (Claude then uses its
+    default). The endpoint and the key are the provider's and are shared: giving review its own address under the
+    same provider would send that provider's key to a server it was not issued for.
+    """
+    settings = dict(config)
+    provider = str(config.get("review_provider") or "").strip()
+    model = str(config.get("review_model") or "").strip()
+    if provider and provider != config.get("provider"):
+        settings["provider"] = provider
+        settings["model"] = model
+    elif model:
+        settings["model"] = model
+    return settings
+
+
+def review_settings_problem(values: dict[str, Any]) -> str | None:
+    """Why these settings would leave review unable to call its model, or None."""
+    review = review_settings(values)
+    if review.get("provider") != "openai-compatible" or values.get("provider") == "openai-compatible":
+        return None
+    if not str(review.get("model") or "").strip():
+        return "审核使用 OpenAI 兼容接口时，请填写审核模型名称"
+    if not (str(values.get("request_url") or "").strip() or str(values.get("base_url") or "").strip()):
+        return "审核使用 OpenAI 兼容接口时，请填写接口地址"
+    return None
 
 
 def model_review(title: str, body: str, config: dict[str, Any]) -> dict[str, Any] | None:
@@ -888,7 +936,7 @@ def review_content(title: str, body: str, config: dict[str, Any] | None = None) 
     approve_at = float(settings.get("ai_audit_approve_confidence", 0.9))
     reject_at = float(settings.get("ai_audit_reject_confidence", 0.85))
 
-    verdict = model_review(title or "", body or "", settings)
+    verdict = model_review(title or "", body or "", review_settings(settings))
     if verdict is None:
         # No model configured, or it could not be reached. The local rules cannot judge meaning, so they claim
         # only LOCAL_RULE_CONFIDENCE; if the bar for publishing is above that, a person decides.
@@ -1400,6 +1448,10 @@ def save_ai_config(
             except ValueError as error:
                 raise HTTPException(status_code=400, detail=str(error)) from error
         values[key] = value
+    values["review_model"] = str(values.get("review_model") or "").strip()
+    problem = review_settings_problem(values)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
     with connect() as conn:
         for key, value in values.items():
             stored_value = json.dumps(value, ensure_ascii=False) if key == "selected_file_ids" else str(value)

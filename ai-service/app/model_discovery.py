@@ -169,29 +169,41 @@ def remember(discovery: Discovery) -> None:
 
 
 def run_at_startup(provider: str, base_url: str | None, api_key: str | None, configured_model: str | None,
-                   validate: Callable[[str], None], fetch: Callable[[str, str, float], Any] | None = None) -> Discovery:
-    """Discover (for the OpenAI-compatible provider only), remember the result, and log what it means."""
+                   validate: Callable[[str], None], fetch: Callable[[str, str, float], Any] | None = None,
+                   review_model: str | None = None) -> Discovery:
+    """
+    Discover (for the OpenAI-compatible provider only), remember the result, and log what it means. The chat
+    model is `configured_model`; `review_model` is the one AI review calls when that differs. Either is None when
+    its purpose does not use this provider.
+    """
     if provider != "openai-compatible":
         found = Discovery("skipped", reason=f"the configured provider is {provider!r}, not openai-compatible")
     else:
         found = discover(base_url, api_key, validate, fetch)
     remember(found)
     configured = str(configured_model or "").strip()
+    checked = [(label, str(model).strip()) for label, model in (("active model", configured_model),
+                                                                 ("active review model", review_model))
+               if model is not None]
     if found.outcome == "ok":
         shown = ", ".join(repr(model) for model in found.models[:LOGGED_MODELS])
         more = f" and {len(found.models) - LOGGED_MODELS} more" if len(found.models) > LOGGED_MODELS else ""
         log.info("model discovery: %d models at %s: %s%s", len(found.models), found.base_url, shown, more)
     elif found.outcome == "failed":
-        log.warning("model discovery failed (%s); using the configured model %r as entered", found.reason, configured)
+        log.warning("model discovery failed (%s); using the configured model%s %s as entered", found.reason,
+                    "s" if len(checked) > 1 else "", ", ".join(repr(model) for _, model in checked) or repr(configured))
     else:
         log.info("model discovery %s: %s", found.outcome, found.reason)
     if provider == "openai-compatible":
-        model, warning = select_model(configured, base_url, found)
-        if warning:
-            with _state.lock:
-                _state.warned.add((configured, normalized_base(base_url)))
-            log.warning("model not listed: %s", warning)
-        log.info("active model: %r%s", model, " (thinking turned off: Qwen3)" if wants_thinking_off(model) else "")
+        for label, wanted in checked:
+            model, warning = select_model(wanted, base_url, found)
+            if warning:
+                with _state.lock:
+                    first_time = (wanted, normalized_base(base_url)) not in _state.warned
+                    _state.warned.add((wanted, normalized_base(base_url)))
+                if first_time:
+                    log.warning("model not listed: %s", warning)
+            log.info("%s: %r%s", label, model, " (thinking turned off: Qwen3)" if wants_thinking_off(model) else "")
     return found
 
 

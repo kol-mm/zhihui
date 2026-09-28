@@ -112,4 +112,36 @@ test.describe('model provider keys', () => {
     await expect(page.getByText('这一项对 Claude 不生效')).toBeVisible();
     // Not saved: the live configuration stays as it was.
   });
+
+  test('AI review can be given its own model, and the address follows whichever purpose needs it', async ({ page }) => {
+    await signIn(page, SUPER_ADMIN);
+    await page.goto('/');
+    await openAdminSection(page, 'AI 与系统');
+    const choose = async (label: string, option: string) => {
+      const select = page.locator('.el-form-item', { hasText: label }).locator('.el-select').first();
+      await select.click();
+      // This select's own list: the one just closed is still fading out and holds options of the same names.
+      const list = await select.locator('[aria-controls]').first().getAttribute('aria-controls');
+      await page.locator(`[id="${list}"] .el-select-dropdown__item`, { hasText: option }).click();
+    };
+    const address = page.locator('.el-form-item', { hasText: '完整请求地址' }).locator('input');
+
+    // By default review follows chat.
+    await expect(page.locator('.el-form-item', { hasText: '审核模型服务' }).locator('.el-select')).toContainText('与 AI 检索相同');
+
+    // Chat on Claude, review on an OpenAI-compatible service: the address is needed again, and the model is asked for.
+    await choose('AI 提供商', 'Anthropic Claude');
+    await expect(address).toBeDisabled();
+    await choose('审核模型服务', 'OpenAI 兼容接口');
+    await expect(address).toBeEnabled();
+    await expect(page.locator('.el-form-item', { hasText: '审核模型名称' }).locator('input'))
+      .toHaveAttribute('placeholder', /必填/);
+
+    // Local rules only: there is no model to name.
+    await choose('审核模型服务', '仅本地规则');
+    await expect(page.locator('.el-form-item', { hasText: '审核模型名称' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: '撤销更改' }).click();
+    // Not saved: the live configuration stays as it was.
+  });
 });
