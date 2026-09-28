@@ -72,6 +72,15 @@ A provider with no active stored key uses its environment variable: `ANTHROPIC_A
 for an OpenAI-compatible service. Claude is always called at Anthropic's own API; if the server needs a proxy to
 reach it, set `ANTHROPIC_BASE_URL`, which the Anthropic SDK reads.
 
+AI review and AI 检索 (chat) can use different models, set in AI 与系统 by the super administrator: 审核模型服务 and
+审核模型 under AI 内容审核. Both empty — the default — means review uses exactly what chat uses. Review can name
+its own model under chat's provider (a faster, cheaper one suits its short yes-or-no decisions), use the other
+provider, or use the local rules only. The endpoint address and the key belong to the provider and are shared by
+both: giving review its own address under the same provider would send that provider's key to a server it was not
+issued for. When review uses an OpenAI-compatible service that chat does not, the address fields must still be
+filled in, and the review model named; the settings are refused otherwise. Start-up discovery (below) checks the
+review model as well.
+
 For an OpenAI-compatible service, ai-service asks `{base_url}/models` once at start-up (three-second timeout, in the
 background) which models the service offers, and checks the model set in AI 与系统 against the list. The configured
 model is always the one called: if the service does not list it, a warning is logged and nothing is switched. If the
@@ -88,6 +97,27 @@ OpenAI API rejects it.
 AI review shows the model at most the first 4,000 characters of a body. Longer content is never published on the
 model's approval alone: it goes to a person with the note 内容较长，AI 只审阅了开头部分. A rejection is acted on as
 usual, and the sensitive-word rules always read the whole text.
+
+## Administrator password recovery
+
+Members who forget their password ask for a reset on the login page, and an administrator issues them a one-time
+code. The code is shown to whoever issues it and sets a new password, so issuing one hands the account over.
+Codes for an administrator's account can therefore be issued only by the super administrator, no administrator can
+issue one for their own account, and the super administrator's own password cannot be reset in the app at all.
+
+To set an administrator's password — the super administrator's included — run this on the server, from the
+directory with `compose.yaml`:
+
+```bash
+docker compose run --rm --no-deps user-service reset-admin-password admin
+```
+
+It asks for the new password twice without showing it, applies the usual password rules, ends every session the
+account had, and records the change in the admin action log as 在服务器上重置管理员密码. The password is never
+accepted on the command line, where it would stay in shell history; for a script, pass it as the first line of
+standard input with `docker compose run -T`. Take a backup first (`./backup.sh`). If the account was locked out by
+failed sign-ins, `docker compose restart user-service` lifts the lock. The command starts a second copy of
+user-service for a few seconds, so on a small host run it when the site is quiet.
 
 ## Narrowing the application database account
 
