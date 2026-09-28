@@ -1,5 +1,6 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.user.security.CaptchaTestSupport;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -33,8 +34,9 @@ class UserControllerTest {
     }
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final UserController controller =
-            new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder);
+    private final CaptchaService captcha = CaptchaTestSupport.predictable();
+    private final UserController controller = new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder,
+            new UserAvatarStorageService("local", "target/test-user-avatars", "http://127.0.0.1:9000", "test", "test", "test"), captcha);
 
     @Test
     void registrationCanBeDisabledByPlatformConfiguration() {
@@ -44,16 +46,16 @@ class UserControllerTest {
                 new InMemoryUserStore(passwordEncoder), passwordEncoder,
                 new com.aiknowledge.user.storage.UserAvatarStorageService("local", "target/test-user-avatars",
                         "http://127.0.0.1:9000", "test", "test", "test"),
-                new com.aiknowledge.user.security.CaptchaService(), config
+                CaptchaTestSupport.predictable(), config
         );
 
-        assertEquals(500, disabled.register(Map.of("username", "new-user", "password", "password123")).code());
+        assertEquals(500, disabled.register(Map.of("username", "new-user", "password", "password123"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void demoUserCanLogin() {
         ApiResponse<Map<String, Object>> response =
-                controller.login(credentials("demo", "demo"));
+                controller.login(credentials("demo", "demo"), CaptchaTestSupport.CLIENT);
 
         assertEquals(0, response.code());
         assertNotNull(response.data().get("token"));
@@ -73,7 +75,7 @@ class UserControllerTest {
     @Test
     void adminTokenContainsAdminRole() {
         ApiResponse<Map<String, Object>> response =
-                controller.login(credentials("admin", "admin123"));
+                controller.login(credentials("admin", "admin123"), CaptchaTestSupport.CLIENT);
         assertEquals(0, response.code());
         String token = String.valueOf(response.data().get("token"));
         assertEquals(true, LocalAuth.isAdmin("Bearer " + token));
@@ -81,23 +83,23 @@ class UserControllerTest {
 
     @Test
     void captchaIsRequiredAndCanOnlyBeUsedOnce() {
-        assertEquals(500, controller.login(Map.of("username", "demo", "password", "demo")).code());
+        assertEquals(500, controller.login(Map.of("username", "demo", "password", "demo"), CaptchaTestSupport.CLIENT).code());
         Map<String, String> request = credentials("demo", "demo");
-        assertEquals(0, controller.login(request).code());
-        assertEquals(500, controller.login(request).code());
+        assertEquals(0, controller.login(request, CaptchaTestSupport.CLIENT).code());
+        assertEquals(500, controller.login(request, CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void registeredUserCanLogin() {
         Map<String, String> registrationRequest = credentials("alice", "secret123");
         registrationRequest.put("nickname", "Alice");
-        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
+        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest, CaptchaTestSupport.CLIENT);
         assertEquals(0, registration.code());
         assertNotNull(registration.data().get("token"));
         assertEquals("USER", registration.data().get("role"));
 
         ApiResponse<Map<String, Object>> login =
-                controller.login(credentials("alice", "secret123"));
+                controller.login(credentials("alice", "secret123"), CaptchaTestSupport.CLIENT);
         assertEquals(0, login.code());
     }
 
@@ -105,19 +107,19 @@ class UserControllerTest {
     void invalidRegistrationFieldsDoNotConsumeTheCaptcha() {
         Map<String, String> registrationRequest = credentials("field-check-user", "onlyletters");
 
-        assertEquals(500, controller.register(registrationRequest).code());
+        assertEquals(500, controller.register(registrationRequest, CaptchaTestSupport.CLIENT).code());
         registrationRequest.put("password", "letters123");
-        assertEquals(0, controller.register(registrationRequest).code());
+        assertEquals(0, controller.register(registrationRequest, CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void registrationRejectsUnsafeOrOverlongFields() {
-        assertEquals(500, controller.register(credentials("same123", "same123")).code());
-        assertEquals(500, controller.register(credentials("space-user", "secret 123")).code());
+        assertEquals(500, controller.register(credentials("same123", "same123"), CaptchaTestSupport.CLIENT).code());
+        assertEquals(500, controller.register(credentials("space-user", "secret 123"), CaptchaTestSupport.CLIENT).code());
 
         Map<String, String> longNickname = credentials("nickname-user", "secret123");
         longNickname.put("nickname", "名".repeat(65));
-        assertEquals(500, controller.register(longNickname).code());
+        assertEquals(500, controller.register(longNickname, CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
@@ -125,14 +127,14 @@ class UserControllerTest {
         String auth = "Bearer " + LocalAuth.issueToken("demo");
         var changed = controller.changePassword(auth, Map.of("currentPassword", "demo", "newPassword", "new-demo-pass1"));
         assertEquals(0, changed.code());
-        assertEquals(0, controller.login(credentials("demo", "new-demo-pass1")).code());
+        assertEquals(0, controller.login(credentials("demo", "new-demo-pass1"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void reservedAdminNameCannotBeRegisteredWithDifferentCase() {
         Map<String, String> registrationRequest = credentials("Admin", "secret123");
         registrationRequest.put("nickname", "Not Admin");
-        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest);
+        ApiResponse<Map<String, Object>> registration = controller.register(registrationRequest, CaptchaTestSupport.CLIENT);
         assertEquals(500, registration.code());
         assertEquals("USER", LocalAuth.roleForUsername("Admin"));
     }
@@ -141,7 +143,7 @@ class UserControllerTest {
     void disabledUserCannotLogin() {
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin");
         assertEquals(0, controller.updateUserStatus(adminAuth, Map.of("userId", 1L, "status", "DISABLED")).code());
-        assertEquals(500, controller.login(credentials("demo", "demo")).code());
+        assertEquals(500, controller.login(credentials("demo", "demo"), CaptchaTestSupport.CLIENT).code());
         controller.updateUserStatus(adminAuth, Map.of("userId", 1L, "status", "ACTIVE"));
     }
 
@@ -194,7 +196,7 @@ class UserControllerTest {
     void directoryRequiresAnExactUsernameAndNeverReturnsAFullList() {
         Map<String, String> registrationRequest = credentials("directory-user", "secret123");
         registrationRequest.put("nickname", "Directory User");
-        controller.register(registrationRequest);
+        controller.register(registrationRequest, CaptchaTestSupport.CLIENT);
 
         String auth = "Bearer " + LocalAuth.issueToken("demo");
         var blankResponse = controller.directory(auth, "");
@@ -230,15 +232,17 @@ class UserControllerTest {
     }
 
     private Map<String, String> credentials(String username, String password) {
-        var challenge = controller.captcha();
-        String question = String.valueOf(challenge.data().get("question"));
-        String[] values = question.replace("= ?", "").split("\\+");
-        int answer = Integer.parseInt(values[0].trim()) + Integer.parseInt(values[1].trim());
+        return credentials(captcha, username, password);
+    }
+
+    /** A sign-in or registration form with this browser's captcha answered. */
+    private static Map<String, String> credentials(CaptchaService service, String username, String password) {
+        Map<String, Object> challenge = service.issue(CaptchaTestSupport.CLIENT);
         Map<String, String> request = new HashMap<>();
         request.put("username", username);
         request.put("password", password);
-        request.put("captchaId", String.valueOf(challenge.data().get("captchaId")));
-        request.put("captchaAnswer", String.valueOf(answer));
+        request.put("captchaId", String.valueOf(challenge.get("captchaId")));
+        request.put("captchaAnswer", CaptchaTestSupport.ANSWER);
         return request;
     }
 
@@ -282,7 +286,7 @@ class UserControllerTest {
         long baseReports = overviewNumber(before.get("reports"));
 
         String username = "overview-" + System.nanoTime();
-        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"), CaptchaTestSupport.CLIENT)
                 .data().get("user")).get("id")).longValue();
         controller.reportUser("Bearer " + LocalAuth.issueToken(username, userId, "USER"),
                 Map.of("targetUserId", 1L, "reason", "概览举报"));
@@ -311,7 +315,7 @@ class UserControllerTest {
         String marker = "pagesample" + System.nanoTime();
         java.util.List<Long> created = new java.util.ArrayList<>();
         for (int i = 1; i <= 3; i++) {
-            created.add(((Number) ((Map<?, ?>) controller.register(credentials(marker + "-" + i, "password123"))
+            created.add(((Number) ((Map<?, ?>) controller.register(credentials(marker + "-" + i, "password123"), CaptchaTestSupport.CLIENT)
                     .data().get("user")).get("id")).longValue());
         }
         controller.updateUserStatus(adminAuth, Map.of("userId", created.get(2), "status", "DISABLED"));
@@ -361,7 +365,7 @@ class UserControllerTest {
         long allBefore = overviewNumber(controller.adminOverview(adminAuth).data().get("reports"));
 
         String username = "openreport-" + System.nanoTime();
-        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+        Long userId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"), CaptchaTestSupport.CLIENT)
                 .data().get("user")).get("id")).longValue();
         Long reportId = controller.reportUser("Bearer " + LocalAuth.issueToken(username, userId, "USER"),
                 Map.of("targetUserId", 1L, "reason", "待处理举报")).data().id();
@@ -379,7 +383,7 @@ class UserControllerTest {
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
         String marker = "用户举报队列" + System.nanoTime();
         String username = "reporter-" + System.nanoTime();
-        Long reporterId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"))
+        Long reporterId = ((Number) ((Map<?, ?>) controller.register(credentials(username, "password123"), CaptchaTestSupport.CLIENT)
                 .data().get("user")).get("id")).longValue();
         String reporterAuth = "Bearer " + LocalAuth.issueToken(username, reporterId, "USER");
         List<Long> created = new java.util.ArrayList<>();
@@ -413,27 +417,27 @@ class UserControllerTest {
     @Test
     void repeatedFailedLoginsLockTheAccountForAWhile() {
         for (int i = 0; i < 5; i++) {
-            assertEquals("用户名或密码错误", controller.login(credentials("demo", "wrong-pass" + i)).message());
+            assertEquals("用户名或密码错误", controller.login(credentials("demo", "wrong-pass" + i), CaptchaTestSupport.CLIENT).message());
         }
-        ApiResponse<Map<String, Object>> locked = controller.login(credentials("demo", "demo"));
+        ApiResponse<Map<String, Object>> locked = controller.login(credentials("demo", "demo"), CaptchaTestSupport.CLIENT);
         assertEquals(500, locked.code());
         assertTrue(locked.message().contains("登录失败次数过多"), locked.message());
 
         // Other accounts keep working.
-        assertEquals(0, controller.login(credentials("admin", "admin123")).code());
+        assertEquals(0, controller.login(credentials("admin", "admin123"), CaptchaTestSupport.CLIENT).code());
 
         // Unknown names lock the same way, so a lock says nothing about whether an account exists.
         String ghost = "ghost-" + System.nanoTime();
         for (int i = 0; i < 5; i++) {
-            assertEquals("用户名或密码错误", controller.login(credentials(ghost, "wrong-pass" + i)).message());
+            assertEquals("用户名或密码错误", controller.login(credentials(ghost, "wrong-pass" + i), CaptchaTestSupport.CLIENT).message());
         }
-        assertTrue(controller.login(credentials(ghost, "wrong-pass")).message().contains("登录失败次数过多"));
+        assertTrue(controller.login(credentials(ghost, "wrong-pass"), CaptchaTestSupport.CLIENT).message().contains("登录失败次数过多"));
     }
 
     @Test
     void loginAsksForMissingCredentials() {
-        assertEquals("请输入用户名和密码", controller.login(credentials("", "")).message());
-        assertEquals("请输入用户名和密码", controller.login(credentials("demo", "")).message());
+        assertEquals("请输入用户名和密码", controller.login(credentials("", ""), CaptchaTestSupport.CLIENT).message());
+        assertEquals("请输入用户名和密码", controller.login(credentials("demo", ""), CaptchaTestSupport.CLIENT).message());
     }
 
     @Test
@@ -470,7 +474,7 @@ class UserControllerTest {
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN");
         String demoAuth = "Bearer " + LocalAuth.issueToken("demo");
         String username = "lookup-" + System.nanoTime();
-        Map<String, Object> registered = controller.register(credentials(username, "secret123")).data();
+        Map<String, Object> registered = controller.register(credentials(username, "secret123"), CaptchaTestSupport.CLIENT).data();
         String memberAuth = "Bearer " + registered.get("token");
         Long memberId = ((Number) ((Map<?, ?>) registered.get("user")).get("id")).longValue();
 
@@ -495,7 +499,7 @@ class UserControllerTest {
     @Test
     void passwordChangeFollowsTheRegistrationRules() {
         String username = "pwchange-" + System.nanoTime();
-        String auth = "Bearer " + controller.register(credentials(username, "secret123")).data().get("token");
+        String auth = "Bearer " + controller.register(credentials(username, "secret123"), CaptchaTestSupport.CLIENT).data().get("token");
 
         assertEquals("密码须同时包含字母和数字", controller.changePassword(auth, Map.of(
                 "currentPassword", "secret123", "newPassword", "onlyletters")).message());
@@ -509,20 +513,20 @@ class UserControllerTest {
                 "currentPassword", "wrong-pass1", "newPassword", "better456")).message());
 
         assertEquals(0, controller.changePassword(auth, Map.of("currentPassword", "secret123", "newPassword", "better456")).code());
-        assertEquals(0, controller.login(credentials(username, "better456")).code());
+        assertEquals(0, controller.login(credentials(username, "better456"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void registrationRejectsReservedNamesInAnyCase() {
         for (String reserved : new String[]{"Admin", "ADMINISTRATOR", "root", "System", "support"}) {
-            assertEquals("该用户名为系统保留名称", controller.register(credentials(reserved, "secret123")).message(), reserved);
+            assertEquals("该用户名为系统保留名称", controller.register(credentials(reserved, "secret123"), CaptchaTestSupport.CLIENT).message(), reserved);
         }
     }
 
 
     @Test
     void signInPutsTheTokenInAnHttpOnlyCookieOnly() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletRequest request = browser();
         request.addHeader("X-Forwarded-Proto", "https,http");
         MockHttpServletResponse response = new MockHttpServletResponse();
         ApiResponse<Map<String, Object>> result = controller.loginRequest(credentials("admin", "admin123"), request, response);
@@ -539,17 +543,24 @@ class UserControllerTest {
 
         // Plain HTTP gets no Secure flag, and a failed sign-in sets nothing.
         MockHttpServletResponse local = new MockHttpServletResponse();
-        controller.loginRequest(credentials("admin", "admin123"), new MockHttpServletRequest(), local);
+        controller.loginRequest(credentials("admin", "admin123"), browser(), local);
         assertFalse(local.getHeader("Set-Cookie").contains("Secure"));
         MockHttpServletResponse failed = new MockHttpServletResponse();
-        assertEquals(500, controller.loginRequest(credentials("demo", "wrong-pass1"), new MockHttpServletRequest(), failed).code());
+        assertEquals(500, controller.loginRequest(credentials("demo", "wrong-pass1"), browser(), failed).code());
         assertNull(failed.getHeader("Set-Cookie"));
 
         MockHttpServletResponse registered = new MockHttpServletResponse();
         var registration = controller.registerRequest(credentials("cookie-" + System.nanoTime(), "secret123"),
-                new MockHttpServletRequest(), registered);
+                browser(), registered);
         assertFalse(registration.data().containsKey("token"));
         assertTrue(registered.getHeader("Set-Cookie").startsWith("zh_session="));
+    }
+
+    /** A request from the page, which always sends its own captcha key. */
+    private static MockHttpServletRequest browser() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CaptchaService.CLIENT_HEADER, CaptchaTestSupport.CLIENT);
+        return request;
     }
 
     @Test
@@ -587,7 +598,7 @@ class UserControllerTest {
         RecordingRevocations revocations = new RecordingRevocations();
         UserController sessions = controllerWith(revocations);
         String username = "rotate-" + System.nanoTime();
-        Map<String, Object> registered = sessions.register(credentials(sessions, username, "secret123")).data();
+        Map<String, Object> registered = sessions.register(credentials(sessions, username, "secret123"), CaptchaTestSupport.CLIENT).data();
         long userId = ((Number) ((Map<?, ?>) registered.get("user")).get("id")).longValue();
         String auth = "Bearer " + registered.get("token");
 
@@ -613,7 +624,7 @@ class UserControllerTest {
         // Appointing an administrator is the super administrator's to do; the rest is ordinary governance.
         String adminAuth = "Bearer " + LocalAuth.issueToken("admin", 2L, "ADMIN", true);
         String username = "governed-" + System.nanoTime();
-        long userId = ((Number) ((Map<?, ?>) sessions.register(credentials(sessions, username, "secret123"))
+        long userId = ((Number) ((Map<?, ?>) sessions.register(credentials(sessions, username, "secret123"), CaptchaTestSupport.CLIENT)
                 .data().get("user")).get("id")).longValue();
 
         sessions.updateUserGovernance(adminAuth, Map.of("userId", userId, "publishPolicy", "PRE_REVIEW"));
@@ -637,19 +648,19 @@ class UserControllerTest {
 
         assertEquals(0, sessions.updateUserGovernance(adminAuth, Map.of("userId", userId, "resetPassword", "handed-over1")).code());
         assertEquals(3, revocations.users.size());
-        assertEquals(0, sessions.login(credentials(sessions, username, "handed-over1")).code());
+        assertEquals(0, sessions.login(credentials(sessions, username, "handed-over1"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void membersCannotPassThemselvesOffAsStaff() {
         Map<String, String> request = credentials("impostor-" + System.nanoTime(), "secret123");
         request.put("nickname", "官方 客服");
-        assertEquals("昵称不能冒充平台管理员、官方或客服，请更换", controller.register(request).message());
+        assertEquals("昵称不能冒充平台管理员、官方或客服，请更换", controller.register(request, CaptchaTestSupport.CLIENT).message());
         // With no nickname the username is shown, so the username is what gets checked.
-        assertEquals("该用户名为系统保留名称", controller.register(credentials("admin_zhang", "secret123")).message());
+        assertEquals("该用户名为系统保留名称", controller.register(credentials("admin_zhang", "secret123"), CaptchaTestSupport.CLIENT).message());
 
         String username = "renamer-" + System.nanoTime();
-        Map<String, Object> registered = controller.register(credentials(username, "secret123")).data();
+        Map<String, Object> registered = controller.register(credentials(username, "secret123"), CaptchaTestSupport.CLIENT).data();
         String auth = "Bearer " + registered.get("token");
         assertEquals("昵称不能冒充平台管理员、官方或客服，请更换", controller.updateProfile(auth,
                 Map.of("nickname", "社区管理员", "signature", "")).message());
@@ -674,20 +685,15 @@ class UserControllerTest {
         @Override public boolean isRevoked(LocalAuth.TokenInfo token) { return token != null && tokens.contains(token.tokenId()); }
     }
 
+    private final CaptchaService sessionsCaptcha = CaptchaTestSupport.predictable();
+
     private UserController controllerWith(TokenRevocations revocations) {
         return new UserController(new InMemoryUserStore(passwordEncoder), passwordEncoder,
                 new UserAvatarStorageService("local", "target/test-user-avatars", "http://127.0.0.1:9000", "test", "test", "test"),
-                new CaptchaService(), null, new LoginAttemptGuard(), revocations);
+                sessionsCaptcha, null, new LoginAttemptGuard(), revocations);
     }
 
     private Map<String, String> credentials(UserController target, String username, String password) {
-        var challenge = target.captcha();
-        String[] values = String.valueOf(challenge.data().get("question")).replace("= ?", "").split("\\+");
-        Map<String, String> request = new HashMap<>();
-        request.put("username", username);
-        request.put("password", password);
-        request.put("captchaId", String.valueOf(challenge.data().get("captchaId")));
-        request.put("captchaAnswer", String.valueOf(Integer.parseInt(values[0].trim()) + Integer.parseInt(values[1].trim())));
-        return request;
+        return credentials(sessionsCaptcha, username, password);
     }
 }

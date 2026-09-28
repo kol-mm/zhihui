@@ -96,11 +96,8 @@ public class PasswordResetController {
         return requestReset(request, captchaClientKey(servletRequest));
     }
 
-    public ApiResponse<Map<String, Object>> requestReset(Map<String, String> request) {
-        return requestReset(request, null);
-    }
-
-    private ApiResponse<Map<String, Object>> requestReset(Map<String, String> request, String captchaClientKey) {
+    /** As the endpoint performs it; package-private for tests. */
+    ApiResponse<Map<String, Object>> requestReset(Map<String, String> request, String captchaClientKey) {
         String username = text(request, "username");
         String contact = text(request, "contact");
         if (username.isEmpty() || username.length() > 32) return ApiResponse.fail("username is required");
@@ -121,11 +118,8 @@ public class PasswordResetController {
         return completeReset(request, captchaClientKey(servletRequest));
     }
 
-    public ApiResponse<Map<String, Object>> completeReset(Map<String, String> request) {
-        return completeReset(request, null);
-    }
-
-    private ApiResponse<Map<String, Object>> completeReset(Map<String, String> request, String captchaClientKey) {
+    /** As the endpoint performs it; package-private for tests. */
+    ApiResponse<Map<String, Object>> completeReset(Map<String, String> request, String captchaClientKey) {
         String username = text(request, "username");
         String code = normalizeCode(text(request, "code"));
         String newPassword = request.getOrDefault("newPassword", "");
@@ -151,7 +145,7 @@ public class PasswordResetController {
         if (!resetStore.complete(open.id(), open.codeHash())) return ApiResponse.fail(INVALID_CODE);
         userStore.updatePassword(user.getId(), passwordEncoder.encode(newPassword));
         tokenRevocations.revokeUser(user.getId());
-        loginAttemptGuard.recordSuccess(user.getUsername());
+        loginAttemptGuard.clearAccount(user.getUsername());
         return ApiResponse.ok(Map.of("reset", true));
     }
 
@@ -298,9 +292,9 @@ public class PasswordResetController {
         return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"), clientKey);
     }
 
+    /** The browser's own key, as sent; CaptchaService refuses an answer under a missing or malformed one. */
     private static String captchaClientKey(HttpServletRequest request) {
-        String clientKey = request.getHeader("X-Captcha-Client");
-        return clientKey == null || clientKey.isBlank() ? null : clientKey;
+        return request.getHeader(CaptchaService.CLIENT_HEADER);
     }
 
     private static String text(Map<String, String> request, String key) {

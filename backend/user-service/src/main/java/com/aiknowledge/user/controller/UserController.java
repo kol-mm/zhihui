@@ -2,6 +2,7 @@ package com.aiknowledge.user.controller;
 
 import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
+import com.aiknowledge.common.AuditEntry;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
 import com.aiknowledge.user.entity.UserEntity;
@@ -57,6 +58,9 @@ public class UserController {
     public void setAdminAudit(AdminAudit audit) {
         this.audit = audit == null ? AdminAudit.NONE : audit;
     }
+
+    /** Said to a page that asks for a captcha without a key of its own, which only an outdated page does. */
+    static final String CAPTCHA_CLIENT_INVALID = "验证码请求无效，请刷新页面后重试";
 
     /** Names new accounts may not take, compared case-insensitively. Existing accounts are unaffected. */
     private static final java.util.Set<String> RESERVED_USERNAMES = java.util.Set.of(
@@ -122,14 +126,11 @@ public class UserController {
     public ApiResponse<Map<String, Object>> captcha(HttpServletRequest request, HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         response.setHeader("Pragma", "no-cache");
-        String clientKey = request.getHeader("X-Captcha-Client");
-        if (clientKey == null || clientKey.isBlank()) clientKey = request.getRemoteAddr();
+        // No fallback to the connection's address: behind the gateway every visitor shares one, so they would all
+        // share one challenge and one cooldown. A page that sends no key of its own is an outdated one.
+        String clientKey = request.getHeader(CaptchaService.CLIENT_HEADER);
+        if (!CaptchaService.isValidClientKey(clientKey)) return ApiResponse.fail(CAPTCHA_CLIENT_INVALID);
         return ApiResponse.ok(captchaService.issue(clientKey));
-    }
-
-    /** Backward-compatible helper for direct controller tests. */
-    public ApiResponse<Map<String, Object>> captcha() {
-        return ApiResponse.ok(captchaService.issue());
     }
 
     @PostMapping(value = "/avatar/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -166,11 +167,8 @@ public class UserController {
         return startSession(register(request, captchaClientKey(servletRequest)), servletRequest, servletResponse);
     }
 
-    public ApiResponse<Map<String, Object>> register(Map<String, String> request) {
-        return register(request, null);
-    }
-
-    private ApiResponse<Map<String, Object>> register(Map<String, String> request, String captchaClientKey) {
+    /** Registration as the endpoint performs it, minus the session cookie; package-private for tests. */
+    ApiResponse<Map<String, Object>> register(Map<String, String> request, String captchaClientKey) {
         if (platformConfig != null && !platformConfig.enabled("registration_enabled", true)) {
             return ApiResponse.fail("平台当前未开放新用户注册");
         }
@@ -217,20 +215,23 @@ public class UserController {
     public ApiResponse<Map<String, Object>> loginRequest(@RequestBody Map<String, String> request,
                                                           HttpServletRequest servletRequest,
                                                           HttpServletResponse servletResponse) {
-        return startSession(login(request, captchaClientKey(servletRequest)), servletRequest, servletResponse);
+        return startSession(login(request, captchaClientKey(servletRequest), clientAddress(servletRequest)),
+                servletRequest, servletResponse);
     }
 
-    public ApiResponse<Map<String, Object>> login(Map<String, String> request) {
-        return login(request, null);
+    /** As {@link #login(Map, String, String)}, from an address the tests need not name. */
+    ApiResponse<Map<String, Object>> login(Map<String, String> request, String captchaClientKey) {
+        return login(request, captchaClientKey, null);
     }
 
-    private ApiResponse<Map<String, Object>> login(Map<String, String> request, String captchaClientKey) {
+    /** Sign-in as the endpoint performs it, minus the session cookie; package-private for tests. */
+    ApiResponse<Map<String, Object>> login(Map<String, String> request, String captchaClientKey, String clientAddress) {
         if (!verifyCaptcha(request, captchaClientKey)) return ApiResponse.fail("captcha is required or invalid; please obtain a new captcha");
         String username = request.getOrDefault("username", "").trim();
         String password = request.getOrDefault("password", "");
         if (username.isEmpty() || password.isEmpty()) return ApiResponse.fail("username and password are required");
         if (username.length() > 32 || password.length() > 128) return ApiResponse.fail("invalid username or password");
-        long lockedSeconds = loginAttemptGuard.lockedForSeconds(username);
+        long lockedSeconds = loginAttemptGuard.lockedForSeconds(username, clientAddress);
         if (lockedSeconds > 0) {
             return ApiResponse.fail("登录失败次数过多，请 " + Math.max(1, (lockedSeconds + 59) / 60) + " 分钟后再试");
         }
@@ -244,11 +245,11 @@ public class UserController {
             matches = passwordEncoder.matches(password, user.getPasswordHash());
         }
         if (!matches) {
-            loginAttemptGuard.recordFailure(username);
+            loginAttemptGuard.recordFailure(username, clientAddress);
             return ApiResponse.fail("invalid username or password");
         }
         if (!"ACTIVE".equals(user.getStatus())) return ApiResponse.fail("user account is disabled");
-        loginAttemptGuard.recordSuccess(username);
+        loginAttemptGuard.recordSuccess(username, clientAddress);
         return ApiResponse.ok(authResult(user));
     }
 
@@ -985,10 +986,19 @@ public class UserController {
         return captchaService.verify(request.get("captchaId"), request.get("captchaAnswer"), clientKey);
     }
 
-    private String captchaClientKey(HttpServletRequest request) {
-        String clientKey = request.getHeader("X-Captcha-Client");
-        // 兼容仍在浏览器缓存中的旧版前端：旧版登录请求没有此请求头。
-        return clientKey == null || clientKey.isBlank() ? null : clientKey;
+    /**
+     * Where a sign-in comes from, for LoginAttemptGuard. The gateway writes X-Client-Ip on every request, replacing
+     * anything the browser sent under that name, and user-service is reachable only through it; without the gateway
+     * (a local run) the connection's own address is used.
+     */
+    private static String clientAddress(HttpServletRequest request) {
+        String vouched = request.getHeader(AuditEntry.CLIENT_IP_HEADER);
+        return vouched != null && !vouched.isBlank() ? vouched.trim() : request.getRemoteAddr();
+    }
+
+    /** The browser's own key, as sent; CaptchaService refuses an answer under a missing or malformed one. */
+    private static String captchaClientKey(HttpServletRequest request) {
+        return request.getHeader(CaptchaService.CLIENT_HEADER);
     }
 
     private boolean isBlockedEitherDirection(Long userId, Long targetUserId) {

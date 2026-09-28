@@ -1,5 +1,6 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.user.security.CaptchaTestSupport;
 import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.AppTime;
@@ -168,7 +169,7 @@ class AuditControllerTest {
         UserStore users = new InMemoryUserStore(encoder);
         PasswordResetStore resets = new InMemoryPasswordResetStore();
         PasswordResetController resetController = new PasswordResetController(users, resets, encoder,
-                new com.aiknowledge.user.security.CaptchaService(), new com.aiknowledge.user.security.LoginAttemptGuard(),
+                CaptchaTestSupport.predictable(), new com.aiknowledge.user.security.LoginAttemptGuard(),
                 TokenRevocations.inMemory(), java.time.Clock.systemUTC());
         resetController.setAdminAudit(new LocalAdminAudit(store));
         UserEntity member = save(users, "reset-audit-" + System.nanoTime(), "USER");

@@ -1,5 +1,7 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.user.security.CaptchaService;
+import com.aiknowledge.user.security.CaptchaTestSupport;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
@@ -27,7 +29,10 @@ class SuperAdminTest {
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final InMemoryUserStore store = new InMemoryUserStore(passwordEncoder);
-    private final UserController controller = new UserController(store, passwordEncoder);
+    private final CaptchaService captcha = CaptchaTestSupport.predictable();
+    private final UserController controller = new UserController(store, passwordEncoder,
+            new com.aiknowledge.user.storage.UserAvatarStorageService("local", "target/test-user-avatars",
+                    "http://127.0.0.1:9000", "test", "test", "test"), captcha);
 
     private String superAdminAuth() {
         UserEntity admin = store.findByUsername("admin").orElseThrow();
@@ -41,22 +46,19 @@ class SuperAdminTest {
     }
 
     private UserEntity register(String username) {
-        ApiResponse<Map<String, Object>> created = controller.register(credentials(username, "password123"));
+        ApiResponse<Map<String, Object>> created = controller.register(credentials(username, "password123"), CaptchaTestSupport.CLIENT);
         assertEquals(0, created.code(), created.message());
         return store.findByUsername(username).orElseThrow();
     }
 
     /** Registration and sign-in are captcha-protected; the challenge is a sum this test can answer. */
     private java.util.Map<String, String> credentials(String username, String password) {
-        var challenge = controller.captcha();
-        String question = String.valueOf(challenge.data().get("question"));
-        String[] parts = question.replace("= ?", "").split("\\+");
-        int answer = Integer.parseInt(parts[0].trim()) + Integer.parseInt(parts[1].trim());
+        Map<String, Object> challenge = captcha.issue(CaptchaTestSupport.CLIENT);
         java.util.Map<String, String> request = new java.util.HashMap<>();
         request.put("username", username);
         request.put("password", password);
-        request.put("captchaId", String.valueOf(challenge.data().get("captchaId")));
-        request.put("captchaAnswer", String.valueOf(answer));
+        request.put("captchaId", String.valueOf(challenge.get("captchaId")));
+        request.put("captchaAnswer", CaptchaTestSupport.ANSWER);
         return request;
     }
 
@@ -122,7 +124,7 @@ class SuperAdminTest {
     @Test
     void signingInAsTheSuperAdministratorIssuesATokenThatSaysSo() {
         ApiResponse<Map<String, Object>> signedIn =
-                controller.login(credentials("admin", "admin123"));
+                controller.login(credentials("admin", "admin123"), CaptchaTestSupport.CLIENT);
 
         assertEquals(0, signedIn.code(), signedIn.message());
         assertTrue(LocalAuth.isSuperAdmin("Bearer " + signedIn.data().get("token")));
@@ -132,7 +134,7 @@ class SuperAdminTest {
     void anOrdinaryMembersTokenDoesNotSaySo() {
         register("plain");
         ApiResponse<Map<String, Object>> signedIn =
-                controller.login(credentials("plain", "password123"));
+                controller.login(credentials("plain", "password123"), CaptchaTestSupport.CLIENT);
 
         assertEquals(0, signedIn.code(), signedIn.message());
         assertFalse(LocalAuth.isSuperAdmin("Bearer " + signedIn.data().get("token")));

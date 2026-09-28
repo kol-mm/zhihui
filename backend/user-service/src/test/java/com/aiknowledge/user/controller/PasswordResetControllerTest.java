@@ -1,5 +1,6 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.user.security.CaptchaTestSupport;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.user.entity.UserEntity;
@@ -57,7 +58,7 @@ class PasswordResetControllerTest {
     private final PasswordEncoder encoder = new BCryptPasswordEncoder(4);
     private final UserStore users = new InMemoryUserStore(encoder);
     private final PasswordResetStore resets = new InMemoryPasswordResetStore();
-    private final CaptchaService captcha = new CaptchaService();
+    private final CaptchaService captcha = CaptchaTestSupport.predictable();
     private final LoginAttemptGuard guard = new LoginAttemptGuard();
     private final RecordingRevocations revocations = new RecordingRevocations();
     private final MutableClock clock = new MutableClock();
@@ -67,27 +68,27 @@ class PasswordResetControllerTest {
     @Test
     void askingAnswersTheSameWhetherOrNotTheAccountExists() {
         UserEntity member = member();
-        ApiResponse<Map<String, Object>> unknown = controller.requestReset(form("username", "nobody-" + System.nanoTime()));
-        ApiResponse<Map<String, Object>> known = controller.requestReset(form("username", member.getUsername(), "contact", "微信 abc"));
+        ApiResponse<Map<String, Object>> unknown = controller.requestReset(form("username", "nobody-" + System.nanoTime()), CaptchaTestSupport.CLIENT);
+        ApiResponse<Map<String, Object>> known = controller.requestReset(form("username", member.getUsername(), "contact", "微信 abc"), CaptchaTestSupport.CLIENT);
         assertEquals(unknown, known);
         assertEquals(1, resets.count(PasswordResetStore.PENDING));
 
         // Asking again keeps a single request and shows the newest contact note.
-        controller.requestReset(form("username", member.getUsername(), "contact", "QQ 123"));
+        controller.requestReset(form("username", member.getUsername(), "contact", "QQ 123"), CaptchaTestSupport.CLIENT);
         assertEquals(1, resets.count(null));
         assertEquals("QQ 123", resets.findOpen(member.getId()).orElseThrow().contact());
 
-        assertEquals("请输入用户名", controller.requestReset(form("username", " ")).message());
+        assertEquals("请输入用户名", controller.requestReset(form("username", " "), CaptchaTestSupport.CLIENT).message());
         assertEquals("联系方式不能超过 100 个字符",
-                controller.requestReset(form("username", member.getUsername(), "contact", "x".repeat(101))).message());
+                controller.requestReset(form("username", member.getUsername(), "contact", "x".repeat(101)), CaptchaTestSupport.CLIENT).message());
         Map<String, String> noCaptcha = new HashMap<>(Map.of("username", member.getUsername()));
-        assertEquals(500, controller.requestReset(noCaptcha).code());
+        assertEquals(500, controller.requestReset(noCaptcha, CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void anIssuedCodeResetsThePasswordExactlyOnce() {
         UserEntity member = member();
-        controller.requestReset(form("username", member.getUsername()));
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
         Map<String, Object> page = controller.adminResetPage(ADMIN, null, null, 20).data();
         assertEquals(1L, page.get("pending"));
         Map<?, ?> item = (Map<?, ?>) ((List<?>) page.get("items")).get(0);
@@ -102,42 +103,60 @@ class PasswordResetControllerTest {
 
         // Typed in lower case without dashes still counts.
         String typed = code.replace("-", "").toLowerCase();
-        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", typed, "newPassword", "fresh-pass9")).code());
+        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", typed, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).code());
         assertTrue(encoder.matches("fresh-pass9", users.findById(member.getId()).orElseThrow().getPasswordHash()));
         assertEquals(List.of(member.getId()), revocations.users);
         assertEquals(PasswordResetStore.COMPLETED, resets.find(((Number) item.get("id")).longValue()).orElseThrow().status());
 
-        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "other-pass9")).message());
+        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "other-pass9"), CaptchaTestSupport.CLIENT).message());
         assertEquals("该重置申请已处理完毕", controller.issueCode(ADMIN, Map.of("requestId", item.get("id")), null).message());
+    }
+
+    /** Guesses at the old password stop mattering once it is replaced — from the guesser's address as well. */
+    @Test
+    void aCompletedResetLiftsEveryLockOnTheAccount() {
+        UserEntity member = member();
+        for (int i = 0; i < 20; i++) guard.recordFailure(member.getUsername(), "203.0.113." + (i / 5));
+        assertTrue(guard.lockedForSeconds(member.getUsername(), "198.51.100.20") > 0);
+
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
+        Map<?, ?> item = (Map<?, ?>) ((List<?>) controller.adminResetPage(ADMIN, null, null, 20).data().get("items")).get(0);
+        String code = String.valueOf(controller.issueCode(ADMIN, Map.of("requestId", item.get("id")), new MockHttpServletResponse())
+                .data().get("code"));
+        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9"),
+                CaptchaTestSupport.CLIENT).code());
+
+        assertEquals(0, guard.lockedForSeconds(member.getUsername(), "198.51.100.20"));
+        assertEquals(0, guard.lockedForSeconds(member.getUsername(), "203.0.113.0"));
     }
 
     @Test
     void fiveWrongCodesEndTheRequestUntilAnAdminIssuesANewOne() {
         UserEntity member = member();
-        controller.requestReset(form("username", member.getUsername()));
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
         long requestId = resets.findOpen(member.getId()).orElseThrow().id();
         String code = String.valueOf(controller.issueCode(ADMIN, Map.of("requestId", requestId), null).data().get("code"));
 
         for (int attempt = 0; attempt < PasswordResetController.MAX_CODE_ATTEMPTS; attempt++) {
-            assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", "AAAA-AAAA-AAAA", "newPassword", "fresh-pass9")).message());
+            assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", "AAAA-AAAA-AAAA", "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).message());
         }
         assertEquals(PasswordResetStore.EXPIRED, resets.find(requestId).orElseThrow().status());
-        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9")).message());
+        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).message());
 
         String second = String.valueOf(controller.issueCode(ADMIN, Map.of("requestId", requestId), null).data().get("code"));
-        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9")).message());
-        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", second, "newPassword", "fresh-pass9")).code());
+        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).message());
+        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", second, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void codesStopWorkingAfterThirtyMinutes() {
         UserEntity member = member();
-        controller.requestReset(form("username", member.getUsername()));
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
         long requestId = resets.findOpen(member.getId()).orElseThrow().id();
         String code = String.valueOf(controller.issueCode(ADMIN, Map.of("requestId", requestId), null).data().get("code"));
 
         clock.advance(PasswordResetController.CODE_LIFETIME);
-        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9")).message());
+        assertEquals(INVALID, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).message());
         Map<?, ?> item = (Map<?, ?>) ((List<?>) controller.adminResetPage(ADMIN, "ISSUED", null, 20).data().get("items")).get(0);
         assertEquals(true, item.get("codeExpired"));
         assertTrue(revocations.users.isEmpty());
@@ -146,23 +165,23 @@ class PasswordResetControllerTest {
     @Test
     void theNewPasswordFollowsTheUsualRulesAndKeepsTheCode() {
         UserEntity member = member();
-        controller.requestReset(form("username", member.getUsername()));
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
         long requestId = resets.findOpen(member.getId()).orElseThrow().id();
         String code = String.valueOf(controller.issueCode(ADMIN, Map.of("requestId", requestId), null).data().get("code"));
 
         assertEquals("密码须同时包含字母和数字",
-                controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "onlyletters")).message());
+                controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "onlyletters"), CaptchaTestSupport.CLIENT).message());
         assertEquals("请输入重置码和新密码",
-                controller.completeReset(form("username", member.getUsername(), "code", "", "newPassword", "fresh-pass9")).message());
+                controller.completeReset(form("username", member.getUsername(), "code", "", "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).message());
         assertEquals(0, resets.find(requestId).orElseThrow().failedAttempts());
-        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9")).code());
+        assertEquals(0, controller.completeReset(form("username", member.getUsername(), "code", code, "newPassword", "fresh-pass9"), CaptchaTestSupport.CLIENT).code());
     }
 
     @Test
     void onlyAdminsHandleRequestsAndSuspendedAccountsGetNoCode() {
         UserEntity member = member();
         String memberAuth = "Bearer " + LocalAuth.issueToken(member.getUsername(), member.getId(), "USER");
-        controller.requestReset(form("username", member.getUsername()));
+        controller.requestReset(form("username", member.getUsername()), CaptchaTestSupport.CLIENT);
         long requestId = resets.findOpen(member.getId()).orElseThrow().id();
 
         assertEquals(500, controller.adminResetPage(memberAuth, null, null, 20).code());
@@ -195,10 +214,9 @@ class PasswordResetControllerTest {
     private Map<String, String> form(String... fields) {
         Map<String, String> request = new HashMap<>();
         for (int index = 0; index < fields.length; index += 2) request.put(fields[index], fields[index + 1]);
-        Map<String, Object> challenge = captcha.issue();
-        String[] values = String.valueOf(challenge.get("question")).replace("= ?", "").split("\\+");
+        Map<String, Object> challenge = captcha.issue(CaptchaTestSupport.CLIENT);
         request.put("captchaId", String.valueOf(challenge.get("captchaId")));
-        request.put("captchaAnswer", String.valueOf(Integer.parseInt(values[0].trim()) + Integer.parseInt(values[1].trim())));
+        request.put("captchaAnswer", CaptchaTestSupport.ANSWER);
         return request;
     }
 }

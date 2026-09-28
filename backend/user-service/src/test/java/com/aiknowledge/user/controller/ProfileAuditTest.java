@@ -1,5 +1,6 @@
 package com.aiknowledge.user.controller;
 
+import com.aiknowledge.user.security.CaptchaTestSupport;
 import com.aiknowledge.common.AdminAudit;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
@@ -52,7 +53,7 @@ class ProfileAuditTest {
         when(config.text("platform_name", "")).thenReturn(platformName);
         UserController controller = new UserController(users, encoder,
                 new UserAvatarStorageService("local", "target/test-user-avatars", "http://127.0.0.1:9000", "test", "test", "test"),
-                new CaptchaService(), config, new LoginAttemptGuard(), TokenRevocations.inMemory(), queue);
+                CaptchaTestSupport.predictable(), config, new LoginAttemptGuard(), TokenRevocations.inMemory(), queue);
         controller.setAdminAudit((authorization, event) -> {
             if (LocalAuth.isAdmin(authorization)) recorded.add(event);
         });

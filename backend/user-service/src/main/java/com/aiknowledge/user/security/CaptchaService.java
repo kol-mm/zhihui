@@ -19,25 +19,56 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.random.RandomGenerator;
+import java.util.regex.Pattern;
 
+/**
+ * Image arithmetic challenges for login, registration and password reset.
+ *
+ * <p>Every challenge belongs to the browser that asked for it: the page sends a random key of its own in
+ * {@link #CLIENT_HEADER} both when it fetches a challenge and when it answers one, and an answer arriving under any
+ * other key — or none — is refused. A challenge works once, expires after three minutes, and is thrown away by the
+ * first answer, right or wrong. Nothing here ever hands out the answer or the question in words; the only way to
+ * learn the sum is to read the picture.
+ */
 @Service
 public class CaptchaService {
+    /** The request header carrying the browser's own key. */
+    public static final String CLIENT_HEADER = "X-Captcha-Client";
+    /**
+     * What the page generates: crypto.randomUUID(), or "captcha-<time>-<random>" where that is unavailable. Anything
+     * else is refused rather than trimmed or cut short, so two different keys can never be taken for one.
+     */
+    private static final Pattern CLIENT_KEY = Pattern.compile("[A-Za-z0-9-]{16,128}");
     private static final long TTL_SECONDS = 180;
     private static final long ISSUE_INTERVAL_MILLIS = 10_000L;
     private static final int MAX_ACTIVE_CHALLENGES = 10_000;
-    private final SecureRandom random = new SecureRandom();
+    private final RandomGenerator random;
     private final Map<String, Challenge> challenges = new ConcurrentHashMap<>();
     private final Map<String, Long> lastIssuedAt = new ConcurrentHashMap<>();
     private final Map<String, String> activeChallengeIds = new ConcurrentHashMap<>();
 
-    public synchronized Map<String, Object> issue() {
-        ensureCapacity();
-        return issueNow("direct", true);
+    public CaptchaService() {
+        this(new SecureRandom());
     }
 
+    /**
+     * For tests in this package, which need to know the sum without the service ever saying it. Challenge ids still
+     * come from UUID.randomUUID(), so a predictable source here never makes an id guessable.
+     */
+    CaptchaService(RandomGenerator random) {
+        this.random = random;
+    }
+
+    public static boolean isValidClientKey(String clientKey) {
+        return clientKey != null && CLIENT_KEY.matcher(clientKey).matches();
+    }
+
+    /** A new challenge for this browser, or — within ten seconds of the last — the one it already has. */
     public synchronized Map<String, Object> issue(String clientKey) {
+        if (!isValidClientKey(clientKey)) throw new IllegalArgumentException("invalid captcha client key");
         cleanup();
-        String key = normalizeClientKey(clientKey);
+        String key = clientKey;
         long now = System.currentTimeMillis();
         Long previous = lastIssuedAt.get(key);
         if (previous != null && now - previous < ISSUE_INTERVAL_MILLIS) {
@@ -58,12 +89,12 @@ public class CaptchaService {
         if (previousChallengeId != null) challenges.remove(previousChallengeId);
         lastIssuedAt.put(key, now);
         ensureCapacity();
-        Map<String, Object> response = issueNow(key, false);
+        Map<String, Object> response = issueNow(key);
         activeChallengeIds.put(key, String.valueOf(response.get("captchaId")));
         return response;
     }
 
-    private Map<String, Object> issueNow(String clientKey, boolean includeQuestion) {
+    private Map<String, Object> issueNow(String clientKey) {
         cleanup();
         int left = 10 + random.nextInt(90);
         int right = 1 + random.nextInt(9);
@@ -75,7 +106,6 @@ public class CaptchaService {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("captchaId", id);
         response.put("image", image);
-        if (includeQuestion) response.put("question", question);
         response.put("expiresAt", expiresAt);
         response.put("expiresInSeconds", TTL_SECONDS);
         response.put("refreshAfterSeconds", ISSUE_INTERVAL_MILLIS / 1000);
@@ -128,15 +158,17 @@ public class CaptchaService {
         }
     }
 
-    public boolean verify(String captchaId, String answer) {
-        return verify(captchaId, answer, null);
-    }
-
+    /**
+     * Whether this browser answered this challenge correctly. The challenge is used up by the answer, right or
+     * wrong, but only when the answer comes from the browser it belongs to: a stranger quoting its id can neither
+     * answer it nor spend it, and learns nothing either way.
+     */
     public boolean verify(String captchaId, String answer, String clientKey) {
+        if (!isValidClientKey(clientKey)) return false;
         if (captchaId == null || captchaId.isBlank() || answer == null || answer.isBlank()) return false;
         Challenge challenge = challenges.get(captchaId);
         if (challenge == null) return false;
-        if (clientKey != null && !challenge.clientKey().equals(normalizeClientKey(clientKey))) return false;
+        if (!challenge.clientKey().equals(clientKey)) return false;
         if (!challenges.remove(captchaId, challenge)) return false;
         releaseClient(challenge.clientKey(), captchaId);
         if (challenge.expiresAt() < System.currentTimeMillis()) return false;
@@ -170,11 +202,6 @@ public class CaptchaService {
         if (activeChallengeIds.remove(clientKey, captchaId)) {
             lastIssuedAt.remove(clientKey);
         }
-    }
-
-    private String normalizeClientKey(String clientKey) {
-        String value = clientKey == null || clientKey.isBlank() ? "unknown" : clientKey.trim();
-        return value.substring(0, Math.min(value.length(), 128));
     }
 
     private record Challenge(String id, int answer, String image, long expiresAt, String clientKey) {
