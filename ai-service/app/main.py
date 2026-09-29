@@ -1255,14 +1255,13 @@ def vector_status() -> ApiResponse:
         indexed = conn.execute(
             "SELECT COUNT(*) AS count FROM knowledge_chunk WHERE embedding IS NOT NULL"
         ).fetchone()["count"]
-        embedding = embeddings.status(conn, read_ai_config(), embedding_worker)
     mode = os.getenv("AI_VECTOR_MODE", "local")
+    # Public, so it says nothing about the embedding model or its errors; administrators see those in the overview.
     return ApiResponse(data={
         "mode": mode,
         "dimension": VECTOR_DIMENSION,
         "indexed_chunks": indexed,
         "external_ready": mode.lower() != "local",
-        "embedding": embedding,
     })
 
 

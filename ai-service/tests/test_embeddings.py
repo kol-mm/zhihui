@@ -112,6 +112,17 @@ class FetchTest(EmbeddingsTestBase):
             with self.subTest(name), self.assertRaises(self.embeddings.EmbeddingError):
                 self.fetch(["甲", "乙"], post)
 
+    def test_only_an_answer_about_the_input_says_the_input_was_refused(self) -> None:
+        for code, refused in ((400, True), (413, True), (422, True), (401, False), (403, False), (404, False),
+                              (429, False), (500, False), (503, False)):
+            with self.subTest(code), self.assertRaises(self.embeddings.EmbeddingError) as raised:
+                self.fetch(["甲"], self.posting(error=urllib.error.HTTPError(BASE, code, "no", {}, None)))
+            self.assertIs(refused, raised.exception.input_refused)
+        for post in (self.posting(error=urllib.error.URLError("refused")), self.posting({"data": []})):
+            with self.assertRaises(self.embeddings.EmbeddingError) as raised:
+                self.fetch(["甲"], post)
+            self.assertFalse(raised.exception.input_refused)
+
     def test_nothing_is_sent_without_a_model_an_address_or_a_key(self) -> None:
         post = self.posting({"data": []})
         for config in (self.config(embedding_model=""), self.config(base_url="")):
@@ -257,6 +268,106 @@ class WorkerTest(EmbeddingsTestBase):
         failing.run_once()
         self.assertIsNone(failing.last_error)
 
+    def refusing(self, *bad: str, error=None):
+        """A model that refuses any request containing one of these texts, and records what it was asked."""
+        self.asked = []
+
+        def fetch(texts, *rest):
+            self.asked.append(len(texts))
+            if any(word in text for text in texts for word in bad):
+                raise error or self.embeddings.EmbeddingError("向量接口返回错误（HTTP 400）", input_refused=True)
+            return [[1.0, float(len(text))] for text in texts]
+        return fetch
+
+    def test_a_refused_chunk_is_set_aside_and_the_rest_are_embedded(self) -> None:
+        for file_id in range(1, 13):
+            self.index(file_id, "敏感" if file_id == 3 else f"第{file_id}份文档")
+        worker = self.worker(self.config(), self.refusing("敏感"))
+
+        self.assertEqual(0.0, worker.run_once())
+        self.assertEqual(0.0, worker.run_once())
+        self.assertEqual(self.embeddings.IDLE_SECONDS, worker.run_once())
+
+        tag = f"openai-compatible:{MODEL}"
+        self.assertEqual([tag, tag, "refused:" + tag] + [tag] * 9, self.tags())
+        self.assertEqual([10] + [1] * 10 + [2], self.asked, "the failed batch is asked again one chunk at a time")
+        self.assertIsNone(worker.last_error)
+        with self.main.connect() as conn:
+            kept = conn.execute("SELECT embedding FROM knowledge_chunk WHERE file_id = 3").fetchone()["embedding"]
+            status = self.embeddings.status(conn, self.config(), worker)
+        self.assertEqual(128, len(json.loads(kept)), "the refused chunk keeps its local vector")
+        self.assertEqual((12, 11, 1, 0), (status["total"], status["embedded"], status["refused"], status["pending"]))
+
+    def test_a_new_model_tries_a_refused_chunk_again(self) -> None:
+        self.index(1, "敏感")
+        self.set_vector(1, [1.0], tag=f"refused:openai-compatible:{MODEL}")
+        self.worker(self.config(), self.refusing()).run_once()
+        self.assertEqual([f"refused:openai-compatible:{MODEL}"], self.tags(), "the same model is not asked again")
+
+        self.worker(self.config(embedding_model="text-embedding-v4"), self.refusing()).run_once()
+        self.assertEqual(["openai-compatible:text-embedding-v4"], self.tags())
+
+    def test_an_outage_marks_nothing_refused(self) -> None:
+        for file_id in (1, 2):
+            self.index(file_id, f"第{file_id}份文档")
+        for error in (self.embeddings.EmbeddingError("向量接口返回错误（HTTP 429）"),
+                      self.embeddings.EmbeddingError("无法连接向量接口（URLError）")):
+            with self.subTest(str(error)):
+                worker = self.worker(self.config(), self.refusing("文档", error=error))
+                self.assertGreaterEqual(worker.run_once(), 30.0)
+                self.assertEqual([1], [len(self.asked)], "no chunk is asked for on its own")
+                self.assertEqual([self.embeddings.LOCAL_TAG] * 2, self.tags())
+                self.assertEqual(str(error), worker.last_error)
+
+    def test_an_outage_while_asking_one_at_a_time_stops_and_backs_off(self) -> None:
+        for file_id in (1, 2, 3):
+            self.index(file_id, f"第{file_id}份文档")
+        answers = iter([self.embeddings.EmbeddingError("向量接口返回错误（HTTP 400）", input_refused=True),
+                        [[1.0]], self.embeddings.EmbeddingError("向量接口返回错误（HTTP 503）")])
+
+        def fetch(texts, *rest):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        worker = self.worker(self.config(), fetch)
+        self.assertGreaterEqual(worker.run_once(), 30.0)
+        tag = f"openai-compatible:{MODEL}"
+        self.assertEqual([tag, self.embeddings.LOCAL_TAG, self.embeddings.LOCAL_TAG], self.tags())
+        self.assertEqual("向量接口返回错误（HTTP 503）", worker.last_error)
+
+    def test_a_model_that_refuses_everything_is_reported_not_blamed_on_the_chunks(self) -> None:
+        for file_id in (1, 2):
+            self.index(file_id, f"第{file_id}份文档")
+        worker = self.worker(self.config(), self.refusing("文档"))  # e.g. a model name the provider does not know
+
+        self.assertGreaterEqual(worker.run_once(), 30.0)
+        self.assertEqual([self.embeddings.LOCAL_TAG] * 2, self.tags())
+        self.assertEqual("向量接口返回错误（HTTP 400）", worker.last_error)
+
+    def test_once_the_model_has_worked_a_lone_refused_chunk_is_set_aside(self) -> None:
+        self.index(1, "第一份文档")
+        self.index(2, "敏感")
+        self.set_vector(1, [1.0])
+        worker = self.worker(self.config(), self.refusing("敏感"))
+
+        self.assertEqual(0.0, worker.run_once())
+        self.assertEqual(f"refused:openai-compatible:{MODEL}", self.tags()[1])
+        self.assertIsNone(worker.last_error)
+
+    def test_a_pass_that_only_sets_chunks_aside_clears_an_earlier_outage(self) -> None:
+        self.index(1, "第一份文档")
+        self.index(2, "敏感")
+        self.set_vector(1, [1.0])
+        worker = self.worker(self.config(), mock.Mock(side_effect=self.embeddings.EmbeddingError("无法连接向量接口（URLError）")))
+        self.assertGreaterEqual(worker.run_once(), 30.0)
+
+        worker._fetch = self.refusing("敏感")
+        self.assertEqual(0.0, worker.run_once())
+        self.assertIsNone(worker.last_error)
+        self.assertIsNone(worker.last_error_at)
+
     def test_a_chunk_replaced_while_it_was_embedded_keeps_its_new_content(self) -> None:
         self.index(1, "旧内容")
 
@@ -343,8 +454,27 @@ class SettingsTest(EmbeddingsTestBase):
         self.set_vector(1, [1.0])
         with self.main.connect() as conn:
             status = self.embeddings.status(conn, self.config(), None)
-        self.assertEqual({"model": MODEL, "semantic": True, "total": 2, "embedded": 1, "pending": 1},
-                         {key: status[key] for key in ("model", "semantic", "total", "embedded", "pending")})
+        self.assertEqual({"model": MODEL, "semantic": True, "total": 2, "embedded": 1, "refused": 0, "pending": 1},
+                         {key: status[key] for key in ("model", "semantic", "total", "embedded", "refused", "pending")})
+
+    def test_status_counts_refused_chunks_for_the_current_model_only(self) -> None:
+        for file_id in (1, 2, 3):
+            self.index(file_id, str(file_id))
+        self.set_vector(1, [1.0])
+        self.set_vector(2, [1.0], tag=f"refused:openai-compatible:{MODEL}")
+        self.set_vector(3, [1.0], tag="refused:openai-compatible:older-model")
+        with self.main.connect() as conn:
+            status = self.embeddings.status(conn, self.config(), None)
+            local = self.embeddings.status(conn, self.config(embedding_model=""), None)
+        self.assertEqual((3, 1, 1, 1), (status["total"], status["embedded"], status["refused"], status["pending"]))
+        self.assertEqual((0, 0, 0), (local["embedded"], local["refused"], local["pending"]))
+
+    def test_the_public_vector_status_says_nothing_about_the_model(self) -> None:
+        self.index(1, "一")
+        with mock.patch.object(self.main, "read_ai_config", return_value=self.config()):
+            data = self.main.vector_status().data
+        self.assertEqual({"mode", "dimension", "indexed_chunks", "external_ready"}, set(data))
+        self.assertNotIn(MODEL, json.dumps(data))
 
     def test_startup_checks_the_embedding_model_even_when_chat_uses_claude(self) -> None:
         with mock.patch.object(self.main, "read_ai_config", return_value=self.config(provider="anthropic")), \

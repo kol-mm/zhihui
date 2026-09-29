@@ -29,6 +29,12 @@ from array import array
 from typing import Any, Callable
 
 LOCAL_TAG = "local-hash"
+# A chunk the model refused (for example, one that fails the provider's content inspection) is recorded under this
+# prefix, so the worker moves past it; it stays matched by words, and a different model tries it again.
+REFUSED_PREFIX = "refused:"
+# HTTP answers that refuse the input itself. Anything else — a bad key, a rate limit, an outage, a malformed
+# answer — says nothing about one chunk, so no chunk is ever marked refused for it.
+INPUT_REFUSED_STATUSES = frozenset({400, 413, 422})
 BATCH_SIZE = 10
 # One input's length, in characters; embedding models accept a few thousand tokens.
 MAX_INPUT_CHARS = 2000
@@ -44,6 +50,11 @@ log = logging.getLogger("ai.embeddings")
 class EmbeddingError(Exception):
     """The model gave no usable vectors. The message is safe to show an administrator."""
 
+    def __init__(self, message: str, input_refused: bool = False) -> None:
+        super().__init__(message)
+        # True only when the provider refused the input it was given, not when it could not answer at all.
+        self.input_refused = input_refused
+
 
 def configured_model(config: dict[str, Any]) -> str:
     return str(config.get("embedding_model") or "").strip()
@@ -53,6 +64,10 @@ def model_tag(config: dict[str, Any]) -> str:
     """What a chunk's vector is recorded as coming from under these settings."""
     model = configured_model(config)
     return f"openai-compatible:{model}" if model else LOCAL_TAG
+
+
+def refused_tag(tag: str) -> str:
+    return REFUSED_PREFIX + tag
 
 
 def endpoint(config: dict[str, Any]) -> str:
@@ -86,7 +101,8 @@ def fetch_embeddings(texts: list[str], config: dict[str, Any], api_key: str | No
     try:
         answer = (post or _post)(url, body, api_key.strip(), timeout)
     except urllib.error.HTTPError as error:
-        raise EmbeddingError(f"向量接口返回错误（HTTP {error.code}）") from error
+        raise EmbeddingError(f"向量接口返回错误（HTTP {error.code}）",
+                             input_refused=error.code in INPUT_REFUSED_STATUSES) from error
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise EmbeddingError(f"无法连接向量接口（{type(error).__name__}）") from error
     except ValueError as error:
@@ -215,26 +231,75 @@ class EmbeddingWorker:
             return IDLE_SECONDS
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, title, content FROM knowledge_chunk WHERE COALESCE(embedding_model, '') != ? "
-                "ORDER BY id LIMIT ?", (tag, BATCH_SIZE)).fetchall()
+                "SELECT id, title, content FROM knowledge_chunk WHERE COALESCE(embedding_model, '') NOT IN (?, ?) "
+                "ORDER BY id LIMIT ?", (tag, refused_tag(tag), BATCH_SIZE)).fetchall()
         if not rows:
             return IDLE_SECONDS
         try:
-            vectors = self._fetch([input_text(row["title"], row["content"]) for row in rows], config,
-                                  self._resolve_key(), self._validate)
+            vectors = self._embed(rows, config)
         except EmbeddingError as error:
-            self._failed(str(error))
+            if not error.input_refused:
+                self._failed(str(error))
+                return self._next_backoff()
+            # The provider refused something in the batch. Asked one at a time, the chunks it refuses are set
+            # aside and the rest are embedded, so one chunk can never hold up the whole library.
+            return self._one_at_a_time(rows, config, tag)
+        self._store(rows, vectors, tag)
+        self._succeeded()
+        return 0.0
+
+    def _embed(self, rows: list[Any], config: dict[str, Any]) -> list[list[float]]:
+        return self._fetch([input_text(row["title"], row["content"]) for row in rows], config,
+                           self._resolve_key(), self._validate)
+
+    def _one_at_a_time(self, rows: list[Any], config: dict[str, Any], tag: str) -> float:
+        refused: list[Any] = []
+        last_error = ""
+        for row in rows:
+            try:
+                vector = self._embed([row], config)
+            except EmbeddingError as error:
+                if not error.input_refused:
+                    self._failed(str(error))
+                    return self._next_backoff()
+                refused.append(row)
+                last_error = str(error)
+                continue
+            self._store([row], vector, tag)
+        # A wrong model name is refused as bad input too, for every chunk. Chunks are only set aside once the model
+        # has shown it works (including just now, for another chunk of this batch); until then nothing is marked,
+        # and the failure is reported and retried like any other.
+        if refused and not self._model_has_worked(tag):
+            self._failed(last_error)
             return self._next_backoff()
+        for row in refused:
+            self._refuse(row, tag)
+        self._succeeded()
+        return 0.0
+
+    def _model_has_worked(self, tag: str) -> bool:
+        with self._connect() as conn:
+            return conn.execute("SELECT 1 FROM knowledge_chunk WHERE embedding_model = ? LIMIT 1", (tag,)).fetchone() is not None
+
+    def _store(self, rows: list[Any], vectors: list[list[float]], tag: str) -> None:
         with self._connect() as conn:
             for row, vector in zip(rows, vectors):
                 # Only if the chunk is still the one that was embedded; a re-index in between replaced it.
                 conn.execute("UPDATE knowledge_chunk SET embedding = ?, embedding_model = ? WHERE id = ? AND content = ?",
                              (json.dumps(vector), tag, row["id"], row["content"]))
+
+    def _refuse(self, row: Any, tag: str) -> None:
+        """Keeps the chunk's local vector and marks it refused, so it is matched by words and not asked again."""
+        log.warning("embedding model refused knowledge chunk %s; it stays matched by words", row["id"])
+        with self._connect() as conn:
+            conn.execute("UPDATE knowledge_chunk SET embedding_model = ? WHERE id = ? AND content = ?",
+                         (refused_tag(tag), row["id"], row["content"]))
+
+    def _succeeded(self) -> None:
         with self._lock:
             self._backoff = 0.0
             self.last_error = None
             self.last_error_at = None
-        return 0.0
 
     def _failed(self, message: str) -> None:
         with self._lock:
@@ -255,12 +320,15 @@ def status(conn: Any, config: dict[str, Any], worker: EmbeddingWorker | None) ->
     tag = model_tag(config)
     total = conn.execute("SELECT COUNT(*) FROM knowledge_chunk").fetchone()[0]
     done = conn.execute("SELECT COUNT(*) FROM knowledge_chunk WHERE embedding_model = ?", (tag,)).fetchone()[0]
+    refused = conn.execute("SELECT COUNT(*) FROM knowledge_chunk WHERE embedding_model = ?", (refused_tag(tag),)).fetchone()[0]
+    semantic = tag != LOCAL_TAG
     return {
         "model": configured_model(config),
-        "semantic": tag != LOCAL_TAG,
+        "semantic": semantic,
         "total": int(total),
-        "embedded": int(done) if tag != LOCAL_TAG else 0,
-        "pending": int(total - done) if tag != LOCAL_TAG else 0,
+        "embedded": int(done) if semantic else 0,
+        "refused": int(refused) if semantic else 0,
+        "pending": int(total - done - refused) if semantic else 0,
         "last_error": worker.last_error if worker and tag != LOCAL_TAG else None,
         "last_error_at": worker.last_error_at if worker and tag != LOCAL_TAG else None,
     }

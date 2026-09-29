@@ -17,6 +17,15 @@ describe('the vector status line', () => {
       .toBe('向量模型 text-embedding-v3：全部 40 个片段已可按语义检索');
   });
 
+  it('counts the chunks the model refused apart from the ones still waiting', () => {
+    expect(embeddingStatusLine({ model: 'text-embedding-v3', semantic: true, total: 40, embedded: 38, refused: 2, pending: 0 }))
+      .toBe('向量模型 text-embedding-v3：38/40 个片段已可按语义检索；2 个片段被模型拒绝，只按关键词匹配');
+    expect(embeddingStatusLine({ model: 'text-embedding-v3', semantic: true, total: 40, embedded: 10, refused: 1, pending: 29 }))
+      .toBe('向量模型 text-embedding-v3：已处理 10/40 个片段，其余 29 个正在后台生成向量，暂按关键词匹配；1 个片段被模型拒绝，只按关键词匹配');
+    expect(embeddingStatusLine({ model: 'text-embedding-v3', semantic: true, total: 40, embedded: 38, refused: 2 }))
+      .toContain('38/40 个片段已可按语义检索');
+  });
+
   it('shows a failure only while a model is in use', () => {
     expect(embeddingProblem({ semantic: true, last_error: '向量接口返回错误（HTTP 401）' }))
       .toBe('向量生成失败：向量接口返回错误（HTTP 401）（稍后自动重试）');
