@@ -53,10 +53,10 @@ class AiServicePersistenceTest(unittest.TestCase):
                 title="平台功能清单",
                 text="知识库支持上传和检索\n广场展示关注用户动态",
             ),
-            authorization=self.user_auth,
+            authorization=self.issue_token("admin", 2, "ADMIN"),
         )
         self.assertEqual(parse_response.code, 0)
-        self.assertEqual(parse_response.data["count"], 2)
+        self.assertEqual(parse_response.data["count"], 1, "two short lines are packed into one chunk")
 
         retrieve_response = self.main.retrieve(
             self.main.ChatRequest(question="知识库检索", user_id=999),
@@ -75,7 +75,7 @@ class AiServicePersistenceTest(unittest.TestCase):
 
         vector_status = self.main.vector_status()
         self.assertEqual(vector_status.data["mode"], "local")
-        self.assertEqual(vector_status.data["indexed_chunks"], 2)
+        self.assertEqual(vector_status.data["indexed_chunks"], 1)
         self.assertFalse(vector_status.data["external_ready"])
 
         chat_response = self.main.chat(
@@ -88,7 +88,7 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertGreaterEqual(len(chat_response.data["references"]), 1)
 
         health_response = self.main.health()
-        self.assertEqual(health_response.data["chunk_count"], 2)
+        self.assertEqual(health_response.data["chunk_count"], 1)
         self.assertEqual(health_response.data["session_count"], 1)
         self.assertNotIn("db_path", health_response.data)
         self.assertNotIn("vector_dimension", health_response.data)
@@ -259,11 +259,11 @@ class AiServicePersistenceTest(unittest.TestCase):
         admin_auth = self.issue_token("admin", 2, "ADMIN")
         self.main.parse_document(
             self.main.TextRequest(file_id=21, title="Selected", text="shared retrieval selected source"),
-            authorization=self.user_auth,
+            authorization=admin_auth,
         )
         self.main.parse_document(
             self.main.TextRequest(file_id=22, title="Excluded", text="shared retrieval excluded source"),
-            authorization=self.user_auth,
+            authorization=admin_auth,
         )
         saved = self.main.save_ai_config(self.main.AiConfigRequest(
             data_source_scope="admin-selected",
@@ -278,14 +278,15 @@ class AiServicePersistenceTest(unittest.TestCase):
         self.assertEqual([item["file_id"] for item in retrieved.data["matches"]], [21])
 
     def test_reindex_replaces_old_file_chunks(self) -> None:
+        admin = self.issue_token("admin", 2, "ADMIN")
         first = self.main.parse_document(
             self.main.TextRequest(file_id=8, title="Old", text="first line\nsecond line"),
-            authorization=self.user_auth,
+            authorization=admin,
         )
-        self.assertEqual(first.data["count"], 2)
+        self.assertEqual(first.data["count"], 1)
         second = self.main.parse_document(
             self.main.TextRequest(file_id=8, title="New", text="replacement"),
-            authorization=self.user_auth,
+            authorization=admin,
         )
         self.assertEqual(second.data["count"], 1)
         self.assertEqual(self.main.vector_status().data["indexed_chunks"], 1)
@@ -299,7 +300,7 @@ class AiServicePersistenceTest(unittest.TestCase):
                       "$env:MYSQL_PASSWORD = \"secret\"\n"
                       "http://127.0.0.1:8080/internal/status"),
             ),
-            authorization=self.user_auth,
+            authorization=self.issue_token("admin", 2, "ADMIN"),
         )
         self.assertEqual(parsed.data["count"], 1)
         self.assertEqual(parsed.data["chunks"][0]["title"], "平台知识文档")

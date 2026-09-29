@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from app import migrations
 from app import provider_keys
-from app import model_discovery
+from app import analysis, embeddings, model_discovery
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -95,6 +95,8 @@ class AiConfigRequest(BaseModel):
     ai_audit_reject_confidence: float = Field(default=0.85, ge=0.5, le=1)
     # A share of what the model passes goes to a person anyway, so its judgement keeps being checked.
     ai_audit_sample_percent: int = Field(default=10, ge=0, le=100)
+    # A summary and a suggested category for each upload, from the chat model. Off until an operator turns it on.
+    ai_analysis_enabled: bool = False
     default_publish_policy: str = Field(default="STANDARD", pattern="^(STANDARD|PRE_REVIEW|BLOCKED)$")
     max_post_images: int = Field(default=9, ge=0, le=9)
     max_comment_length: int = Field(default=2000, ge=100, le=5000)
@@ -111,6 +113,8 @@ class AiConfigRequest(BaseModel):
     # and key stay those of the provider, shared by both — see review_settings.
     review_provider: str = Field(default="", pattern="^(|local|openai-compatible|anthropic)$")
     review_model: str = Field(default="", max_length=200)
+    # An OpenAI-compatible embedding model for semantic retrieval; empty keeps the local word vectors.
+    embedding_model: str = Field(default="", max_length=200)
     temperature: float = Field(default=0.2, ge=0, le=1)
     max_upload_mb: int = Field(default=25, ge=1, le=200)
     pdf_max_upload_mb: int = Field(default=200, ge=1, le=200)
@@ -245,7 +249,9 @@ async def lifespan(_: FastAPI):
         raise RuntimeError(problem)
     init_db()
     start_model_discovery()
+    embedding_worker.start()
     yield
+    embedding_worker.stop()
 
 
 def start_model_discovery() -> None:
@@ -255,7 +261,9 @@ def start_model_discovery() -> None:
         review = review_settings(config)
         chat_uses = config.get("provider") == "openai-compatible"
         review_uses = review.get("provider") == "openai-compatible"
-        provider = "openai-compatible" if chat_uses or review_uses else str(config.get("provider"))
+        embedding_model = embeddings.configured_model(config)
+        provider = ("openai-compatible" if chat_uses or review_uses or embedding_model
+                    else str(config.get("provider")))
         api_key = resolve_provider_key(provider)["secret"] if provider == "openai-compatible" else None
     except Exception as error:  # noqa: BLE001 - discovery is advisory; the service starts regardless
         logging.getLogger("ai-service").warning("model discovery not started: %s", type(error).__name__)
@@ -264,6 +272,7 @@ def start_model_discovery() -> None:
         provider=provider, base_url=config.get("base_url"), api_key=api_key,
         configured_model=config.get("model") if chat_uses else None,
         review_model=review.get("model") if review_uses and review.get("model") != config.get("model") else None,
+        embedding_model=embedding_model or None,
         validate=lambda url: validate_upstream_url(url, resolve_dns=True))
 
 
@@ -345,7 +354,8 @@ def resolve_provider_key(provider: str) -> dict[str, Any]:
 
 
 # Where the API key gets sent. An ordinary administrator keeps every other setting but may not repoint these.
-SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url", "review_provider", "review_model")
+SUPER_ADMIN_ONLY_SETTINGS = ("provider", "model", "base_url", "request_url", "review_provider", "review_model",
+                             "embedding_model")
 
 
 # ---- Admin action log -------------------------------------------------------------------------------------------
@@ -370,6 +380,7 @@ AI_CONFIG_LABELS = {
     "ai_audit_approve_confidence": "AI 自动通过门槛",
     "ai_audit_reject_confidence": "AI 自动驳回门槛",
     "ai_audit_sample_percent": "AI 通过抽样复核比例",
+    "ai_analysis_enabled": "AI 摘要与自动分类",
     "default_publish_policy": "默认发帖策略",
     "max_post_images": "帖子配图上限",
     "max_comment_length": "评论字数上限",
@@ -384,6 +395,7 @@ AI_CONFIG_LABELS = {
     "request_url": "请求地址",
     "review_provider": "审核模型服务",
     "review_model": "审核模型",
+    "embedding_model": "向量模型",
     "temperature": "温度",
     "max_upload_mb": "上传大小上限",
     "pdf_max_upload_mb": "PDF 上传大小上限",
@@ -489,6 +501,7 @@ def read_ai_config() -> dict[str, Any]:
         "ai_audit_approve_confidence": 0.9,
         "ai_audit_reject_confidence": 0.85,
         "ai_audit_sample_percent": 10,
+        "ai_analysis_enabled": False,
         "default_publish_policy": "STANDARD",
         "max_post_images": 9,
         "max_comment_length": 2000,
@@ -503,6 +516,7 @@ def read_ai_config() -> dict[str, Any]:
         "request_url": "",
         "review_provider": "",
         "review_model": "",
+        "embedding_model": "",
         "temperature": 0.2,
         "max_upload_mb": 25,
         "pdf_max_upload_mb": 200,
@@ -526,7 +540,7 @@ def read_ai_config() -> dict[str, Any]:
         elif row["config_key"] in {
             "registration_enabled", "ai_chat_enabled", "knowledge_upload_enabled", "user_ranking_enabled",
             "comments_enabled", "private_messages_enabled", "feedback_enabled", "post_audit_required",
-            "profile_audit_required", "ai_audit_enabled",
+            "profile_audit_required", "ai_audit_enabled", "ai_analysis_enabled",
             "notifications_enabled", "community_enabled"
         }:
             defaults[row["config_key"]] = value.lower() in {"1", "true", "yes", "on"}
@@ -541,18 +555,39 @@ def read_ai_config() -> dict[str, Any]:
     return defaults
 
 
-def split_text(text: str) -> list[str]:
-    normalized = text.replace("\r", "\n")
-    line_chunks = [part.strip() for part in normalized.split("\n") if part.strip()]
-    if line_chunks:
-        return line_chunks
+# A chunk is what retrieval returns and what an embedding describes: a few sentences, not a single line.
+CHUNK_CHARS = 500
+# Where one overlong line is cut into several chunks, each repeats this much of the one before it.
+CHUNK_OVERLAP = 80
 
-    chunk_size = 500
-    return [
-        text[index:index + chunk_size].strip()
-        for index in range(0, len(text), chunk_size)
-        if text[index:index + chunk_size].strip()
-    ]
+
+def clean_lines(text: str) -> list[str]:
+    """The text's non-empty lines, without those the sensitive-content rules catch. Checked line by line, so one
+    leaked secret removes only its own line, not the passage around it."""
+    lines = [line.strip() for line in text.replace("\r", "\n").split("\n")]
+    return [line for line in lines if line and not contains_sensitive_content(line)]
+
+
+def split_text(text: str) -> list[str]:
+    """Consecutive lines packed into chunks of up to CHUNK_CHARS; a longer line is cut with CHUNK_OVERLAP."""
+    pieces: list[str] = []
+    for line in clean_lines(text):
+        if len(line) <= CHUNK_CHARS:
+            pieces.append(line)
+            continue
+        step = CHUNK_CHARS - CHUNK_OVERLAP
+        pieces.extend(line[start:start + CHUNK_CHARS] for start in range(0, len(line) - CHUNK_OVERLAP, step))
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        if current and len(current) + 1 + len(piece) > CHUNK_CHARS:
+            chunks.append(current)
+            current = piece
+        else:
+            current = f"{current}\n{piece}" if current else piece
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def tokenize(text: str) -> list[str]:
@@ -595,17 +630,45 @@ def score_chunk(question: str, chunk: sqlite3.Row) -> int:
     return exact_score + len(overlap) * 2
 
 
-def retrieve_chunks(question: str, limit: int = 5, allowed_file_ids: set[int] | None = None) -> list[dict[str, Any]]:
-    question_vector = build_embedding(question)
+vector_cache = embeddings.VectorCache()
+embedding_worker = embeddings.EmbeddingWorker(
+    connect=lambda: connect(), read_config=lambda: read_ai_config(),
+    resolve_key=lambda: resolve_provider_key("openai-compatible")["secret"],
+    validate=lambda url: validate_upstream_url(url, resolve_dns=True))
+
+
+def question_vector(question: str, config: dict[str, Any]) -> list[float] | None:
+    """The embedding model's vector for a question, or None — retrieval then matches by words alone."""
+    try:
+        return embeddings.fetch_embeddings([question], config, resolve_provider_key("openai-compatible")["secret"],
+                                           lambda url: validate_upstream_url(url, resolve_dns=True))[0]
+    except embeddings.EmbeddingError as error:
+        logging.getLogger("ai-service").warning("question not embedded, matching by words: %s", error)
+        return None
+
+
+def retrieve_chunks(question: str, limit: int = 5, allowed_file_ids: set[int] | None = None,
+                    config: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """
+    The passages that best answer the question, from the whole index. A passage is a candidate if it shares words
+    with the question, or — once the embedding model has described it — if it is close enough in meaning
+    (SEMANTIC_MIN_SIMILARITY) without sharing any. Vectors are only ever compared with vectors from the same model.
+    """
+    settings = config if config is not None else read_ai_config()
+    tag = embeddings.model_tag(settings)
+    local_question = build_embedding(question)
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, file_id, title, content, embedding, created_at
+            SELECT id, file_id, title, content, embedding, embedding_model, created_at
             FROM knowledge_chunk
             ORDER BY id DESC
-            LIMIT 200
             """
         ).fetchall()
+    semantic_question = None
+    if tag != embeddings.LOCAL_TAG and any(row["embedding_model"] == tag for row in rows):
+        semantic_question = question_vector(question, settings)
+    vector_cache.forget_missing({int(row["id"]) for row in rows})
 
     scored: list[tuple[float, sqlite3.Row]] = []
     for row in rows:
@@ -614,16 +677,27 @@ def retrieve_chunks(question: str, limit: int = 5, allowed_file_ids: set[int] | 
         if contains_sensitive_content(row["content"]):
             continue
         lexical_raw = score_chunk(question, row)
-        if lexical_raw <= 0:
-            continue
-        stored_vector = json.loads(row["embedding"]) if row["embedding"] else build_embedding(row["content"])
-        vector_score = cosine_similarity(question_vector, stored_vector)
+        row_tag = row["embedding_model"] or embeddings.LOCAL_TAG
+        if semantic_question is not None and row_tag == tag:
+            stored = vector_cache.get(int(row["id"]), row_tag, row["embedding"])
+            vector_score = embeddings.cosine(semantic_question, stored) if stored is not None else 0.0
+            if lexical_raw <= 0 and vector_score < embeddings.SEMANTIC_MIN_SIMILARITY:
+                continue
+        else:
+            if lexical_raw <= 0:
+                continue
+            if row_tag == embeddings.LOCAL_TAG:
+                local = vector_cache.get(int(row["id"]), row_tag, row["embedding"])
+                vector_score = cosine_similarity(local_question, local) if local is not None else 0.0
+            else:
+                # The model has described this chunk but cannot describe the question right now: words alone.
+                vector_score = min(lexical_raw / 20, 1.0)
         lexical_score = min(lexical_raw / 20, 1.0)
         scored.append((vector_score * 0.75 + lexical_score * 0.25, row))
     matched = [row for _, row in sorted(scored, key=lambda item: (item[0], item[1]["id"]), reverse=True)]
     result: list[dict[str, Any]] = []
     for row in matched[:limit]:
-        item = {key: row[key] for key in row.keys() if key != "embedding"}
+        item = {key: row[key] for key in row.keys() if key not in ("embedding", "embedding_model")}
         item["title"] = public_title(item.get("title"))
         result.append(item)
     return result
@@ -1112,6 +1186,8 @@ def public_config() -> ApiResponse:
         "profile_audit_required": bool(config.get("profile_audit_required", False)),
         # The knowledge and community services read this to decide whether to ask for a review at all.
         "ai_audit_enabled": bool(config.get("ai_audit_enabled", False)),
+        # The knowledge service reads this to decide whether to ask for a summary and a category.
+        "ai_analysis_enabled": bool(config.get("ai_analysis_enabled", False)),
         "default_publish_policy": str(config.get("default_publish_policy", "STANDARD")),
         "max_post_images": int(config.get("max_post_images", 9)),
         "max_comment_length": int(config.get("max_comment_length", 2000)),
@@ -1126,7 +1202,9 @@ def public_config() -> ApiResponse:
 
 @app.post("/ai/parse", response_model=ApiResponse)
 def parse_document(request: TextRequest, authorization: str | None = Header(default=None)) -> ApiResponse:
-    require_user(authorization)
+    # Whatever is indexed is quoted to everyone by AI 问答, and a file's chunks are replaced by its id: any member
+    # could otherwise rewrite what the AI says about an approved document. The page indexes only on approval.
+    require_admin(authorization)
     init_db()
     with connect() as conn:
         created = index_document(conn, request)
@@ -1144,10 +1222,10 @@ def index_document(conn: sqlite3.Connection, request: TextRequest) -> list[dict[
     for chunk in chunks:
         cursor = conn.execute(
             """
-            INSERT INTO knowledge_chunk(file_id, title, content, embedding, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO knowledge_chunk(file_id, title, content, embedding, embedding_model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (file_id, title, chunk, json.dumps(build_embedding(chunk)), created_at),
+            (file_id, title, chunk, json.dumps(build_embedding(chunk)), embeddings.LOCAL_TAG, created_at),
         )
         created.append(
             {
@@ -1158,6 +1236,8 @@ def index_document(conn: sqlite3.Connection, request: TextRequest) -> list[dict[
                 "created_at": created_at,
             }
         )
+    # Stored with local vectors at once; the model's vectors follow in the background.
+    embedding_worker.wake()
     return created
 
 
@@ -1175,12 +1255,14 @@ def vector_status() -> ApiResponse:
         indexed = conn.execute(
             "SELECT COUNT(*) AS count FROM knowledge_chunk WHERE embedding IS NOT NULL"
         ).fetchone()["count"]
+        embedding = embeddings.status(conn, read_ai_config(), embedding_worker)
     mode = os.getenv("AI_VECTOR_MODE", "local")
     return ApiResponse(data={
         "mode": mode,
         "dimension": VECTOR_DIMENSION,
         "indexed_chunks": indexed,
         "external_ready": mode.lower() != "local",
+        "embedding": embedding,
     })
 
 
@@ -1285,8 +1367,10 @@ def ai_admin_overview(authorization: str | None = Header(default=None)) -> ApiRe
     require_admin(authorization)
     health_data = health().data
     configuration = read_ai_config()
+    with connect() as conn:
+        embedding = embeddings.status(conn, configuration, embedding_worker)
     return ApiResponse(data={**health_data, "configuration": configuration,
-                             "reviewHealth": review_health(configuration)})
+                             "reviewHealth": review_health(configuration), "embedding": embedding})
 
 
 @app.get("/ai/admin/chunks", response_model=ApiResponse)
@@ -1414,6 +1498,121 @@ class ReviewRequest(BaseModel):
     text: str = Field(default="", max_length=2_000_000)
 
 
+class AnalyzeCategory(BaseModel):
+    id: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=60)
+
+
+class AnalyzeRequest(BaseModel):
+    title: str = Field(default="", max_length=500)
+    text: str = Field(default="", max_length=2_000_000)
+    categories: list[AnalyzeCategory] = Field(default_factory=list, max_length=200)
+
+
+def chat_model_text(system: str, user: str, config: dict[str, Any], max_tokens: int,
+                    client_factory: Any = None) -> str | None:
+    """One answer from the configured chat model (AI 检索), or None when there is none to be had."""
+    provider = str(config.get("provider"))
+    if provider not in provider_keys.PROVIDERS:
+        return None
+    key = resolve_provider_key(provider)
+    if not key["secret"]:
+        return None
+    if provider == "anthropic":
+        try:
+            client = (client_factory or provider_keys.make_claude_client)(
+                key["secret"], float(os.getenv("AI_CLAUDE_TIMEOUT", "120")), 1)
+            text, _ = provider_keys.claude_text(client, provider_keys.claude_model(config), system, user, max_tokens)
+            return text
+        except Exception as error:  # noqa: BLE001 - analysis is optional; a failure leaves the file without it
+            logging.getLogger("ai-service").warning("Claude analysis failed: %s", type(error).__name__)
+            return None
+    base_url = str(config.get("base_url", "")).strip().rstrip("/")
+    endpoint = str(config.get("request_url", "")).strip() or (base_url + "/chat/completions" if base_url else "")
+    if not endpoint:
+        return None
+    try:
+        validate_upstream_url(endpoint, resolve_dns=True)
+    except ValueError:
+        return None
+    payload = compatible_payload(config, str(config.get("model") or ""), [
+        {"role": "system", "content": system}, {"role": "user", "content": user}], 0.2)
+    payload["max_tokens"] = max_tokens
+    request = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
+                                     headers={"Authorization": f"Bearer {key['secret']}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=float(os.getenv("AI_API_TIMEOUT", "30"))) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        content = body.get("choices", [{}])[0].get("message", {}).get("content")
+        return str(content).strip() if content else None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
+def analyze_document(title: str, text: str, categories: list[dict[str, Any]],
+                     config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A summary and a category for a document, or {"available": False} when no model can give them."""
+    settings = config if config is not None else read_ai_config()
+    if not settings.get("ai_analysis_enabled", False):
+        return {"available": False, "summary": None, "categoryId": None, "reason": "AI 摘要与自动分类未开启"}
+    if not (text or "").strip():
+        return {"available": False, "summary": None, "categoryId": None, "reason": "没有可供分析的正文"}
+    answer = chat_model_text(analysis.SYSTEM_PROMPT, analysis.user_prompt(title or "", text, categories), settings,
+                             analysis.MAX_TOKENS)
+    if answer is None:
+        return {"available": False, "summary": None, "categoryId": None, "reason": "没有可用的模型"}
+    parsed = analysis.parse(answer, categories, contains_sensitive_content)
+    if parsed is None:
+        return {"available": False, "summary": None, "categoryId": None, "reason": "模型的回答无法解析"}
+    return {"available": True, **parsed, "reason": ""}
+
+
+def require_internal(token: str | None) -> None:
+    expected = os.getenv("PLATFORM_INTERNAL_USER_TOKEN", "ai-knowledge-local-internal")
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=403, detail="internal authorization is required")
+
+
+class IndexRemoval(BaseModel):
+    file_id: int = Field(..., ge=1)
+
+
+@app.post("/ai/internal/index", response_model=ApiResponse)
+def internal_index(request: TextRequest, x_internal_token: str | None = Header(default=None)) -> ApiResponse:
+    """
+    The knowledge service's copy of an approved document, replacing whatever the file had in the index. It sends
+    this whenever a file becomes approved — by a person or by AI review — so what AI 问答 draws on follows the
+    library without depending on an administrator's browser.
+    """
+    require_internal(x_internal_token)
+    if not request.file_id:
+        raise HTTPException(status_code=400, detail="file_id is required")
+    init_db()
+    with connect() as conn:
+        created = index_document(conn, request)
+    return ApiResponse(data={"file_id": request.file_id, "count": len(created)})
+
+
+@app.post("/ai/internal/index/remove", response_model=ApiResponse)
+def internal_index_remove(request: IndexRemoval, x_internal_token: str | None = Header(default=None)) -> ApiResponse:
+    """A file deleted, hidden or rejected: AI 问答 must stop quoting it."""
+    require_internal(x_internal_token)
+    init_db()
+    with connect() as conn:
+        removed = conn.execute("DELETE FROM knowledge_chunk WHERE file_id = ?", (request.file_id,)).rowcount
+    return ApiResponse(data={"file_id": request.file_id, "removed": removed})
+
+
+@app.post("/ai/internal/analyze", response_model=ApiResponse)
+def internal_analyze(request: AnalyzeRequest, x_internal_token: str | None = Header(default=None)) -> ApiResponse:
+    """Called by the knowledge service, in the background, after a document is uploaded."""
+    expected = os.getenv("PLATFORM_INTERNAL_USER_TOKEN", "ai-knowledge-local-internal")
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(status_code=403, detail="internal authorization is required")
+    categories = [{"id": item.id, "name": item.name} for item in request.categories]
+    return ApiResponse(data=analyze_document(request.title, request.text, categories))
+
+
 @app.post("/ai/internal/review", response_model=ApiResponse)
 def internal_review(request: ReviewRequest, x_internal_token: str | None = Header(default=None)) -> ApiResponse:
     """Called by the knowledge and community services before content is published."""
@@ -1449,6 +1648,9 @@ def save_ai_config(
                 raise HTTPException(status_code=400, detail=str(error)) from error
         values[key] = value
     values["review_model"] = str(values.get("review_model") or "").strip()
+    values["embedding_model"] = str(values.get("embedding_model") or "").strip()
+    if values["embedding_model"] and not values.get("base_url"):
+        raise HTTPException(status_code=400, detail="使用向量模型时，请填写兼容接口基础地址（base_url），向量接口为其下的 /embeddings")
     problem = review_settings_problem(values)
     if problem:
         raise HTTPException(status_code=400, detail=problem)
@@ -1461,6 +1663,8 @@ def save_ai_config(
                 (key, stored_value, now_iso()),
             )
     after = read_ai_config()
+    if embeddings.model_tag(after) != embeddings.model_tag(before) or after.get("base_url") != before.get("base_url"):
+        embedding_worker.wake()
     changes = config_changes(before, after)
     if changes:
         labels = "、".join(change["label"] for change in changes)

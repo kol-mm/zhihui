@@ -19,11 +19,11 @@ class MigrationRunnerTest(unittest.TestCase):
         return {row[0] for row in self.conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")}
 
     def test_an_empty_database_gets_every_version_once(self) -> None:
-        self.assertEqual([1, 2, 3], migrations.migrate(self.conn))
+        self.assertEqual([1, 2, 3, 4], migrations.migrate(self.conn))
         self.assertTrue({"knowledge_chunk", "ai_chat_session", "ai_chat_message", "ai_config",
                          "idx_ai_chat_session_user", "idx_ai_chat_message_session"} <= self.tables())
         self.assertEqual([], migrations.migrate(self.conn))
-        self.assertEqual([1, 2, 3], migrations.applied_versions(self.conn))
+        self.assertEqual([1, 2, 3, 4], migrations.applied_versions(self.conn))
 
     def test_a_database_from_before_the_runner_is_completed_and_keeps_its_rows(self) -> None:
         self.conn.executescript(
@@ -36,10 +36,12 @@ class MigrationRunnerTest(unittest.TestCase):
             INSERT INTO ai_chat_session (user_id, title, created_at) VALUES (1, 'old chat', '2026-01-01');
             """
         )
-        self.assertEqual([1, 2, 3], migrations.migrate(self.conn))
+        self.assertEqual([1, 2, 3, 4], migrations.migrate(self.conn))
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(knowledge_chunk)")}
         self.assertIn("embedding", columns)
         self.assertEqual(("kept", None), self.conn.execute("SELECT title, embedding FROM knowledge_chunk").fetchone())
+        # Every vector from before embedding models is the local one, and is recorded as such.
+        self.assertEqual("local-hash", self.conn.execute("SELECT embedding_model FROM knowledge_chunk").fetchone()[0])
         self.assertEqual("old chat", self.conn.execute("SELECT title FROM ai_chat_session").fetchone()[0])
         self.assertIn("ai_chat_message", self.tables())
 

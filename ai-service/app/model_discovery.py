@@ -170,7 +170,7 @@ def remember(discovery: Discovery) -> None:
 
 def run_at_startup(provider: str, base_url: str | None, api_key: str | None, configured_model: str | None,
                    validate: Callable[[str], None], fetch: Callable[[str, str, float], Any] | None = None,
-                   review_model: str | None = None) -> Discovery:
+                   review_model: str | None = None, embedding_model: str | None = None) -> Discovery:
     """
     Discover (for the OpenAI-compatible provider only), remember the result, and log what it means. The chat
     model is `configured_model`; `review_model` is the one AI review calls when that differs. Either is None when
@@ -183,7 +183,8 @@ def run_at_startup(provider: str, base_url: str | None, api_key: str | None, con
     remember(found)
     configured = str(configured_model or "").strip()
     checked = [(label, str(model).strip()) for label, model in (("active model", configured_model),
-                                                                 ("active review model", review_model))
+                                                                 ("active review model", review_model),
+                                                                 ("active embedding model", embedding_model))
                if model is not None]
     if found.outcome == "ok":
         shown = ", ".join(repr(model) for model in found.models[:LOGGED_MODELS])

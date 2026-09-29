@@ -97,10 +97,20 @@ def _provider_keys(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_ai_provider_key_active ON ai_provider_key(provider) WHERE active = 1")
 
 
+def _embedding_model(conn: sqlite3.Connection) -> None:
+    # Which model a chunk's vector came from, so vectors from different models are never compared and a change of
+    # model is noticed. Every vector until now is the local hashed-token one.
+    if "embedding_model" not in _columns(conn, "knowledge_chunk"):
+        conn.execute("ALTER TABLE knowledge_chunk ADD COLUMN embedding_model TEXT")
+    conn.execute("UPDATE knowledge_chunk SET embedding_model = 'local-hash' WHERE embedding_model IS NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_embedding_model ON knowledge_chunk(embedding_model, id)")
+
+
 MIGRATIONS: list[Migration] = [
     (1, "baseline", _baseline),
     (2, "chat history indexes", _history_indexes),
     (3, "model provider keys", _provider_keys),
+    (4, "embedding model per chunk", _embedding_model),
 ]
 
 
