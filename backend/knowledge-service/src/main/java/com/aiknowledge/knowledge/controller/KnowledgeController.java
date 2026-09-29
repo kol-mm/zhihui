@@ -43,6 +43,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import com.aiknowledge.common.DailySeries;
@@ -280,7 +281,8 @@ public class KnowledgeController {
 
     /** Asks for a summary and a category in the background; the upload has already been answered by then. */
     private void requestAnalysis(KnowledgeFileEntity saved, String content) {
-        if (analysisEnabled() && content != null && !content.isBlank()) {
+        // A file the upload review already rejected is never shown to a reviewer, so a summary would be wasted.
+        if (analysisEnabled() && content != null && !content.isBlank() && !"REJECTED".equals(saved.getAuditStatus())) {
             analysisRunner.submit(saved.getId(), saved.getTitle(), content);
         }
     }
@@ -1066,6 +1068,7 @@ public class KnowledgeController {
                 .add("auditStatus", "审核状态", existing.getAuditStatus(), auditStatus);
         // Read before the update: a store may hand back the very object it is about to change.
         boolean wasApproved = "APPROVED".equals(existing.getAuditStatus());
+        String previousTitle = existing.getTitle();
         var updated = knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus);
         analyticsRanking.invalidate();
         if (updated.isPresent() && !changes.isEmpty()) {
@@ -1078,7 +1081,11 @@ public class KnowledgeController {
                             fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl(),
                                     document.getContentBlocks()));
                     // A status change moves it in or out; a new title changes what its chunks are headed with.
-                    if (wasApproved || "APPROVED".equals(file.getAuditStatus())) syncAiIndex(file);
+                    // Anything else, such as a new category, leaves the chunks as they are, so nothing is re-embedded.
+                    boolean approved = "APPROVED".equals(file.getAuditStatus());
+                    if (wasApproved != approved || approved && !Objects.equals(previousTitle, file.getTitle())) {
+                        syncAiIndex(file);
+                    }
                     return ApiResponse.ok(toView(file));
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));

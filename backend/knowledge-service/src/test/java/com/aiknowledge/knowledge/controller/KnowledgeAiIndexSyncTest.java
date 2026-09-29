@@ -135,6 +135,34 @@ class KnowledgeAiIndexSyncTest {
                 "renamed while approved, taken out when hidden, not touched by an edit while hidden, taken out on delete");
     }
 
+    /** Its chunks are headed with the title and nothing else, so no other edit re-embeds them. */
+    @Test
+    void anEditThatLeavesTheTitleAndStatusAloneSendsNothing() {
+        KnowledgeController controller = controller(null);
+        Long fileId = upload(controller, "原标题");
+        controller.audit(ADMIN, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+        Long category = store.listCategories().get(0).getId();
+        sent.clear();
+
+        assertEquals(0, controller.updateFileMetadata(ADMIN, Map.of("fileId", fileId, "categoryId", category)).code());
+        assertEquals(0, controller.updateFileMetadata(ADMIN, Map.of("fileId", fileId, "title", "原标题")).code());
+        assertEquals(0, controller.updateFileMetadata(ADMIN, Map.of("fileId", fileId, "auditStatus", "APPROVED")).code());
+        assertEquals(category, store.find(fileId).orElseThrow().getCategoryId(), "the edit itself still happened");
+        assertEquals(List.of(), sent);
+    }
+
+    @Test
+    void showingAHiddenFileAgainPutsItBack() {
+        KnowledgeController controller = controller(null);
+        Long fileId = upload(controller, "隐藏过的");
+        controller.audit(ADMIN, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+        controller.updateFileMetadata(ADMIN, Map.of("fileId", fileId, "auditStatus", "HIDDEN"));
+        sent.clear();
+
+        controller.updateFileMetadata(ADMIN, Map.of("fileId", fileId, "auditStatus", "APPROVED"));
+        assertEquals(List.of("publish " + fileId + " 隐藏过的"), sent);
+    }
+
     @Test
     void anAuthorDeletingTheirOwnApprovedFileTakesItOutOfTheIndex() {
         KnowledgeController controller = controller(null);

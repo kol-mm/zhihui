@@ -1,5 +1,6 @@
 package com.aiknowledge.knowledge.controller;
 
+import com.aiknowledge.common.AiContentReview;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
@@ -51,14 +52,35 @@ class KnowledgeAnalysisControllerTest {
 
     private final RecordingRunner runner = new RecordingRunner(store);
 
+    private static final class FixedReview extends AiContentReview {
+        private final Verdict verdict;
+
+        FixedReview(Verdict verdict) {
+            super("http://localhost:0/unused", "t", Duration.ofSeconds(1));
+            this.verdict = verdict;
+        }
+
+        @Override
+        public Verdict review(String kind, String title, String text) {
+            return verdict;
+        }
+    }
+
     private KnowledgeController controller(boolean analysisOn) {
+        return controller(analysisOn, null);
+    }
+
+    private KnowledgeController controller(boolean analysisOn, String verdict) {
         when(config.enabled("knowledge_upload_enabled", true)).thenReturn(true);
-        when(config.enabled("ai_audit_enabled", false)).thenReturn(false);
+        when(config.enabled("ai_audit_enabled", false)).thenReturn(verdict != null);
         when(config.enabled("ai_analysis_enabled", false)).thenReturn(analysisOn);
+        when(config.maxUploadMb()).thenReturn(25);
+        when(config.pdfMaxUploadMb()).thenReturn(200);
         KnowledgeController controller = new KnowledgeController(store,
                 new LocalFileStorageService("target/test-uploads-analysis", "local", "http://127.0.0.1:9000", "ai-knowledge"),
                 new LocalFullTextSearchService("local", "http://127.0.0.1:9200", "ai-knowledge"),
                 new DocumentTextExtractor(), config);
+        if (verdict != null) controller.setContentReview(new FixedReview(new AiContentReview.Verdict(verdict, 0.95, "理由")));
         controller.setAnalysisRunner(runner);
         return controller;
     }
@@ -76,6 +98,21 @@ class KnowledgeAnalysisControllerTest {
         upload(controller(false), "另一段正文。");
 
         assertEquals(List.of(analysed), runner.submitted);
+    }
+
+    /** No reviewer will ever look at a file AI review turned away, so it is not summarised. */
+    @Test
+    void anUploadAiReviewRejectsIsNotAnalysed() {
+        upload(controller(true, AiContentReview.REJECT), "一段含有广告推广的正文。");
+        KnowledgeController rejecting = controller(true, AiContentReview.REJECT);
+        var file = new org.springframework.mock.web.MockMultipartFile("file", "ad.txt", "text/plain",
+                "一段含有广告推广的正文。".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(0, rejecting.uploadFile(MEMBER, file, "广告", null, null).code());
+        assertEquals(List.of(), runner.submitted);
+
+        Long approved = upload(controller(true, AiContentReview.APPROVE), "一段关于检索增强生成的正文。");
+        Long escalated = upload(controller(true, AiContentReview.ESCALATE), "一段需要人工判断的正文。");
+        assertEquals(List.of(approved, escalated), runner.submitted);
     }
 
     @Test
