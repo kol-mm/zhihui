@@ -17,6 +17,7 @@
           <el-button type="danger" text :icon="Warning" @click="emit('report', file)">举报</el-button>
         </div>
       </header>
+      <el-alert v-if="file.summary" class="knowledge-summary" type="info" :closable="false" title="AI 摘要" :description="file.summary" />
       <p v-if="parseStatusHint(file.parseStatus)" class="knowledge-parse-hint">{{ parseStatusHint(file.parseStatus) }}</p>
       <PdfViewer v-if="file.fileType?.toLowerCase() === 'pdf' && pdfPreviewUrl" class="detail-pdf" :src="pdfPreviewUrl" :document-id="file.id" />
       <div v-else class="detail-knowledge-body rich-knowledge-body">
@@ -38,7 +39,7 @@ import { resolveApiUrl } from '../api/client';
 import { parseStatusHint } from '../utils/parseStatus';
 import PdfViewer from './PdfViewer.vue';
 
-type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; parseStatus?:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean };
+type KnowledgeFile = { id:number; userId:number; title:string; fileType:string; auditStatus:string; summary?:string|null; parseStatus?:string; fileUrl?:string; views?:number; downloads?:number; likes?:number; liked?:boolean; collected?:boolean };
 type ContentBlock = { type:'image'|'heading'|'list'|'paragraph'|'table'; text?:string; url?:string };
 type UserSummary = { id:number; username:string; nickname:string; avatarUrl?:string };
 
