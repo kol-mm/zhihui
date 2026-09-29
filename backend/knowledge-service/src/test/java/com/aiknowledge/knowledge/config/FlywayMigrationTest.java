@@ -17,8 +17,11 @@ class FlywayMigrationTest {
     void anEmptyDatabaseGetsTheSchemaAndTheStarterCategories() throws Exception {
         try (MigrationDatabase db = new MigrationDatabase("zc_mig_knowledge_fresh")) {
             db.flyway().migrate();
-            assertEquals("1", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             assertEquals(3, db.number("SELECT COUNT(*) FROM knowledge_category"));
+            // V3: where the AI service's summary and suggested category are kept.
+            assertEquals(2, db.number("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() "
+                    + "AND TABLE_NAME = 'knowledge_file' AND COLUMN_NAME IN ('summary', 'suggested_category_id')"));
             assertTrue(db.hasIndex("knowledge_file", "idx_file_audit_created"));
             assertEquals(0, db.flyway().migrate().migrationsExecuted);
         }
@@ -41,7 +44,7 @@ class FlywayMigrationTest {
 
             db.flyway().migrate();
 
-            assertEquals("0,1", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
+            assertEquals("0,1,2,3", db.text("SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM flyway_schema_history"));
             for (String index : new String[]{"idx_file_audit", "idx_file_category_audit", "idx_file_user_id", "idx_file_audit_created"}) {
                 assertTrue(db.hasIndex("knowledge_file", index), index);
             }

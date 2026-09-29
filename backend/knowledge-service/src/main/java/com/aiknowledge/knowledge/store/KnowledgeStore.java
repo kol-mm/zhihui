@@ -70,6 +70,13 @@ public interface KnowledgeStore {
     /** {@code source} is MANUAL or AI; the reason is kept either way. */
     Optional<KnowledgeFileEntity> auditFile(Long fileId, String auditStatus, String reason, String source);
     Optional<KnowledgeFileEntity> updateFileMetadata(Long fileId, String title, Long categoryId, String auditStatus);
+
+    /**
+     * Records the AI service's summary and suggested category. The suggestion becomes the file's category only if
+     * the file has none at that moment — checked in the same write, so a category someone set in the meantime is
+     * never replaced.
+     */
+    Optional<KnowledgeFileEntity> saveAnalysis(Long fileId, String summary, Long suggestedCategoryId);
     boolean deleteFile(Long fileId);
     List<KnowledgeCategoryEntity> listCategories();
     KnowledgeCategoryEntity saveCategory(KnowledgeCategoryEntity category);

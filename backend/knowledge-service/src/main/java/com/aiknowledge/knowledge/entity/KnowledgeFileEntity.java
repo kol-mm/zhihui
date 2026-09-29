@@ -23,7 +23,15 @@ public class KnowledgeFileEntity {
     private Integer views;
     private Integer downloads;
     private LocalDateTime createdAt;
+    /** Written by the AI service after upload; null until then, or when AI 摘要与自动分类 is off. */
+    private String summary;
+    /** The category the AI service suggested; applied only when the file had none. */
+    private Long suggestedCategoryId;
 
+    public String getSummary() { return summary; }
+    public void setSummary(String summary) { this.summary = summary; }
+    public Long getSuggestedCategoryId() { return suggestedCategoryId; }
+    public void setSuggestedCategoryId(Long suggestedCategoryId) { this.suggestedCategoryId = suggestedCategoryId; }
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getUserId() { return userId; }

@@ -477,6 +477,24 @@ public class MySqlKnowledgeStore implements KnowledgeStore {
 
     @Override
     @Transactional
+    public Optional<KnowledgeFileEntity> saveAnalysis(Long fileId, String summary, Long suggestedCategoryId) {
+        int updated = fileMapper.update(null, Wrappers.<KnowledgeFileEntity>lambdaUpdate()
+                .set(KnowledgeFileEntity::getSummary, summary)
+                .set(KnowledgeFileEntity::getSuggestedCategoryId, suggestedCategoryId)
+                .eq(KnowledgeFileEntity::getId, fileId));
+        if (updated == 0) return Optional.empty();
+        if (suggestedCategoryId != null) {
+            // Only where no category is set now: one statement, so it cannot overwrite a choice made meanwhile.
+            fileMapper.update(null, Wrappers.<KnowledgeFileEntity>lambdaUpdate()
+                    .set(KnowledgeFileEntity::getCategoryId, suggestedCategoryId)
+                    .eq(KnowledgeFileEntity::getId, fileId)
+                    .isNull(KnowledgeFileEntity::getCategoryId));
+        }
+        return Optional.ofNullable(fileMapper.selectById(fileId));
+    }
+
+    @Override
+    @Transactional
     public boolean deleteFile(Long fileId) {
         if (fileMapper.selectById(fileId) == null) return false;
         collectMapper.delete(Wrappers.<KnowledgeCollectEntity>lambdaQuery().eq(KnowledgeCollectEntity::getFileId, fileId));

@@ -348,6 +348,18 @@ public class InMemoryKnowledgeStore implements KnowledgeStore {
     }
 
     @Override
+    public synchronized Optional<KnowledgeFileEntity> saveAnalysis(Long fileId, String summary, Long suggestedCategoryId) {
+        Optional<KnowledgeFileEntity> found = find(fileId);
+        found.ifPresent(file -> {
+            file.setSummary(summary);
+            file.setSuggestedCategoryId(suggestedCategoryId);
+            if (file.getCategoryId() == null && suggestedCategoryId != null) file.setCategoryId(suggestedCategoryId);
+            persist();
+        });
+        return found;
+    }
+
+    @Override
     public synchronized boolean deleteFile(Long fileId) {
         boolean removed = files.removeIf(file -> fileId.equals(file.getId()));
         if (!removed) return false;

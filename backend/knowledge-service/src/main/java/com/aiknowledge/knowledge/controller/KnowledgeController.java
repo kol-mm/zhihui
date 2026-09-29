@@ -6,6 +6,8 @@ import com.aiknowledge.common.AiContentReview;
 import com.aiknowledge.common.ApiResponse;
 import com.aiknowledge.common.LocalAuth;
 import com.aiknowledge.common.PlatformConfigClient;
+import com.aiknowledge.knowledge.analysis.AiKnowledgeIndex;
+import com.aiknowledge.knowledge.analysis.KnowledgeAnalysisRunner;
 import com.aiknowledge.knowledge.entity.KnowledgeFileEntity;
 import com.aiknowledge.knowledge.entity.KnowledgeCategoryEntity;
 import com.aiknowledge.knowledge.search.LocalFullTextSearchService;
@@ -72,6 +74,34 @@ public class KnowledgeController {
     private final ExpiringValue<List<Map<String, Object>>> analyticsRanking = new ExpiringValue<>(Duration.ofSeconds(60));
 
     private AdminAudit audit = AdminAudit.NONE;
+    private KnowledgeAnalysisRunner analysisRunner;
+    private AiKnowledgeIndex aiIndex;
+
+    /** Keeps what AI 问答 draws on in step with the library; absent in tests that do not need it. */
+    @Autowired(required = false)
+    public void setAiIndex(AiKnowledgeIndex aiIndex) {
+        this.aiIndex = aiIndex;
+    }
+
+    /**
+     * Tells the AI service about the file as it now stands: approved files are indexed from their extracted text,
+     * everything else is taken out. Called after every change that can move a file into or out of the index.
+     */
+    private void syncAiIndex(KnowledgeFileEntity file) {
+        if (aiIndex == null || file == null) return;
+        if ("APPROVED".equals(file.getAuditStatus())) {
+            String text = fullTextSearch.find(file.getId()).map(LocalFullTextSearchService.SearchDocument::getContent).orElse("");
+            aiIndex.publish(file.getId(), file.getTitle(), text);
+        } else {
+            aiIndex.withdraw(file.getId());
+        }
+    }
+
+    /** Summaries and categories for uploads, when AI 摘要与自动分类 is on; absent in tests that do not need it. */
+    @Autowired(required = false)
+    public void setAnalysisRunner(KnowledgeAnalysisRunner analysisRunner) {
+        this.analysisRunner = analysisRunner;
+    }
 
     @Autowired(required = false)
     public void setAdminAudit(AdminAudit audit) {
@@ -160,6 +190,8 @@ public class KnowledgeController {
             if (!content.isBlank() || !contentBlocks.isEmpty()) {
                 fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl(), contentBlocks);
             }
+            requestAnalysis(saved, content);
+            if ("APPROVED".equals(saved.getAuditStatus())) syncAiIndex(saved);
             Map<String, Object> view = toView(saved);
             view.put("size", bytes.length);
             view.put("storageMode", stored.get("storageMode"));
@@ -240,6 +272,38 @@ public class KnowledgeController {
             return AiContentReview.Verdict.escalate("AI 审核未开启");
         }
         return contentReview.review("KNOWLEDGE", title, content);
+    }
+
+    private boolean analysisEnabled() {
+        return analysisRunner != null && platformConfig != null && platformConfig.enabled("ai_analysis_enabled", false);
+    }
+
+    /** Asks for a summary and a category in the background; the upload has already been answered by then. */
+    private void requestAnalysis(KnowledgeFileEntity saved, String content) {
+        if (analysisEnabled() && content != null && !content.isBlank()) {
+            analysisRunner.submit(saved.getId(), saved.getTitle(), content);
+        }
+    }
+
+    /**
+     * Generates the summary and category again for a file already in the library — one uploaded before the
+     * feature was on, or after a better model was chosen. The work happens in the background.
+     */
+    @PostMapping("/admin/analyze")
+    public ApiResponse<Map<String, Object>> analyzeFile(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @RequestBody Map<String, Object> request
+    ) {
+        if (!LocalAuth.isAdmin(authorization)) return ApiResponse.fail("admin authorization is required");
+        if (!analysisEnabled()) return ApiResponse.fail("AI 摘要与自动分类未开启");
+        Long fileId = number(request.get("fileId"), 0L);
+        KnowledgeFileEntity file = knowledgeStore.find(fileId).orElse(null);
+        if (file == null) return ApiResponse.fail("knowledge file not found");
+        String content = fullTextSearch.find(fileId).map(LocalFullTextSearchService.SearchDocument::getContent).orElse("");
+        if (content == null || content.isBlank()) return ApiResponse.fail("该文件没有可供分析的正文");
+        boolean queued = analysisRunner.submit(file.getId(), file.getTitle(), content);
+        return queued ? ApiResponse.ok(Map.of("fileId", fileId, "queued", true))
+                : ApiResponse.fail("AI 分析队列已满，请稍后再试");
     }
 
     /** Writes the verdict onto a file that has not been saved yet. */
@@ -466,6 +530,8 @@ public class KnowledgeController {
         if (!content.isBlank()) {
             fullTextSearch.index(saved.getId(), saved.getTitle(), content, saved.getFileUrl());
         }
+        requestAnalysis(saved, content);
+        if ("APPROVED".equals(saved.getAuditStatus())) syncAiIndex(saved);
         return ApiResponse.ok(toView(saved));
     }
 
@@ -685,6 +751,7 @@ public class KnowledgeController {
                     fileId, file.getTitle(), file.getUserId(), "删除他人上传的知识资源"));
         }
         boolean indexRemoved = fullTextSearch.remove(fileId);
+        if (aiIndex != null) aiIndex.withdraw(fileId);
         boolean storageRemoved = false;
         try {
             storageRemoved = fileStorage.delete(file.getFileUrl());
@@ -959,6 +1026,7 @@ public class KnowledgeController {
         String previousStatus = existing.getAuditStatus();
         var audited = knowledgeStore.auditFile(fileId, auditStatus, reason);
         analyticsRanking.invalidate();
+        audited.ifPresent(this::syncAiIndex);
         audited.ifPresent(file -> audit.record(authorization, AdminAudit.Event.of("KNOWLEDGE_AUDIT", AdminAudit.KNOWLEDGE,
                         "KNOWLEDGE_FILE", fileId, file.getTitle(), file.getUserId(),
                         "APPROVED".equals(auditStatus) ? "审核通过知识资源" : "驳回知识资源")
@@ -996,6 +1064,8 @@ public class KnowledgeController {
                 .add("title", "标题", existing.getTitle(), title)
                 .add("categoryId", "分类", existing.getCategoryId(), categoryId)
                 .add("auditStatus", "审核状态", existing.getAuditStatus(), auditStatus);
+        // Read before the update: a store may hand back the very object it is about to change.
+        boolean wasApproved = "APPROVED".equals(existing.getAuditStatus());
         var updated = knowledgeStore.updateFileMetadata(fileId, title, categoryId, auditStatus);
         analyticsRanking.invalidate();
         if (updated.isPresent() && !changes.isEmpty()) {
@@ -1007,6 +1077,8 @@ public class KnowledgeController {
                     fullTextSearch.find(fileId).ifPresent(document ->
                             fullTextSearch.index(fileId, title, document.getContent(), file.getFileUrl(),
                                     document.getContentBlocks()));
+                    // A status change moves it in or out; a new title changes what its chunks are headed with.
+                    if (wasApproved || "APPROVED".equals(file.getAuditStatus())) syncAiIndex(file);
                     return ApiResponse.ok(toView(file));
                 })
                 .orElseGet(() -> ApiResponse.fail("knowledge file not found"));
@@ -1044,6 +1116,8 @@ public class KnowledgeController {
         view.put("auditStatus", file.getAuditStatus());
         view.put("auditSource", file.getAuditSource());
         view.put("auditReason", file.getAuditReason());
+        view.put("summary", file.getSummary());
+        view.put("suggestedCategoryId", file.getSuggestedCategoryId());
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         return view;
@@ -1065,6 +1139,8 @@ public class KnowledgeController {
         view.put("auditStatus", file.getAuditStatus());
         view.put("auditSource", file.getAuditSource());
         view.put("auditReason", file.getAuditReason());
+        view.put("summary", file.getSummary());
+        view.put("suggestedCategoryId", file.getSuggestedCategoryId());
         view.put("views", file.getViews());
         view.put("downloads", file.getDownloads());
         view.put("likes", knowledgeStore.likeCount(file.getId()));
