@@ -101,8 +101,10 @@ usual, and the sensitive-word rules always read the whole text.
 ### Semantic retrieval
 
 AI 问答 answers from knowledge chunks: an approved document's text, cleaned line by line (lines the
-sensitive-content rules catch are dropped) and packed into chunks of up to 500 characters. Only administrators
-index — the admin page does it when a document is approved — since whatever is indexed is quoted to every member.
+sensitive-content rules catch are dropped) and packed into chunks of up to 500 characters. The knowledge service
+keeps the index in step with the library: a document goes in when it is approved and comes out when it is hidden,
+rejected or deleted, and a renamed approved document is indexed again, since its title heads every chunk. Other
+edits, such as a new category, leave the chunks alone and cost no new vectors.
 
 Without an embedding model, chunks are matched by the words they share with the question. Set 向量模型 under
 AI 检索配置 (super administrator only) to an OpenAI-compatible embedding model — for example `text-embedding-v3`
@@ -113,8 +115,14 @@ is sent to that provider to be embedded, as questions and passages already are w
 Indexing never waits for the model. New chunks are stored at once and a background worker fetches their vectors
 ten at a time; the settings page shows how many are done, and until a chunk has its vector it is matched by words.
 Changing the embedding model re-embeds every chunk by itself, and vectors from different models are never
-compared. If the model cannot be reached, the worker retries with growing pauses (up to ten minutes) and retrieval
-falls back to words; nothing fails for the member asking.
+compared. If the model cannot be reached — or turns the key away, or asks to slow down — the worker retries with
+growing pauses (up to ten minutes) and retrieval falls back to words; nothing fails for the member asking.
+
+A provider may refuse particular text, as DashScope's content inspection does. When a batch is refused, the worker
+asks for its chunks one at a time and sets aside the ones refused on their own, so one chunk never holds up the
+rest; a chunk set aside keeps being matched by words, is counted on the settings page, and is tried again when the
+embedding model changes. Chunks are only set aside once the model has embedded something, so a mistyped model
+name, which is refused for every chunk, shows as a failure on the settings page instead.
 
 Retrieval compares the question with every chunk in ai-service's own database. Measured inside the ai service's
 256 MB limit, a question takes about 0.2 s at 1,000 chunks and 1.5–2 s at 5,000 with 1,024-dimension vectors. Well
@@ -125,7 +133,8 @@ step.
 
 With AI 摘要与自动分类 turned on (AI 与系统 → AI 检索配置; off by default), each uploaded document's text is
 sent — in the background, after the upload has been answered — to the chat model set in AI 检索配置, which writes a
-short summary and picks one of the existing categories. The category is applied only when the uploader chose
+short summary and picks one of the existing categories. Documents AI review has already rejected are not sent.
+The category is applied only when the uploader chose
 none; a category already chosen is never replaced, and the suggestion is shown to reviewers in 内容审核 instead.
 Reviewers see the summary next to the document before approving it; members see it on the document's page. A
 document can try to steer the model, so what comes back is checked rather than trusted: a category not on the list
