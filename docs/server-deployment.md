@@ -98,6 +98,43 @@ AI review shows the model at most the first 4,000 characters of a body. Longer c
 model's approval alone: it goes to a person with the note 内容较长，AI 只审阅了开头部分. A rejection is acted on as
 usual, and the sensitive-word rules always read the whole text.
 
+### Semantic retrieval
+
+AI 问答 answers from knowledge chunks: an approved document's text, cleaned line by line (lines the
+sensitive-content rules catch are dropped) and packed into chunks of up to 500 characters. Only administrators
+index — the admin page does it when a document is approved — since whatever is indexed is quoted to every member.
+
+Without an embedding model, chunks are matched by the words they share with the question. Set 向量模型 under
+AI 检索配置 (super administrator only) to an OpenAI-compatible embedding model — for example `text-embedding-v3`
+on DashScope — and fill in the compatible base address: ai-service then calls `{base_url}/embeddings` with the
+OpenAI-compatible key, and a question also finds passages that say the same thing in other words. Documents' text
+is sent to that provider to be embedded, as questions and passages already are when chat uses a model.
+
+Indexing never waits for the model. New chunks are stored at once and a background worker fetches their vectors
+ten at a time; the settings page shows how many are done, and until a chunk has its vector it is matched by words.
+Changing the embedding model re-embeds every chunk by itself, and vectors from different models are never
+compared. If the model cannot be reached, the worker retries with growing pauses (up to ten minutes) and retrieval
+falls back to words; nothing fails for the member asking.
+
+Retrieval compares the question with every chunk in ai-service's own database. Measured inside the ai service's
+256 MB limit, a question takes about 0.2 s at 1,000 chunks and 1.5–2 s at 5,000 with 1,024-dimension vectors. Well
+beyond that — tens of thousands of chunks — a dedicated vector store (ChromaDB, per the technology plan) is the next
+step.
+
+### Document summaries and categories
+
+With AI 摘要与自动分类 turned on (AI 与系统 → AI 检索配置; off by default), each uploaded document's text is
+sent — in the background, after the upload has been answered — to the chat model set in AI 检索配置, which writes a
+short summary and picks one of the existing categories. The category is applied only when the uploader chose
+none; a category already chosen is never replaced, and the suggestion is shown to reviewers in 内容审核 instead.
+Reviewers see the summary next to the document before approving it; members see it on the document's page. A
+document can try to steer the model, so what comes back is checked rather than trusted: a category not on the list
+is dropped, the summary is cut to 200 characters, and a summary the sensitive-content rules catch is dropped.
+
+The model reads the first 6,000 characters. Nothing happens without a configured model, and a document uploaded
+before the switch was turned on can be analysed from 内容审核 with 生成摘要. At most 200 documents wait in the
+queue; beyond that, new uploads are skipped and can be analysed the same way later.
+
 ## Administrator password recovery
 
 Members who forget their password ask for a reset on the login page, and an administrator issues them a one-time
